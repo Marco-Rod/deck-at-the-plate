@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import Dict, Any
 
+from app.auth import get_current_user
 from app.database import get_db
 from app.models import GameSession, PlayerCard, TacticCard
 from app.schemas import (
@@ -14,6 +15,9 @@ from app.engine.calculator import calculate_play_outcome
 from app.engine.state_manager import process_at_bat_transition
 from app.engine.fatigue_manager import apply_pitcher_fatigue
 from app.engine.tactical_actions import resolve_bunt, resolve_steal
+from app.engine.websocket_manager import manager
+from app.engine.turn_guard import verify_player_turn
+
 from app.schemas import ChangePitcherRequest
 from app.schemas import StealBaseRequest
 
@@ -79,13 +83,21 @@ def play_tactic(game_id: str, payload: PlayTacticRequest, db: Session = Depends(
 
 
 @router.post("/{game_id}/pitch", summary="Registrar picheo (Fase 1)")
-def select_pitch(game_id: str, payload: PitchActionRequest, db: Session = Depends(get_db)):
+async def select_pitch(
+    game_id: str, 
+    payload: PitchActionRequest, 
+    db: Session = Depends(get_db),
+    current_user_id: str = Depends(get_current_user)
+):
     """
     Guarda la selección secreta del lanzador (tipo de tiro y zona 1-9) esperando el swing.
     """
     game = db.query(GameSession).filter(GameSession.id == game_id).first()
     if not game:
         raise HTTPException(status_code=404, detail="Sesión de juego no encontrada.")
+
+    # Validar que sea el turno del lanzador autenticado
+    verify_player_turn(game, current_user_id, required_role="PITCHER")
 
     state = dict(game.state_data or {})
     state["current_pitch"] = {
@@ -95,12 +107,27 @@ def select_pitch(game_id: str, payload: PitchActionRequest, db: Session = Depend
 
     game.state_data = state
     db.commit()
+    
+    # Emite evento en tiempo real a ambos clientes conectados
+    await manager.broadcast_to_game(game_id, {
+        "type": "PITCH_COMMITTED",
+        "message": "El lanzador ha ejecutado su picheo. Esperando swing del bateador.",
+        "has_pitched": True
+    })
 
-    return {"status": "ok", "message": "Picheo registrado exitosamente. Esperando swing del bateador."}
+    return {
+        "status": "ok",
+        "message": "Picheo registrado exitosamente. Notificación enviada."
+    }
 
 
 @router.post("/{game_id}/swing", response_model=PlayResultResponse, summary="Ejecutar swing y resolver jugada (Fase 2 y 3)")
-def execute_swing(game_id: str, payload: SwingActionRequest, db: Session = Depends(get_db)):
+async def execute_swing(
+    game_id: str, 
+    payload: SwingActionRequest, 
+    db: Session = Depends(get_db),
+    current_user_id: str = Depends(get_current_user)
+):
     """
     Procesa la acción del bateador, calcula la fatiga del picher, aplica los modificadores
     de cartas tácticas, ejecuta la matemática de Statcast y actualiza el estado completo del juego.
@@ -109,6 +136,9 @@ def execute_swing(game_id: str, payload: SwingActionRequest, db: Session = Depen
     
     if not game:
         raise HTTPException(status_code=404, detail="Sesión de juego no encontrada.")
+
+    # Validar que sea el turno del bateador autenticado
+    verify_player_turn(game, current_user_id, required_role="BATTER")
 
     state = dict(game.state_data or {})
     current_pitch = state.get("current_pitch")
@@ -209,6 +239,21 @@ def execute_swing(game_id: str, payload: SwingActionRequest, db: Session = Depen
     db.commit()
     db.refresh(game)
 
+    # Emite el resultado completo a todos los clientes en la sala
+    await manager.broadcast_to_game(game_id, {
+        "type": "PLAY_RESOLVED",
+        "event": event,
+        "description": description,
+        "outs": game.outs,
+        "balls": game.balls,
+        "strikes": game.strikes,
+        "score_home": game.score_home,
+        "score_away": game.score_away,
+        "current_inning": game.current_inning,
+        "is_top_inning": game.is_top_inning,
+        "state_data": game.state_data
+    })
+
     return PlayResultResponse(
         event=event,
         description=description,
@@ -253,7 +298,7 @@ def change_pitcher(game_id: str, payload: ChangePitcherRequest, db: Session = De
     }
 
 @router.post("/{game_id}/steal", summary="Intentar robo de base")
-def steal_base(game_id: str, payload: StealBaseRequest, db: Session = Depends(get_db)):
+async def steal_base(game_id: str, payload: StealBaseRequest, db: Session = Depends(get_db)):
     """
     Ejecuta un intento de robo de base (2B o 3B) por parte del equipo a la ofensiva.
     """
