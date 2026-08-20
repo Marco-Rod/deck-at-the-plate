@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+*.class
+.venv/
+venv/
+ENV/
+.pytest_cache/
+
+# Entorno y Configuración
+.env
+.DS_Store
+
+# Docker volumes / data
+.dockerdata/
+*.sqlite3
