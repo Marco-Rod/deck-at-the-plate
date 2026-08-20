@@ -1,0 +1,44 @@
+@import url('https://fonts.googleapis.com/css2?family=Courier+Prime:ital,wght@0,400;0,700;1,400&family=Inter:wght@400;600;700&family=Teko:wght@600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  background-color: #121619;
+  color: #F7F5F0;
+  font-family: 'Inter', sans-serif;
+  margin: 0;
+  padding: 0;
+}
+
+/* Ficha estilo Pizarra de Anotación (Scoreboard Tile) */
+.scoreboard-tile {
+  background-color: #0A0D0F;
+  border: 2px solid #2C3E35;
+  color: #F7F5F0;
+  font-family: 'Teko', sans-serif;
+  letter-spacing: 0.05em;
+  text-shadow: 0 0 8px rgba(247, 245, 240, 0.3);
+}
+
+/* Botón estilo metal/madera vintage */
+.btn-koshien {
+  background: linear-gradient(180deg, #1A3323 0%, #121619 100%);
+  border: 2px solid #C5A059;
+  color: #F7F5F0;
+  font-family: 'Teko', sans-serif;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  transition: all 0.15s ease-in-out;
+}
+
+.btn-koshien:hover {
+  background: linear-gradient(180deg, #2D5A3F 0%, #1A3323 100%);
+  border-color: #F7F5F0;
+  box-shadow: 0 0 12px rgba(197, 160, 89, 0.4);
+}
+
+.btn-koshien:active {
+  transform: scale(0.97);
+}
