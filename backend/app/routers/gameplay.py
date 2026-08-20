@@ -17,6 +17,7 @@ from app.engine.fatigue_manager import apply_pitcher_fatigue
 from app.engine.tactical_actions import resolve_bunt, resolve_steal
 from app.engine.websocket_manager import manager
 from app.engine.turn_guard import verify_player_turn
+from app.engine.cpu_ai import get_cpu_pitch_action, get_cpu_swing_action
 
 from app.schemas import ChangePitcherRequest
 from app.schemas import StealBaseRequest
@@ -348,3 +349,37 @@ async def steal_base(game_id: str, payload: StealBaseRequest, db: Session = Depe
         "outs": game.outs,
         "runners": runners
     }
+
+async def trigger_cpu_response_if_needed(game: GameSession, db: Session):
+    """
+    Evalúa si el turno actual le corresponde a la CPU.
+    Si es así, ejecuta la acción (picheo o swing) de forma autónoma.
+    """
+    state = dict(game.state_data or {})
+    if state.get("mode") != "PVE":
+        return
+
+    difficulty = state.get("difficulty", "MEDIUM")
+    
+    # Identificar si la CPU debe pichear o batear
+    cpu_is_pitching = (game.is_top_inning and game.home_user_id == "CPU_BOT") or \
+                       (not game.is_top_inning and game.away_user_id == "CPU_BOT")
+
+    # 1. Si la CPU debe pichear y aún no ha lanzado:
+    if cpu_is_pitching and not state.get("current_pitch"):
+        cpu_pitch = get_cpu_pitch_action(difficulty)
+        state["current_pitch"] = cpu_pitch
+        game.state_data = state
+        db.commit()
+        
+        await manager.broadcast_to_game(game.id, {
+            "type": "PITCH_COMMITTED",
+            "message": "La CPU ha seleccionado su picheo.",
+            "has_pitched": True
+        })
+
+    # 2. Si el humano ya pichó y la CPU debe batear:
+    elif not cpu_is_pitching and state.get("current_pitch"):
+        cpu_swing = get_cpu_swing_action(difficulty)
+        # Invocar la resolución de swing internamente en nombre de la CPU
+        await execute_swing_internal(game, cpu_swing, db)

@@ -16,6 +16,9 @@ def create_game_session(payload: CreateGameRequest, db: Session = Depends(get_db
     """
     Crea una nueva partida 1v1 e inicializa el marcador (0-0), Inning 1 Alta y el estado de la mesa.
     """
+
+    away_id = payload.away_user_id if payload.game_mode == "PVP" else "CPU_BOT"
+
     # Validar que existan los pitchers seleccionados
     home_pitcher = db.query(PlayerCard).filter(PlayerCard.id == payload.home_pitcher_id).first()
     away_pitcher = db.query(PlayerCard).filter(PlayerCard.id == payload.away_pitcher_id).first()
@@ -46,20 +49,22 @@ def create_game_session(payload: CreateGameRequest, db: Session = Depends(get_db
         "last_event": "Juego iniciado"
     }
 
-    game_id = f"game_{uuid.uuid4().hex[:10]}"
-
-    new_game = GameSession(
-        id=game_id,
+game = GameSession(
+        id=f"game_{uuid.uuid4().hex[:8]}",
         home_user_id=payload.home_user_id,
-        away_user_id=payload.away_user_id,
-        current_inning=1,
-        is_top_inning=True,
-        outs=0,
-        balls=0,
-        strikes=0,
-        score_home=0,
-        score_away=0,
-        state_data=initial_state
+        away_user_id=away_id,
+        state_data={
+            "mode": payload.game_mode,
+            "difficulty": payload.difficulty,
+            "home_lineup": payload.home_lineup,
+            "away_lineup": payload.away_lineup,
+            "tactics": tactics_state,
+            "active_pitcher": payload.away_pitcher_id,
+            "active_batter": payload.home_lineup[0],
+            "runners": {"1b": None, "2b": None, "3b": None},
+            "current_pitch": None,
+            "active_tactics": {"home": None, "away": None}
+        }
     )
 
     db.add(new_game)
