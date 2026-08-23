@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import GameSession, PlayerCard
+from app.models import GameSession, PlayerCardModel
 from app.schemas import CreateGameRequest, GameSessionResponse
 
 from app.engine.deck_manager import initialize_tactics_state
@@ -49,7 +49,7 @@ def create_game_session(payload: CreateGameRequest, db: Session = Depends(get_db
         "last_event": "Juego iniciado"
     }
 
-game = GameSession(
+    game = GameSession(
         id=f"game_{uuid.uuid4().hex[:8]}",
         home_user_id=payload.home_user_id,
         away_user_id=away_id,

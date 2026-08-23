@@ -1,37 +1,52 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List, Optional
 
+from app.schemas import TeamBaseSchema, TeamRosterResponseSchema, PlayerCardSchema
 from app.database import get_db
-from app.models import PlayerCard, TacticCard
-from app.schemas import PlayerCardResponse, TacticCardResponse
+from app.models import PlayerCardModel, Team
 
-router = APIRouter(prefix="/api/v1/cards", tags=["Catálogo y Cartas"])
+router = APIRouter(prefix="/api/v1/cards", tags=["Cards & Rosters"])
 
-@router.get("/players", response_model=List[PlayerCardResponse], summary="Obtener catálogo de jugadores")
-def get_player_cards(
-    role: Optional[str] = Query(None, description="Filtrar por rol: 'Pitcher' o 'Batter'"),
-    team: Optional[str] = Query(None, description="Filtrar por nombre de equipo ficticio"),
-    db: Session = Depends(get_db)
-):
-    """
-    Retorna la lista de cartas de jugadores. 
-    Permite filtrar por rol o por equipo ficticio dentro de los metadatos JSON.
-    """
-    query = db.query(PlayerCard)
+
+@router.get("/teams", response_model=List[TeamBaseSchema])
+def get_all_teams(db: Session = Depends(get_db)):
+    return db.query(Team).all()
+
+
+@router.get("/teams/{team_id}", response_model=TeamRosterResponseSchema)
+def get_team_roster(team_id: str, db: Session = Depends(get_db)):
+    """Devuelve la información de un equipo junto con su plantilla activa de jugadores."""
+    formatted_team_id = team_id.upper()
+    team = db.query(Team).filter(Team.id == formatted_team_id).first()
     
-    if role:
-        query = query.filter(PlayerCard.role == role)
-        
-    if team:
-        # Consulta sobre el campo JSON extra_metadata
-        query = query.filter(PlayerCard.extra_metadata["fictional_team"].as_string() == team)
-        
-    return query.all()
+    if not team:
+        raise HTTPException(status_code=404, detail="Equipo no encontrado")
 
-@router.get("/tactics", response_model=List[TacticCardResponse], summary="Obtener mazo de tácticas")
-def get_tactic_cards(db: Session = Depends(get_db)):
-    """
-    Retorna la lista completa de cartas de mejora y tácticas registradas.
-    """
-    return db.query(TacticCard).all()
+    players = (
+        db.query(PlayerCardModel)
+        .filter(PlayerCardModel.team_id == formatted_team_id)
+        .order_by(PlayerCardModel.overall.desc())
+        .all()
+    )
+
+    return {
+        "team": {
+            "id": team.id,
+            "name": team.name,
+            "city": team.city,
+            "primary_color": team.primary_color,
+            "secondary_color": team.secondary_color,
+        },
+        "total_players": len(players),
+        "roster": players,
+    }
+
+
+@router.get("/{card_id}")
+def get_card_by_id(card_id: str, db: Session = Depends(get_db)):
+    """Consulta los atributos detallados de una carta específica por su ID."""
+    card = db.query(PlayerCardModel).filter(PlayerCardModel.id == card_id).first()
+    if not card:
+        raise HTTPException(status_code=404, detail="Carta no encontrada")
+    return card

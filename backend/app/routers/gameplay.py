@@ -4,7 +4,7 @@ from typing import Dict, Any
 
 from app.auth import get_current_user
 from app.database import get_db
-from app.models import GameSession, PlayerCard, TacticCard
+from app.models import GameSession, PlayerCardModel, TacticCard
 from app.schemas import (
     PlayTacticRequest,
     PitchActionRequest,
