@@ -1,0 +1,4 @@
+# Este directorio contiene los archivos de migración generados por Alembic.
+# Para generar la primera migración baseline, ejecutar dentro del contenedor:
+#   docker compose exec backend alembic revision --autogenerate -m "baseline_schema"
+#   docker compose exec backend alembic upgrade head

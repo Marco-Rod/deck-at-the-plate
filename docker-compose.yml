@@ -28,6 +28,7 @@ services:
       - "8000:8000"
     environment:
       - DATABASE_URL=postgresql://game_user:game_password@db:5432/baseball_game
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}  # Definir en archivo .env (ver .env.example)
     depends_on:
       db:
         condition: service_healthy
@@ -42,6 +43,8 @@ services:
       - "5173:5173"
     environment:
       - VITE_API_URL=http://localhost:8000
+    depends_on:
+      - backend
 
 volumes:
   postgres_data:
