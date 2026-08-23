@@ -1,3 +1,26 @@
+"""
+Módulo: calculator
+==================
+Motor matemático del at-bat. Implementa la resolución de una jugada mediante
+RNG ponderado calibrado con métricas reales de MLB (Statcast).
+
+Flujo de resolución:
+    1. TAKE:        El bateador no hace swing. Se evalúa si el pitcheo era strike
+                    basándose en el control del pitcher y la visión del bateador.
+    2. Whiff:       Si el bateador hace swing, se calcula la tasa de fallo (whiff%)
+                    usando velocidad y movimiento del pitcher vs contacto del bateador.
+    3. Foul:        Si hace contacto pero no conectó limpio, probabilidad de foul (~35%).
+    4. BABIP:       Bola en juego. Se calcula un power_score que determina el tipo
+                    de hit u out según umbrales empíricos de MLB.
+
+Rangos de los eventos en bolas en juego (power_score 0–115 aprox.):
+    > 96  → HOME_RUN   (~3%)
+    93–96 → HIT_3B     (~2%)
+    85–93 → HIT_2B     (~8%)
+    63–85 → HIT_1B    (~22%)
+    25–63 → OUT_GROUND (~42%)
+    < 25  → OUT_FLY    (~23%)
+"""
 import random
 from typing import Dict, Any, Tuple
 
@@ -77,13 +100,22 @@ def calculate_play_outcome(
         power_score += 15.0
 
     # Distribución empírica MLB
+    # Los umbrales aproximan la distribución real de eventos en bolas en juego:
+    #   HOME_RUN  ~3%  (>96)
+    #   HIT_3B    ~2%  (93–96)  ← triple, evento raro pero válido
+    #   HIT_2B    ~8%  (85–93)
+    #   HIT_1B    ~22% (63–85)
+    #   OUT_GROUND ~42% (25–63)
+    #   OUT_FLY    ~23% (<25)
     if power_score > 96.0:
         return "HOME_RUN", "¡Enorme batazo por todo el jardín central! ¡HOME RUN!"
-    elif power_score > 89.0:
+    elif power_score > 93.0:
+        return "HIT_3B", "¡Batazo pegado a la barda! El corredor llega a tercera base. ¡Triple!"
+    elif power_score > 85.0:
         return "HIT_2B", "Batazo profundo contra la barda. Doble base."
-    elif power_score > 71.0:
+    elif power_score > 63.0:
         return "HIT_1B", "Contacto limpio sobre el cuadro. Hit sencillo."
-    elif power_score > 38.0:
+    elif power_score > 25.0:
         return "OUT_GROUND", "Roletazo suave al cuadro para out."
     else:
         return "OUT_FLY", "Elevado de rutina atrapado en el jardín."

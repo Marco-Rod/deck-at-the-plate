@@ -1,37 +1,28 @@
-from sqlalchemy import Column, String, Integer, JSON, Boolean
-from app.database import Base
+"""
+models.py — Archivo de compatibilidad (NO agregar definiciones aquí)
+=====================================================================
+Este archivo existe para que imports de la forma `from app.models import X`
+sigan funcionando. Todos los modelos SQLAlchemy viven en app/models/ (directorio).
 
-class PlayerCard(Base):
-    __tablename__ = "player_cards"
+Estructura del paquete de modelos:
+    app/models/team.py      → Team
+    app/models/card.py      → PlayerCardModel, TacticCard, CardRarity
+    app/models/user_data.py → User, UserWallet, UserCardInventory
+    app/models/game.py      → GameSession
 
-    id = Column(String, primary_key=True, index=True)
-    name = Column(String, nullable=False)
-    role = Column(String, nullable=False)
-    year = Column(Integer, default=2024)
-    attributes = Column(JSON, nullable=False)
-    extra_metadata = Column(JSON, nullable=True)
+Agrega nuevos modelos en el directorio correspondiente y re-expórtalos
+desde app/models/__init__.py.
+"""
 
-class TacticCard(Base):
-    __tablename__ = "tactic_cards"
-
-    id = Column(String, primary_key=True, index=True)
-    name = Column(String, nullable=False)
-    category = Column(String, nullable=False)
-    target_role = Column(String, nullable=False)
-    effects = Column(JSON, nullable=False)
-    description = Column(String, nullable=True)
-
-class GameSession(Base):
-    __tablename__ = "game_sessions"
-
-    id = Column(String, primary_key=True, index=True)
-    home_user_id = Column(String, nullable=False)
-    away_user_id = Column(String, nullable=False)
-    current_inning = Column(Integer, default=1)
-    is_top_inning = Column(Boolean, default=True)
-    outs = Column(Integer, default=0)
-    balls = Column(Integer, default=0)
-    strikes = Column(Integer, default=0)
-    score_home = Column(Integer, default=0)
-    score_away = Column(Integer, default=0)
-    state_data = Column(JSON, nullable=True)
+# Re-exportar desde el paquete para compatibilidad hacia atrás
+from app.models import (  # noqa: F401 — imports necesarios para que SQLAlchemy registre los modelos
+    Base,
+    Team,
+    PlayerCardModel,
+    CardRarity,
+    TacticCard,
+    User,
+    UserWallet,
+    UserCardInventory,
+    GameSession,
+)
