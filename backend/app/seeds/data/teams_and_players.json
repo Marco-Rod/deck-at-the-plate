@@ -1,0 +1,61 @@
+{
+  "teams": [
+    {
+      "id": "LAD",
+      "name": "Los Angeles Dodgers",
+      "city": "Los Angeles",
+      "primary_color": "#005A9C",
+      "secondary_color": "#FFFFFF"
+    },
+    {
+      "id": "NYY",
+      "name": "New York Yankees",
+      "city": "New York",
+      "primary_color": "#0C2340",
+      "secondary_color": "#E3D4AD"
+    }
+  ],
+  "players": [
+    { "id": "card_lad_ohtani", "team_id": "LAD", "name": "Shohei Ohtani", "number": "17", "position": "TWP", "overall": 95, "rarity": "DIAMOND", "is_two_way": true, "power": 98, "contact": 88, "velocity": 99, "control": 86 },
+    { "id": "card_lad_betts", "team_id": "LAD", "name": "Mookie Betts", "number": "50", "position": "SS", "overall": 92, "rarity": "DIAMOND", "is_two_way": false, "power": 88, "contact": 92, "velocity": 0, "control": 0 },
+    { "id": "card_lad_freeman", "team_id": "LAD", "name": "Freddie Freeman", "number": "5", "position": "1B", "overall": 90, "rarity": "DIAMOND", "is_two_way": false, "power": 86, "contact": 94, "velocity": 0, "control": 0 },
+    { "id": "card_lad_smith", "team_id": "LAD", "name": "Will Smith", "number": "16", "position": "C", "overall": 85, "rarity": "GOLD", "is_two_way": false, "power": 82, "contact": 84, "velocity": 0, "control": 0 },
+    { "id": "card_lad_muncy", "team_id": "LAD", "name": "Max Muncy", "number": "13", "position": "3B", "overall": 83, "rarity": "GOLD", "is_two_way": false, "power": 89, "contact": 72, "velocity": 0, "control": 0 },
+    { "id": "card_lad_lux", "team_id": "LAD", "name": "Gavin Lux", "number": "9", "position": "2B", "overall": 77, "rarity": "SILVER", "is_two_way": false, "power": 70, "contact": 78, "velocity": 0, "control": 0 },
+    { "id": "card_lad_hernandez", "team_id": "LAD", "name": "Teoscar Hernández", "number": "37", "position": "LF", "overall": 84, "rarity": "GOLD", "is_two_way": false, "power": 90, "contact": 76, "velocity": 0, "control": 0 },
+    { "id": "card_lad_edman", "team_id": "LAD", "name": "Tommy Edman", "number": "25", "position": "CF", "overall": 81, "rarity": "SILVER", "is_two_way": false, "power": 72, "contact": 82, "velocity": 0, "control": 0 },
+    { "id": "card_lad_pages", "team_id": "LAD", "name": "Andy Pages", "number": "84", "position": "RF", "overall": 76, "rarity": "SILVER", "is_two_way": false, "power": 78, "contact": 71, "velocity": 0, "control": 0 },
+    
+    { "id": "card_lad_yamamoto", "team_id": "LAD", "name": "Yoshinobu Yamamoto", "number": "18", "position": "SP", "overall": 91, "rarity": "DIAMOND", "is_two_way": false, "power": 0, "contact": 0, "velocity": 96, "control": 92 },
+    { "id": "card_lad_glasnow", "team_id": "LAD", "name": "Tyler Glasnow", "number": "31", "position": "SP", "overall": 88, "rarity": "GOLD", "is_two_way": false, "power": 0, "contact": 0, "velocity": 98, "control": 82 },
+    { "id": "card_lad_kershaw", "team_id": "LAD", "name": "Clayton Kershaw", "number": "22", "position": "SP", "overall": 82, "rarity": "GOLD", "is_two_way": false, "power": 0, "contact": 0, "velocity": 90, "control": 88 },
+    { "id": "card_lad_treinen", "team_id": "LAD", "name": "Blake Treinen", "number": "49", "position": "RP", "overall": 84, "rarity": "GOLD", "is_two_way": false, "power": 0, "contact": 0, "velocity": 97, "control": 80 },
+    { "id": "card_lad_vesia", "team_id": "LAD", "name": "Alex Vesia", "number": "51", "position": "RP", "overall": 80, "rarity": "SILVER", "is_two_way": false, "power": 0, "contact": 0, "velocity": 94, "control": 76 },
+    { "id": "card_lad_hudson", "team_id": "LAD", "name": "Daniel Hudson", "number": "41", "position": "SU", "overall": 78, "rarity": "SILVER", "is_two_way": false, "power": 0, "contact": 0, "velocity": 95, "control": 78 },
+    { "id": "card_lad_phillips", "team_id": "LAD", "name": "Evan Phillips", "number": "59", "position": "CL", "overall": 86, "rarity": "GOLD", "is_two_way": false, "power": 0, "contact": 0, "velocity": 96, "control": 89 },
+    
+    { "id": "card_lad_rojas", "team_id": "LAD", "name": "Miguel Rojas", "number": "7", "position": "SS", "overall": 75, "rarity": "BRONZE", "is_two_way": false, "power": 65, "contact": 78, "velocity": 0, "control": 0 },
+    { "id": "card_lad_taylor", "team_id": "LAD", "name": "Chris Taylor", "number": "3", "position": "LF", "overall": 73, "rarity": "BRONZE", "is_two_way": false, "power": 70, "contact": 68, "velocity": 0, "control": 0 },
+
+    { "id": "card_nyy_judge", "team_id": "NYY", "name": "Aaron Judge", "number": "99", "position": "CF", "overall": 96, "rarity": "DIAMOND", "is_two_way": false, "power": 99, "contact": 86, "velocity": 0, "control": 0 },
+    { "id": "card_nyy_soto", "team_id": "NYY", "name": "Juan Soto", "number": "22", "position": "RF", "overall": 93, "rarity": "DIAMOND", "is_two_way": false, "power": 92, "contact": 93, "velocity": 0, "control": 0 },
+    { "id": "card_nyy_chisholm", "team_id": "NYY", "name": "Jazz Chisholm Jr.", "number": "13", "position": "3B", "overall": 83, "rarity": "GOLD", "is_two_way": false, "power": 82, "contact": 77, "velocity": 0, "control": 0 },
+    { "id": "card_nyy_torres", "team_id": "NYY", "name": "Gleyber Torres", "number": "25", "position": "2B", "overall": 80, "rarity": "SILVER", "is_two_way": false, "power": 78, "contact": 80, "velocity": 0, "control": 0 },
+    { "id": "card_nyy_volpe", "team_id": "NYY", "name": "Anthony Volpe", "number": "11", "position": "SS", "overall": 78, "rarity": "SILVER", "is_two_way": false, "power": 72, "contact": 76, "velocity": 0, "control": 0 },
+    { "id": "card_nyy_rizzo", "team_id": "NYY", "name": "Anthony Rizzo", "number": "48", "position": "1B", "overall": 77, "rarity": "SILVER", "is_two_way": false, "power": 75, "contact": 73, "velocity": 0, "control": 0 },
+    { "id": "card_nyy_verdugo", "team_id": "NYY", "name": "Alex Verdugo", "number": "24", "position": "LF", "overall": 76, "rarity": "SILVER", "is_two_way": false, "power": 70, "contact": 79, "velocity": 0, "control": 0 },
+    { "id": "card_nyy_wells", "team_id": "NYY", "name": "Austin Wells", "number": "28", "position": "C", "overall": 79, "rarity": "SILVER", "is_two_way": false, "power": 77, "contact": 74, "velocity": 0, "control": 0 },
+    { "id": "card_nyy_stanton", "team_id": "NYY", "name": "Giancarlo Stanton", "number": "27", "position": "DH", "overall": 82, "rarity": "GOLD", "is_two_way": false, "power": 94, "contact": 70, "velocity": 0, "control": 0 },
+
+    { "id": "card_nyy_cole", "team_id": "NYY", "name": "Gerrit Cole", "number": "45", "position": "SP", "overall": 92, "rarity": "DIAMOND", "is_two_way": false, "power": 0, "contact": 0, "velocity": 97, "control": 91 },
+    { "id": "card_nyy_rodon", "team_id": "NYY", "name": "Carlos Rodón", "number": "55", "position": "SP", "overall": 82, "rarity": "GOLD", "is_two_way": false, "power": 0, "contact": 0, "velocity": 95, "control": 78 },
+    { "id": "card_nyy_stroman", "team_id": "NYY", "name": "Marcus Stroman", "number": "0", "position": "SP", "overall": 79, "rarity": "SILVER", "is_two_way": false, "power": 0, "contact": 0, "velocity": 91, "control": 82 },
+    { "id": "card_nyy_weaver", "team_id": "NYY", "name": "Luke Weaver", "number": "30", "position": "RP", "overall": 83, "rarity": "GOLD", "is_two_way": false, "power": 0, "contact": 0, "velocity": 96, "control": 85 },
+    { "id": "card_nyy_kahnle", "team_id": "NYY", "name": "Tommy Kahnle", "number": "21", "position": "RP", "overall": 78, "rarity": "SILVER", "is_two_way": false, "power": 0, "contact": 0, "velocity": 94, "control": 79 },
+    { "id": "card_nyy_cousins", "team_id": "NYY", "name": "Jake Cousins", "number": "75", "position": "SU", "overall": 77, "rarity": "SILVER", "is_two_way": false, "power": 0, "contact": 0, "velocity": 95, "control": 75 },
+    { "id": "card_nyy_holmes", "team_id": "NYY", "name": "Clay Holmes", "number": "35", "position": "CL", "overall": 84, "rarity": "GOLD", "is_two_way": false, "power": 0, "contact": 0, "velocity": 98, "control": 81 },
+
+    { "id": "card_nyy_cabrera", "team_id": "NYY", "name": "Oswaldo Cabrera", "number": "95", "position": "3B", "overall": 74, "rarity": "BRONZE", "is_two_way": false, "power": 68, "contact": 72, "velocity": 0, "control": 0 },
+    { "id": "card_nyy_rice", "team_id": "NYY", "name": "Ben Rice", "number": "93", "position": "1B", "overall": 72, "rarity": "BRONZE", "is_two_way": false, "power": 74, "contact": 65, "velocity": 0, "control": 0 }
+  ]
+}
