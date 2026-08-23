@@ -222,10 +222,19 @@ Análisis basado en: revisión completa de backend, engine, routers, schemas, se
 
 ## FASE 6 — Completar el loop de juego (P0 — Bloqueantes)
 
-### `[ ]` #21 — 🔴 PVE: Invocar `trigger_cpu_response_if_needed()` en los endpoints de juego
+### `[x]` #21 — 🔴 PVE: Invocar `trigger_cpu_response_if_needed()` en los endpoints de juego
 **Archivos:** `backend/app/routers/gameplay.py`  
-**Problema:** La función existe y tiene la lógica de CPU correcta pero nunca se llama. En PvE el jugador tiene que alternar el selector de rol manualmente para simular ambos turnos. El juego no avanza solo.  
-**Solución:** Llamar a `trigger_cpu_response_if_needed(game, db)` al final de `select_pitch` y al final de `execute_swing`, solo cuando `state.get("mode") == "PVE"`. También extraer la lógica de swing a una función interna `_execute_swing_logic()` para que la CPU pueda invocarla.
+**Problema:** La función existía pero usaba variables inexistentes (`pending_pitch`, `apply_fatigue`, `resolve_play`, `VALID_ZONES`) y nunca se llamaba desde los endpoints.  
+**Fix aplicado:**
+- Reescrito `gameplay.py` completo eliminando todo el código de placeholder.
+- Extraída función `_resolve_swing()`: núcleo compartido humano/CPU que ejecuta los 6 pasos del at-bat (fatiga, tácticas, cálculo, transición, broadcast WS).
+- Extraída `_apply_tactic_modifiers()`: centraliza la lectura de efectos de TacticCard.
+- Implementada `_is_cpu_turn()`: determina si la CPU actúa según modo PvE, `is_top_inning` y `away_user_id == "CPU_BOT"`.
+- Implementada `trigger_cpu_response_if_needed()` completamente funcional:
+  - Caso A (Bot inning): CPU batea tras el picheo humano → llama `_resolve_swing`.
+  - Caso B (Top inning): CPU pichea con `get_cpu_pitch_action` y emite `PITCH_COMMITTED`.
+- Invocada al final de `select_pitch` y `execute_swing`.
+- Corregido `steal_base`: agrega llamada a `check_game_over` tras out por robo y establece `just_switched_half`.
 
 ---
 
