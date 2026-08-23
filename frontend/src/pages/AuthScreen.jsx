@@ -1,29 +1,40 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { soundFx } from '../utils/audioManager';
+import { auth as authApi } from '../utils/api';
 
 export const AuthScreen = ({ onLoginSuccess }) => {
   const { t, i18n } = useTranslation();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [isRegister, setIsRegister] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
 
   const toggleLanguage = () => {
     soundFx.playClick();
     i18n.changeLanguage(i18n.language === 'es' ? 'en' : 'es');
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
+    setError(null);
+    setLoading(true);
     soundFx.playGameStart();
 
-    const fakeToken = "jwt_token_demo_2026";
-    const userId = username.toLowerCase().replace(/\s+/g, '_') || "player_1";
-
-    localStorage.setItem('jwt_token', fakeToken);
-    localStorage.setItem('user_id', userId);
-
-    onLoginSuccess({ userId, username: username || "Bateador Pro" });
+    try {
+      if (isRegister) {
+        // Registrar nuevo usuario y luego hacer login automático
+        await authApi.register(username, password);
+      }
+      // Login (funciona para registro inmediato o login directo)
+      const data = await authApi.login(username, password);
+      onLoginSuccess({ userId: data.user_id, username: data.username });
+    } catch (err) {
+      setError(err.message || 'Error de autenticación. Intenta de nuevo.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -77,6 +88,11 @@ export const AuthScreen = ({ onLoginSuccess }) => {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
+          {error && (
+            <div className="bg-red-900/30 border border-red-500/50 p-3 font-mono text-xs text-red-400">
+              {error}
+            </div>
+          )}
           <div>
             <label className="block font-mono text-xs text-[#E6DFD3] uppercase mb-1">
               {t('auth.username_label')}
@@ -107,10 +123,15 @@ export const AuthScreen = ({ onLoginSuccess }) => {
 
           <button
             type="submit"
+            disabled={loading}
             onMouseEnter={() => soundFx.playCardSelect()}
-            className="w-full bg-[#1A3323] hover:bg-[#2D5A3F] text-[#F7F5F0] border-2 border-[#C5A059] py-3 font-sports text-2xl tracking-widest mt-6 transition-all active:scale-95"
+            className="w-full bg-[#1A3323] hover:bg-[#2D5A3F] disabled:opacity-50 disabled:cursor-not-allowed text-[#F7F5F0] border-2 border-[#C5A059] py-3 font-sports text-2xl tracking-widest mt-6 transition-all active:scale-95"
           >
-            {isRegister ? t('auth.submit_register') : t('auth.submit_login')}
+            {loading
+              ? 'CONECTANDO...'
+              : isRegister
+              ? t('auth.submit_register')
+              : t('auth.submit_login')}
           </button>
         </form>
       </div>

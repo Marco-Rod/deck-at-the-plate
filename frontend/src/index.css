@@ -42,3 +42,27 @@ body {
 .btn-koshien:active {
   transform: scale(0.97);
 }
+
+@keyframes borderGlow {
+  0%, 100% { filter: drop-shadow(0 0 8px rgba(197, 160, 89, 0.4)); }
+  50% { filter: drop-shadow(0 0 18px rgba(197, 160, 89, 0.9)); }
+}
+
+@keyframes cardShimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.animate-card-selected {
+  animation: borderGlow 1.8s infinite ease-in-out;
+}
+
+.shimmer-effect {
+  background: linear-gradient(
+    110deg,
+    rgba(255, 255, 255, 0) 20%,
+    rgba(255, 255, 255, 0.25) 50%,
+    rgba(255, 255, 255, 0) 80%
+  );
+  background-size: 200% 100%;
+}
