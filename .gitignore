@@ -7,6 +7,13 @@ venv/
 ENV/
 .pytest_cache/
 
+# Node / Frontend
+node_modules/
+frontend/node_modules/
+dist/
+frontend/dist/
+.npm/
+
 # Entorno y Configuración
 .env
 .DS_Store
