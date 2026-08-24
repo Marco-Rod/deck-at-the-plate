@@ -3,7 +3,7 @@ from typing import List
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
 
-from app.models import PlayerCardModel, CardRarity, UserWallet, UserCardInventory
+from app.models import PlayerCardModel, CardRarity, UserWallet, UserCardInventory, User
 
 
 class PackService:
@@ -26,24 +26,83 @@ class PackService:
         }
     }
 
+    import random
+from typing import List
+from sqlalchemy.orm import Session
+from fastapi import HTTPException, status
+
+from app.models import PlayerCardModel, CardRarity, UserWallet, UserCardInventory
+
+
+class PackService:
+    PACK_RATES = {
+        "BRONZE": {
+            "price": 500,
+            "cards_count": 3,
+            "rates": {CardRarity.COMMON: 0.60, CardRarity.BRONZE: 0.35, CardRarity.SILVER: 0.05}
+        },
+        "GOLD": {
+            "price": 1500,
+            "cards_count": 4,
+            "rates": {CardRarity.BRONZE: 0.20, CardRarity.SILVER: 0.50, CardRarity.GOLD: 0.25, CardRarity.DIAMOND: 0.05}
+        },
+        "DIAMOND": {
+            "price": 4000,
+            "cards_count": 5,
+            "rates": {CardRarity.SILVER: 0.10, CardRarity.GOLD: 0.60, CardRarity.DIAMOND: 0.30}
+        }
+    }
+
     @staticmethod
     def assign_starter_pack(db: Session, user_id: str, team_id: str) -> List[PlayerCardModel]:
-        """Asigna un mazo inicial garantizado al usuario al registrarse o crear su club."""
+        """
+        Asigna un mazo inicial garantizado de 25 cartas ÚNICAS (sin repetir jugadores).
+        Prioriza el equipo seleccionado y completa con el resto del catálogo.
+        """
         team_id = team_id.upper()
+        
+        # 1. Obtener cartas del equipo elegido
         team_cards = db.query(PlayerCardModel).filter(PlayerCardModel.team_id == team_id).all()
 
-        if not team_cards:
-            # Si no hay cartas de ese equipo, asignamos las primeras disponibles
-            team_cards = db.query(PlayerCardModel).all()
+        # 2. Obtener cartas de otros equipos
+        other_cards = db.query(PlayerCardModel).filter(PlayerCardModel.team_id != team_id).all()
 
-        # Seleccionamos hasta 10 cartas base para el inventario del usuario
-        selected_cards = team_cards[:10] if len(team_cards) >= 10 else team_cards
+        # Unimos sin duplicados: primero el equipo elegido, luego otros equipos
+        all_unique_cards = team_cards + other_cards
+        
+        if len(all_unique_cards) < 25:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Catálogo insuficiente en DB. Se requieren al menos 25 cartas únicas y hay {len(all_unique_cards)}."
+            )
 
+        # Tomamos exactamente las primeras 25 cartas únicas
+        selected_cards = all_unique_cards[:25]
+
+        # 3. Guardar en el inventario del usuario evitando duplicados de DB
         assigned_items = []
         for card in selected_cards:
-            inventory_item = UserCardInventory(user_id=user_id, card_id=card.id)
-            db.add(inventory_item)
+            already_exists = db.query(UserCardInventory).filter(
+                UserCardInventory.user_id == user_id,
+                UserCardInventory.card_id == card.id
+            ).first()
+
+            if not already_exists:
+                inventory_item = UserCardInventory(user_id=user_id, card_id=card.id)
+                db.add(inventory_item)
+
             assigned_items.append(card)
+
+        user = db.query(User).filter(User.id == user_id).first()
+        if user:
+            user.favorite_team_id = team_id
+            user.has_completed_onboarding = True
+
+        # 4. Inicializar cartera con 1000 Stamps
+        wallet = db.query(UserWallet).filter(UserWallet.user_id == user_id).first()
+        if not wallet:
+            wallet = UserWallet(user_id=user_id, stamps=1000)
+            db.add(wallet)
 
         db.commit()
         return assigned_items

@@ -20,6 +20,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from passlib.context import CryptContext
+import bcrypt
 
 from app.database import get_db
 from app.models import User, UserWallet
@@ -33,13 +34,20 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 def _hash_password(plain: str) -> str:
-    """Retorna el hash bcrypt de la contraseña en texto plano."""
-    return pwd_context.hash(plain)
+    """Retorna el hash bcrypt truncando la entrada a 72 bytes."""
+    # Convertir a bytes y truncar explícitamente a 72 bytes
+    pwd_bytes = plain.encode('utf-8')[:72]
+    # Generar salt y hash
+    salt = bcrypt.gensalt()
+    hashed = bcrypt.hashpw(pwd_bytes, salt)
+    return hashed.decode('utf-8')
 
 
 def _verify_password(plain: str, hashed: str) -> bool:
-    """Verifica si una contraseña en texto plano coincide con su hash."""
-    return pwd_context.verify(plain, hashed)
+    """Verifica si la contraseña coincide con el hash en BD."""
+    pwd_bytes = plain.encode('utf-8')[:72]
+    hashed_bytes = hashed.encode('utf-8')
+    return bcrypt.checkpw(pwd_bytes, hashed_bytes)
 
 
 @router.post(
@@ -67,6 +75,7 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)):
     new_user = User(
         username=payload.username,
         hashed_password=_hash_password(payload.password),
+        has_completed_onboarding=False
     )
     db.add(new_user)
     db.flush()  # Genera el ID sin hacer commit, para poder crear la wallet en la misma transacción
@@ -81,6 +90,7 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)):
         "status": "created",
         "user_id": new_user.id,
         "username": new_user.username,
+        "has_completed_onboarding": False
     }
 
 

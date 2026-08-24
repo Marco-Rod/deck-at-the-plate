@@ -141,7 +141,7 @@ async def _resolve_swing(
         db:            Sesión de base de datos activa.
         game_id:       ID de la partida para el broadcast WS.
     """
-    current_pitch = state.get("current_pitch")
+    current_pitch = state.get("current_pitch") or {}
 
     # --- 1. Fatiga del pitcher ---
     pitch_counts = state.get("pitch_counts", {})
@@ -160,6 +160,16 @@ async def _resolve_swing(
     batter_attrs = map_card_to_batter_attrs(batter_card) if batter_card else {"contacto": 70, "poder": 70, "vision": 70}
     pitcher_attrs = apply_pitcher_fatigue(raw_pitcher_attrs, current_count)
 
+    # --- NUEVO: Extraer estadísticas específicas del picheo lanzado desde el repertorio ---
+    selected_pitch_type = current_pitch.get("pitch_type", "4-SEAM")
+    pitch_specific_stats = pitcher_card.get_pitch_stats(selected_pitch_type) if pitcher_card else None
+
+
+    if pitch_specific_stats:
+        # Enriquecemos current_pitch con los datos reales del repertorio para calculator.py
+        current_pitch["velocity"] = pitch_specific_stats.get("velocity", pitcher_attrs["velocidad"])
+        current_pitch["control"] = pitch_specific_stats.get("control", pitcher_attrs["control"])
+        current_pitch["movement"] = pitch_specific_stats.get("movement", pitcher_attrs["movimiento"])
     active_tactics = state.get("active_tactics", {})
 
     # --- 3. Procesamiento especial de BUNT ---
@@ -372,6 +382,17 @@ async def select_pitch(
     verify_player_turn(game, current_user_id, required_role="PITCHER")
 
     state = dict(game.state_data or {})
+    active_pitcher_id = state.get("active_pitcher")
+    if active_pitcher_id:
+        pitcher_card = db.query(PlayerCardModel).filter(PlayerCardModel.id == active_pitcher_id).first()
+        if pitcher_card and payload.pitch_type != "IBB":
+            pitch_stats = pitcher_card.get_pitch_stats(payload.pitch_type)
+            if not pitch_stats:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"El lanzador {pitcher_card.name} no tiene el picheo '{payload.pitch_type}' en su repertorio."
+                )
+                
     state["current_pitch"] = {
         "pitch_type": payload.pitch_type,
         "zone": payload.zone,

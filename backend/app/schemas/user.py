@@ -36,7 +36,7 @@ class RegisterRequest(BaseModel):
     """Payload para registrar un nuevo usuario."""
     username: str = Field(..., min_length=3, max_length=30, description="Nombre de usuario único (3–30 caracteres)")
     password: str = Field(..., min_length=6, description="Contraseña (mínimo 6 caracteres)")
-
+    has_completed_onboarding: bool = False
 
 class LoginResponse(BaseModel):
     """Respuesta del endpoint de login con el JWT y datos básicos del usuario."""

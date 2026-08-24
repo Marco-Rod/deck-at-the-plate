@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.schemas import UserProfileResponseSchema, UserInventoryResponseSchema
 from app.database import get_db
-from app.models import User, UserWallet, UserCardInventory, PlayerCardModel
+from app.models import User, UserWallet, UserCardInventory, PlayerCardModel, UserLineup
 
 router = APIRouter(prefix="/api/v1/user", tags=["User & Inventory"])
 
@@ -63,3 +63,45 @@ def get_user_inventory(user_id: str, db: Session = Depends(get_db)):
         "total_cards": len(cards_list),
         "inventory": cards_list
     }
+
+
+@router.get("/{user_id}/lineup")
+def get_user_active_lineup(user_id: str, db: Session = Depends(get_db)):
+    """Recupera la alineación activa del usuario desde la base de datos."""
+    lineup = (
+        db.query(UserLineup)
+        .filter(UserLineup.user_id == user_id, UserLineup.is_active == True)
+        .first()
+    )
+    if not lineup:
+        return {"user_id": user_id, "name": "Lineup Principal", "slots": {}}
+    return lineup
+
+
+@router.put("/{user_id}/lineup")
+def save_user_lineup(user_id: str, payload: dict, db: Session = Depends(get_db)):
+    """Crea o actualiza el lineup activo del usuario en PostgreSQL."""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+
+    lineup = (
+        db.query(UserLineup)
+        .filter(UserLineup.user_id == user_id, UserLineup.is_active == True)
+        .first()
+    )
+
+    if not lineup:
+        lineup = UserLineup(
+            user_id=user_id,
+            name=payload.get("name", "Lineup Principal"),
+            is_active=True,
+            slots=payload.get("slots", {})
+        )
+        db.add(lineup)
+    else:
+        lineup.slots = payload.get("slots", {})
+
+    db.commit()
+    db.refresh(lineup)
+    return lineup

@@ -11,7 +11,7 @@ Uso recomendado:
 from app.database import Base
 from app.models.team import Team
 from app.models.card import PlayerCardModel, CardRarity, TacticCard
-from app.models.user_data import User, UserWallet, UserCardInventory
+from app.models.user_data import User, UserWallet, UserCardInventory, UserLineup
 from app.models.game import GameSession
 
 # Permite hacer: "from app.models import PlayerCardModel, GameSession"
@@ -25,4 +25,5 @@ __all__ = [
     "UserWallet",
     "UserCardInventory",
     "GameSession",
+    "UserLineup"
 ]

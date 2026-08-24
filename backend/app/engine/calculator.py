@@ -24,6 +24,7 @@ Rangos de los eventos en bolas en juego (power_score 0–115 aprox.):
 import random
 from typing import Dict, Any, Tuple
 
+
 def calculate_play_outcome(
     pitcher_attrs: Dict[str, int],
     batter_attrs: Dict[str, int],
@@ -33,19 +34,42 @@ def calculate_play_outcome(
 ) -> Tuple[str, str]:
     """
     Calcula el resultado de la jugada aplicando RNG ponderado basado en atributos de Statcast.
+    
+    Args:
+        pitcher_attrs: Atributos globales de la carta del pícher.
+        batter_attrs: Atributos globales de la carta del bateador.
+        pitch_selected: Diccionario con la zona y picheo lanzado.
+                        Ejemplo: {
+                            "zone": 5, 
+                            "pitch_type": "SLIDER",
+                            "velocity": 85,  # (Opcional) Especifico del repertorio
+                            "control": 88,   # (Opcional) Especifico del repertorio
+                            "movement": 94   # (Opcional) Especifico del repertorio
+                        }
+        swing_selected: Diccionario con el tipo de swing y predicción.
+        tactics_modifiers: Modificadores aplicados por cartas tácticas.
+
     Retorna: (event_code, description)
     """
 
-    tactics = tactics_modifiers or {"batter_con": 1.0, "batter_pwr": 1.0, "batter_vis": 1.0, "pitcher_mov": 1.0}
+    tactics = tactics_modifiers or {
+        "batter_con": 1.0, 
+        "batter_pwr": 1.0, 
+        "batter_vis": 1.0, 
+        "pitcher_mov": 1.0,
+        "pitcher_vel": 1.0,
+        "pitcher_ctl": 1.0
+    }
 
-    # Atributos modificados
+    # --- ATRIBUTOS DEL BATEADOR ---
     con = batter_attrs.get("contacto", 50) * tactics.get("batter_con", 1.0)
     pwr = batter_attrs.get("poder", 50) * tactics.get("batter_pwr", 1.0)
     vis = batter_attrs.get("vision", 50) * tactics.get("batter_vis", 1.0)
 
-    vel = pitcher_attrs.get("velocidad", 50)
-    ctl = pitcher_attrs.get("control", 50)
-    mov = pitcher_attrs.get("movimiento", 50) * tactics.get("pitcher_mov", 1.0)
+    # --- ATRIBUTOS DEL PICHEO (Prioriza el repertorio específico, si no usa los globales) ---
+    vel = pitch_selected.get("velocity", pitcher_attrs.get("velocidad", 50)) * tactics.get("pitcher_vel", 1.0)
+    ctl = pitch_selected.get("control", pitcher_attrs.get("control", 50)) * tactics.get("pitcher_ctl", 1.0)
+    mov = pitch_selected.get("movement", pitcher_attrs.get("movimiento", 50)) * tactics.get("pitcher_mov", 1.0)
 
     swing_type = swing_selected.get("swing_type", "NORMAL")
     guessed_zone = swing_selected.get("guessed_zone")
@@ -53,6 +77,10 @@ def calculate_play_outcome(
 
     actual_zone = pitch_selected["zone"]
     actual_pitch = pitch_selected["pitch_type"]
+
+    # Manejo especial de Base por Bolas Intencional
+    if actual_pitch == "IBB":
+        return "BALL", "Base por bolas intencional."
 
     zone_matched = (guessed_zone == actual_zone)
     pitch_matched = (guessed_pitch == actual_pitch)
@@ -62,7 +90,7 @@ def calculate_play_outcome(
         # Base MLB: ~65% de picheos sin swing son strikes
         strike_chance = 0.65 + (ctl - 50) * 0.003 - (vis - 50) * 0.002
         if zone_matched:
-            strike_chance -= 0.12  # Bono por anticipar zona
+            strike_chance -= 0.12  # Bono por anticipar la zona correcta
 
         if random.random() < max(0.25, min(0.85, strike_chance)):
             return "STRIKE_LOOKING", "Lanzamiento en la zona. ¡Strike cantado!"
@@ -71,6 +99,7 @@ def calculate_play_outcome(
 
     # --- FASE 2: BATEADOR HACE SWING ---
     # Base Whiff%: ~24.5% en MLB para un duelo neutro (50 vs 50)
+    # Un picheo con alto movimiento (ej. Slider/Sweeper de 95 MOV) incrementa el whiff%
     whiff_base = 24.5 + (vel * 0.25 + mov * 0.25) - (con * 0.35)
 
     if zone_matched:
@@ -93,20 +122,11 @@ def calculate_play_outcome(
         return "FOUL", "Batazo de foul."
 
     # --- FASE 3: BOLA PUESTA EN JUEGO (BABIP MLB REAL) ---
-    # Escala ponderada para simular el ~30% de Hits / 70% de Outs en bolas en juego
     power_score = (pwr - 50) * 0.4 + random.uniform(0, 100)
 
     if zone_matched and pitch_matched:
         power_score += 15.0
 
-    # Distribución empírica MLB
-    # Los umbrales aproximan la distribución real de eventos en bolas en juego:
-    #   HOME_RUN  ~3%  (>96)
-    #   HIT_3B    ~2%  (93–96)  ← triple, evento raro pero válido
-    #   HIT_2B    ~8%  (85–93)
-    #   HIT_1B    ~22% (63–85)
-    #   OUT_GROUND ~42% (25–63)
-    #   OUT_FLY    ~23% (<25)
     if power_score > 96.0:
         return "HOME_RUN", "¡Enorme batazo por todo el jardín central! ¡HOME RUN!"
     elif power_score > 93.0:
