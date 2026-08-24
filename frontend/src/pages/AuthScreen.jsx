@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { soundFx } from '../utils/audioManager';
 import { auth as authApi } from '../utils/api';
 
-export const AuthScreen = ({ onLoginSuccess }) => {
+export const AuthScreen = ({ onLoginSuccess, onRegisterSuccess }) => {
   const { t, i18n } = useTranslation();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -24,12 +24,23 @@ export const AuthScreen = ({ onLoginSuccess }) => {
 
     try {
       if (isRegister) {
-        // Registrar nuevo usuario y luego hacer login automático
-        await authApi.register(username, password);
+        // 1. Crear la cuenta del usuario
+        const registerData = await authApi.register(username, password);
+        
+        // 2. Autenticar inmediatamente para guardar token en localStorage
+        const loginData = await authApi.login(username, password);
+
+        // 3. Redirigir a la pantalla de Onboarding (Selección de Club)
+        if (onRegisterSuccess) {
+          onRegisterSuccess(loginData.user_id);
+        }
+      } else {
+        // Login tradicional -> Va directo al Lobby
+        const loginData = await authApi.login(username, password);
+        if (onLoginSuccess) {
+          onLoginSuccess({ userId: loginData.user_id, username: loginData.username });
+        }
       }
-      // Login (funciona para registro inmediato o login directo)
-      const data = await authApi.login(username, password);
-      onLoginSuccess({ userId: data.user_id, username: data.username });
     } catch (err) {
       setError(err.message || 'Error de autenticación. Intenta de nuevo.');
     } finally {
@@ -38,12 +49,13 @@ export const AuthScreen = ({ onLoginSuccess }) => {
   };
 
   return (
-    <div className="min-h-screen w-full flex flex-col items-center justify-center p-4 bg-[#121619]">
+    <div className="min-h-screen w-full flex flex-col items-center justify-center p-4 bg-[#121619] select-none">
       {/* Botón Selector de Idioma */}
       <div className="w-full max-w-md flex justify-end mb-2">
         <button
+          type="button"
           onClick={toggleLanguage}
-          className="border border-[#C5A059] bg-[#1A3323] px-3 py-1 font-mono text-xs text-[#F7F5F0] hover:bg-[#2D5A3F] transition-colors"
+          className="border border-[#C5A059] bg-[#1A3323] px-3 py-1 font-mono text-xs text-[#F7F5F0] hover:bg-[#2D5A3F] transition-colors cursor-pointer"
         >
           🌐 {i18n.language === 'es' ? 'ENGLISH' : 'ESPAÑOL'}
         </button>
@@ -70,7 +82,7 @@ export const AuthScreen = ({ onLoginSuccess }) => {
           <button
             type="button"
             onClick={() => { soundFx.playClick(); setIsRegister(false); }}
-            className={`flex-1 py-2 font-sports text-2xl tracking-wider uppercase transition-colors ${
+            className={`flex-1 py-2 font-sports text-2xl tracking-wider uppercase transition-colors cursor-pointer ${
               !isRegister ? 'bg-[#1A3323] text-[#F7F5F0] border-b-2 border-[#C5A059]' : 'text-[#E6DFD3] opacity-60 hover:opacity-100'
             }`}
           >
@@ -79,7 +91,7 @@ export const AuthScreen = ({ onLoginSuccess }) => {
           <button
             type="button"
             onClick={() => { soundFx.playClick(); setIsRegister(true); }}
-            className={`flex-1 py-2 font-sports text-2xl tracking-wider uppercase transition-colors ${
+            className={`flex-1 py-2 font-sports text-2xl tracking-wider uppercase transition-colors cursor-pointer ${
               isRegister ? 'bg-[#1A3323] text-[#F7F5F0] border-b-2 border-[#C5A059]' : 'text-[#E6DFD3] opacity-60 hover:opacity-100'
             }`}
           >
@@ -103,7 +115,7 @@ export const AuthScreen = ({ onLoginSuccess }) => {
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               placeholder="Ej. Bateador33"
-              className="w-full bg-[#0A0D0F] border border-[#2C3E35] p-3 text-[#F7F5F0] focus:outline-none focus:border-[#C5A059]"
+              className="w-full bg-[#0A0D0F] border border-[#2C3E35] p-3 text-[#F7F5F0] focus:outline-none focus:border-[#C5A059] font-mono"
             />
           </div>
 
@@ -117,7 +129,7 @@ export const AuthScreen = ({ onLoginSuccess }) => {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••"
-              className="w-full bg-[#0A0D0F] border border-[#2C3E35] p-3 text-[#F7F5F0] focus:outline-none focus:border-[#C5A059]"
+              className="w-full bg-[#0A0D0F] border border-[#2C3E35] p-3 text-[#F7F5F0] focus:outline-none focus:border-[#C5A059] font-mono"
             />
           </div>
 
@@ -125,7 +137,7 @@ export const AuthScreen = ({ onLoginSuccess }) => {
             type="submit"
             disabled={loading}
             onMouseEnter={() => soundFx.playCardSelect()}
-            className="w-full bg-[#1A3323] hover:bg-[#2D5A3F] disabled:opacity-50 disabled:cursor-not-allowed text-[#F7F5F0] border-2 border-[#C5A059] py-3 font-sports text-2xl tracking-widest mt-6 transition-all active:scale-95"
+            className="w-full bg-[#1A3323] hover:bg-[#2D5A3F] disabled:opacity-50 disabled:cursor-not-allowed text-[#F7F5F0] border-2 border-[#C5A059] py-3 font-sports text-2xl tracking-widest mt-6 transition-all active:scale-95 cursor-pointer"
           >
             {loading
               ? 'CONECTANDO...'

@@ -1,224 +1,356 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { soundFx } from '../utils/audioManager';
 import { user as userApi } from '../utils/api';
 
+// Categorización por sectores del campo
+const FIELD_SECTORS = [
+  {
+    name: 'OUTFIELD (JARDINES)',
+    slots: [
+      { id: 'LF', name: 'LEFT FIELD' },
+      { id: 'CF', name: 'CENTER FIELD' },
+      { id: 'RF', name: 'RIGHT FIELD' },
+    ],
+  },
+  {
+    name: 'INFIELD (CUADRO INTERIOR)',
+    slots: [
+      { id: '3B', name: 'TERCERA BASE' },
+      { id: 'SS', name: 'SHORTSTOP' },
+      { id: '2B', name: 'SEGUNDA BASE' },
+      { id: '1B', name: 'PRIMERA BASE' },
+    ],
+  },
+  {
+    name: 'BATERÍA & DH',
+    slots: [
+      { id: 'P', name: 'PITCHER' },
+      { id: 'C', name: 'CATCHER' },
+      { id: 'DH', name: 'BATEADOR DESIGNADO' },
+    ],
+  },
+];
+
+const ALL_SLOTS = FIELD_SECTORS.flatMap(s => s.slots);
+
 export const MyTeamScreen = ({ user, onBack }) => {
   const { t } = useTranslation();
-  const [activeTab, setActiveTab] = useState('LINEUP');
   const [inventory, setInventory] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [savingStatus, setSavingStatus] = useState(null);
 
-  // Cargar inventario real del usuario desde la API
+  const [fieldLineup, setFieldLineup] = useState({});
+  const [activeSlot, setActiveSlot] = useState('P');
+
+  // Cargar inventario y lineup remoto/local
   useEffect(() => {
     if (!user?.userId) return;
 
     setLoading(true);
     userApi.getInventory(user.userId)
-      .then((data) => {
-        setInventory(data.inventory || []);
+      .then(async (data) => {
+        const rawInventory = (data.inventory || []).map(i => i.card).filter(Boolean);
+        setInventory(rawInventory);
+
+        try {
+          // 1. Intentar obtener el lineup desde la API
+          const remoteLineup = await userApi.getLineup(user.userId);
+          if (remoteLineup && remoteLineup.slots && Object.keys(remoteLineup.slots).length > 0) {
+            setFieldLineup(remoteLineup.slots);
+          } else {
+            // 2. Fallback a localStorage o autocompletado
+            const saved = localStorage.getItem(`user_lineup_${user.userId}`);
+            if (saved) {
+              setFieldLineup(JSON.parse(saved));
+            } else {
+              autoAssignLineup(rawInventory);
+            }
+          }
+        } catch {
+          autoAssignLineup(rawInventory);
+        }
+
         setError(null);
       })
       .catch((err) => {
-        console.error('Error cargando inventario:', err);
-        setError('No se pudo cargar el inventario. Verifica tu conexión.');
+        console.error('Error cargando datos:', err);
+        setError('No se pudo cargar la información del usuario.');
       })
       .finally(() => setLoading(false));
   }, [user?.userId]);
 
-  // Separar cartas de pitcher y bateadores del inventario
-  const pitchers = inventory
-    .map(item => item.card)
-    .filter(card => ['SP', 'RP', 'TWP'].includes(card?.position));
+  // Persistir en backend y localStorage
+  const syncLineup = async (updatedLineup) => {
+    setFieldLineup(updatedLineup);
+    localStorage.setItem(`user_lineup_${user?.userId}`, JSON.stringify(updatedLineup));
 
-  const batters = inventory
-    .map(item => item.card)
-    .filter(card => card && !['SP', 'RP'].includes(card.position));
+    try {
+      setSavingStatus('GUARDANDO...');
+      await userApi.updateLineup(user.userId, updatedLineup);
+      setSavingStatus('✓ GUARDADO EN DB');
+      setTimeout(() => setSavingStatus(null), 2000);
+    } catch (err) {
+      console.error('Error al sincronizar con el backend:', err);
+      setSavingStatus('⚠️ ERROR AL GUARDAR');
+    }
+  };
 
-  // Mazo táctico (datos mock hasta que el endpoint de inventario los incluya)
-  const tacticalDeck = [
-    { id: "t1", name: "Batazo de Contacto", cost: 1, desc: "+15 CON en conteos de 2 Strikes", type: "BOOST" },
-    { id: "t2", name: "Toque Suicida", cost: 2, desc: "Ejecuta toque con corredor en 3B sin importar vel.", type: "PLAY" },
-    { id: "t3", name: "Recta de Fuego", cost: 1, desc: "+10 VEL al pichear arriba de la zona", type: "BOOST" },
-    { id: "t4", name: "Robo Agresivo", cost: 2, desc: "+20 Velocidad de salto para el corredor", type: "PLAY" },
-  ];
+  const autoAssignLineup = (cards = inventory) => {
+    if (soundFx?.playClick) soundFx.playClick();
+
+    const assigned = {};
+    const usedCardIds = new Set();
+
+    FIELD_SECTORS.flatMap(s => s.slots).forEach((slot) => {
+      if (slot.id === 'DH' || slot.id === 'P') return;
+
+      const candidates = cards.filter(
+        c => !usedCardIds.has(c.id) && c.position === slot.id
+      );
+
+      candidates.sort((a, b) => (b.overall || 0) - (a.overall || 0));
+      if (candidates[0]) {
+        assigned[slot.id] = candidates[0];
+        usedCardIds.add(candidates[0].id);
+      }
+    });
+
+    const pitcherCandidates = cards.filter(
+      c => ['SP', 'RP', 'CP', 'TWP'].includes(c.position) || c.is_two_way
+    );
+    pitcherCandidates.sort((a, b) => (b.overall || 0) - (a.overall || 0));
+
+    if (pitcherCandidates[0]) {
+      assigned['P'] = pitcherCandidates[0];
+      if (pitcherCandidates[0].position !== 'TWP' && !pitcherCandidates[0].is_two_way) {
+        usedCardIds.add(pitcherCandidates[0].id);
+      }
+    }
+
+    const dhCandidates = cards.filter(
+      c => (!usedCardIds.has(c.id) || c.position === 'TWP' || c.is_two_way) && !['SP', 'RP', 'CP'].includes(c.position)
+    );
+    dhCandidates.sort((a, b) => (b.overall || 0) - (a.overall || 0));
+
+    if (dhCandidates[0]) {
+      assigned['DH'] = dhCandidates[0];
+    }
+
+    syncLineup(assigned);
+  };
+
+  const assignedCardIds = useMemo(() => {
+    return new Set(Object.values(fieldLineup).map(c => c?.id).filter(Boolean));
+  }, [fieldLineup]);
+
+  const availableForSelectedSlot = useMemo(() => {
+    if (!activeSlot) return [];
+    
+    return inventory.filter(card => {
+      const isTWP = card.position === 'TWP' || card.is_two_way;
+
+      if (!isTWP && assignedCardIds.has(card.id) && fieldLineup[activeSlot]?.id !== card.id) {
+        return false;
+      }
+
+      if (activeSlot === 'P') {
+        return ['SP', 'RP', 'CP', 'TWP'].includes(card.position) || isTWP;
+      }
+
+      if (activeSlot === 'DH') {
+        return !['SP', 'RP', 'CP'].includes(card.position) || isTWP;
+      }
+
+      return card.position === activeSlot;
+    }).sort((a, b) => (b.overall || 0) - (a.overall || 0));
+  }, [inventory, activeSlot, assignedCardIds, fieldLineup]);
+
+  const handleSelectCardForSlot = (card) => {
+    if (soundFx?.playCardSelect) soundFx.playCardSelect();
+    const updated = {
+      ...fieldLineup,
+      [activeSlot]: card
+    };
+    syncLineup(updated);
+  };
 
   return (
-    <div className="min-h-screen w-full flex flex-col justify-between p-6 bg-[#121619]">
-      {/* Cabecera Superior */}
+    <div className="min-h-screen w-full flex flex-col justify-between p-6 bg-[#121619] text-[#F7F5F0] font-mono select-none">
+      
+      {/* CABECERA SUPERIOR */}
       <div className="w-full flex justify-between items-center border-b-2 border-[#C5A059] pb-3 mb-4">
         <div>
-          <span className="font-mono text-xs text-[#C5A059] uppercase block">GESTIÓN DE INVENTARIO Y ESTRATEGIA</span>
-          <h2 className="font-sports text-4xl text-[#F7F5F0] uppercase leading-none">MI EQUIPO</h2>
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-[#C5A059] uppercase block font-mono">ESTRATEGIA & ALINEACIÓN DEFENSIVA</span>
+            {savingStatus && (
+              <span className="text-[10px] bg-[#1A3323] text-[#C5A059] px-2 py-0.5 border border-[#C5A059] rounded animate-pulse">
+                {savingStatus}
+              </span>
+            )}
+          </div>
+          <h2 className="font-sports text-4xl uppercase leading-none">MI EQUIPO</h2>
         </div>
-        <button
-          onClick={() => { soundFx.playClick(); onBack(); }}
-          className="border border-[#2C3E35] hover:border-[#C5A059] bg-[#1A3323] px-5 py-2 font-mono text-xs text-[#F7F5F0] transition-colors"
-        >
-          VOLVER AL LOBBY
-        </button>
+
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => autoAssignLineup()}
+            className="bg-[#1A3323] hover:bg-[#2D5A3F] border border-[#C5A059] text-[#C5A059] px-4 py-2 text-xs uppercase tracking-wider transition-all cursor-pointer active:scale-95 font-sports"
+          >
+            ⚡ AUTO-LINEUP ÓPTIMO
+          </button>
+          <button
+            type="button"
+            onClick={onBack}
+            className="border border-[#2C3E35] hover:border-[#C5A059] bg-[#0A0D0F] px-5 py-2 text-xs text-[#F7F5F0] transition-colors cursor-pointer font-mono"
+          >
+            VOLVER AL LOBBY
+          </button>
+        </div>
       </div>
 
-      {/* Pestañas Principales */}
-      <div className="flex border-b border-[#2C3E35] mb-6">
-        <button
-          onClick={() => { soundFx.playClick(); setActiveTab('LINEUP'); }}
-          className={`flex-1 py-3 font-sports text-2xl uppercase tracking-wider transition-colors ${
-            activeTab === 'LINEUP'
-              ? 'bg-[#1A3323] text-[#F7F5F0] border-b-2 border-[#C5A059]'
-              : 'text-[#E6DFD3] opacity-60 hover:opacity-100'
-          }`}
-        >
-          ⚾ ROSTER & PITCHEO
-        </button>
-        <button
-          onClick={() => { soundFx.playClick(); setActiveTab('DECK'); }}
-          className={`flex-1 py-3 font-sports text-2xl uppercase tracking-wider transition-colors ${
-            activeTab === 'DECK'
-              ? 'bg-[#1A3323] text-[#F7F5F0] border-b-2 border-[#C5A059]'
-              : 'text-[#E6DFD3] opacity-60 hover:opacity-100'
-          }`}
-        >
-          🃏 MAZO TÁCTICO & BOOSTS
-        </button>
-      </div>
+      {/* VISTA PRINCIPAL (9 COLS CAMPO / 3 COLS CANDIDATOS) */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 my-auto">
+        
+        {/* VISTA DEL CAMPO ORGANIZADA EN SECTORES (lg:col-span-9) */}
+        <div className="lg:col-span-9 bg-[#0A0D0F] border-2 border-[#2C3E35] p-6 shadow-2xl relative min-h-[520px] flex flex-col justify-around overflow-hidden">
+          
+          <div className="absolute inset-0 pointer-events-none flex items-center justify-center opacity-20 select-none">
+            <svg viewBox="0 0 400 400" className="w-[480px] h-[480px]">
+              <path d="M 200 350 L 50 150 A 210 210 0 0 1 350 150 Z" fill="none" stroke="#C5A059" strokeWidth="2" strokeDasharray="4 4" />
+              <line x1="200" y1="350" x2="30" y2="130" stroke="#C5A059" strokeWidth="2" />
+              <line x1="200" y1="350" x2="370" y2="130" stroke="#C5A059" strokeWidth="2" />
+              <polygon points="200,350 280,270 200,190 120,270" fill="none" stroke="#C5A059" strokeWidth="2" />
+              <circle cx="200" cy="270" r="18" fill="none" stroke="#C5A059" strokeWidth="1.5" />
+              <polygon points="200,352 193,345 193,340 207,340 207,345" fill="#C5A059" />
+            </svg>
+          </div>
 
-      {/* Pestaña 1: Lineup y Pitcheo */}
-      {activeTab === 'LINEUP' && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 my-auto">
-          {/* Bateadores del inventario */}
-          <div className="lg:col-span-7 bg-[#0A0D0F] border-2 border-[#2C3E35] p-4 shadow-2xl">
-            <h3 className="font-sports text-2xl text-[#C5A059] uppercase border-b border-[#2C3E35] pb-2 mb-3">
-              BATEADORES EN INVENTARIO
-            </h3>
-            {loading && (
-              <p className="font-mono text-xs text-[#C5A059] text-center py-8">Cargando inventario...</p>
-            )}
-            {error && (
-              <p className="font-mono text-xs text-red-400 text-center py-8">{error}</p>
-            )}
-            {!loading && !error && batters.length === 0 && (
-              <p className="font-mono text-xs text-[#E6DFD3] text-center py-8 opacity-60">
-                No tienes bateadores en tu inventario. Abre un sobre en la tienda.
-              </p>
-            )}
-            <div className="space-y-2">
-              {batters.map((card, idx) => (
-                <div
-                  key={card.id}
-                  className="flex justify-between items-center bg-[#121619] border border-[#2C3E35] p-2 hover:border-[#C5A059] transition-colors"
-                >
-                  <div className="flex items-center gap-3">
-                    <span className="font-sports text-2xl text-[#C5A059] w-6 text-center">
-                      #{idx + 1}
-                    </span>
-                    <div>
-                      <div className="font-sports text-xl text-[#F7F5F0] leading-none uppercase">
-                        {card.name}
+          <span className="text-[10px] text-[#C5A059] uppercase font-bold block mb-2 relative z-10">
+            ★ Haz clic en una posición para seleccionar candidatos ★
+          </span>
+
+          {FIELD_SECTORS.map((sector, sIdx) => (
+            <div key={sIdx} className="w-full mb-3 relative z-10">
+              <span className="text-[9px] text-[#C5A059]/80 font-mono tracking-widest block mb-1 border-b border-[#2C3E35]/60 pb-0.5 uppercase">
+                {sector.name}
+              </span>
+              <div className="flex flex-wrap justify-center gap-4">
+                {sector.slots.map((slot) => {
+                  const assignedPlayer = fieldLineup[slot.id];
+                  const isSelected = activeSlot === slot.id;
+                  const isTWP = assignedPlayer?.position === 'TWP' || assignedPlayer?.is_two_way;
+
+                  return (
+                    <button
+                      key={slot.id}
+                      type="button"
+                      onClick={() => { if (soundFx?.playClick) soundFx.playClick(); setActiveSlot(slot.id); }}
+                      className={`flex-1 min-w-[170px] max-w-[220px] p-3 border-2 transition-all cursor-pointer flex flex-col justify-between min-h-[85px] rounded backdrop-blur-md ${
+                        isSelected
+                          ? 'border-[#C5A059] bg-[#1A3323]/90 scale-105 shadow-[0_0_15px_rgba(197,160,89,0.4)]'
+                          : assignedPlayer
+                          ? 'border-[#2C3E35] bg-[#121619]/85 hover:border-gray-400'
+                          : 'border-dashed border-red-500/50 bg-red-950/20'
+                      }`}
+                    >
+                      <div className="w-full flex justify-between items-center text-[10px] text-[#C5A059] font-bold border-b border-white/10 pb-0.5">
+                        <div className="flex items-center gap-1">
+                          <span>{slot.id}</span>
+                          {isTWP && (
+                            <span className="bg-[#C5A059] text-[#121619] text-[8px] px-1 rounded font-extrabold">
+                              TWP
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-[9px] text-gray-400 truncate">{slot.name}</span>
                       </div>
-                      <span className="font-mono text-[10px] text-[#E6DFD3]">
-                        CON: {card.contact} | POW: {card.power}
+
+                      {assignedPlayer ? (
+                        <div className="my-auto text-left w-full mt-1">
+                          <div className="font-sports text-lg text-white truncate leading-tight uppercase">
+                            {assignedPlayer.name}
+                          </div>
+                          <span className="text-[10px] text-gray-400 block font-mono">
+                            {assignedPlayer.overall} OVR | C:{assignedPlayer.contact} P:{assignedPlayer.power}
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-red-400 my-auto uppercase font-bold text-center block py-1">
+                          [ VACÍO ]
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* CANDIDATOS PARA LA POSICIÓN COMPACTOS (lg:col-span-3) */}
+        <div className="lg:col-span-3 bg-[#0A0D0F] border-2 border-[#2C3E35] p-3 shadow-2xl flex flex-col">
+          <div className="border-b border-[#2C3E35] pb-2 mb-3">
+            <span className="text-[10px] text-gray-400 block uppercase font-mono">CANDIDATOS PARA</span>
+            <h3 className="font-sports text-xl text-[#C5A059] uppercase">
+              POSICIÓN: {activeSlot}
+            </h3>
+          </div>
+
+          <div className="space-y-2 overflow-y-auto max-h-[50vh] pr-1">
+            {availableForSelectedSlot.length === 0 ? (
+              <p className="text-xs text-gray-500 text-center py-8 font-mono">
+                No tienes cartas disponibles para la posición {activeSlot}.
+              </p>
+            ) : (
+              availableForSelectedSlot.map((card) => {
+                const isEquippedInCurrentSlot = fieldLineup[activeSlot]?.id === card.id;
+                const isCardTWP = card.position === 'TWP' || card.is_two_way;
+
+                return (
+                  <div
+                    key={card.id}
+                    onClick={() => handleSelectCardForSlot(card)}
+                    className={`p-2 border transition-all cursor-pointer flex justify-between items-center rounded ${
+                      isEquippedInCurrentSlot
+                        ? 'border-[#C5A059] bg-[#1A3323]'
+                        : 'border-[#2C3E35] bg-[#121619] hover:border-gray-400'
+                    }`}
+                  >
+                    <div className="overflow-hidden mr-2">
+                      <div className="font-sports text-base text-white uppercase leading-tight truncate flex items-center gap-1">
+                        <span>{card.name}</span>
+                        {isCardTWP && (
+                          <span className="text-[8px] bg-[#C5A059] text-[#121619] px-1 rounded font-bold">
+                            TWP
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-[9px] text-gray-400 font-mono block">
+                        {card.position} • C:{card.contact} P:{card.power}
                       </span>
                     </div>
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <span className="font-mono text-xs bg-[#1A3323] border border-[#C5A059] px-2 py-0.5 text-[#F7F5F0]">
-                      {card.position}
-                    </span>
-                    <span className="font-sports text-2xl text-[#F7F5F0]">
-                      {card.overall} <span className="text-[10px] font-mono text-[#C5A059]">OVR</span>
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Pitchers del inventario */}
-          <div className="lg:col-span-5 bg-[#0A0D0F] border-2 border-[#2C3E35] p-4 shadow-2xl">
-            <h3 className="font-sports text-2xl text-[#C5A059] uppercase border-b border-[#2C3E35] pb-2 mb-3">
-              ROTACIÓN & BULLPEN
-            </h3>
-            {!loading && !error && pitchers.length === 0 && (
-              <p className="font-mono text-xs text-[#E6DFD3] text-center py-8 opacity-60">
-                No tienes lanzadores en tu inventario.
-              </p>
-            )}
-            <div className="space-y-3">
-              {pitchers.map((pitcher) => (
-                <div
-                  key={pitcher.id}
-                  className="bg-[#121619] border border-[#2C3E35] p-3 flex justify-between items-center"
-                >
-                  <div>
-                    <span className="font-mono text-[10px] text-[#C5A059] block font-bold">
-                      {pitcher.position}
-                    </span>
-                    <div className="font-sports text-2xl text-[#F7F5F0] leading-none uppercase">
-                      {pitcher.name}
+                    <div className="text-right shrink-0">
+                      <span className="font-sports text-lg text-[#C5A059] block leading-none">
+                        {card.overall}
+                      </span>
+                      {isEquippedInCurrentSlot && (
+                        <span className="text-[8px] text-green-400 uppercase font-bold font-mono">ASIGNADO</span>
+                      )}
                     </div>
-                    <span className="font-mono text-[10px] text-[#E6DFD3]">
-                      VEL: {pitcher.velocity} | CTL: {pitcher.control} | MOV: {pitcher.movement}
-                    </span>
                   </div>
-                  <div className="text-right">
-                    <span className="font-sports text-2xl text-[#C5A059]">{pitcher.overall} OVR</span>
-                  </div>
-                </div>
-              ))}
-            </div>
+                );
+              })
+            )}
           </div>
         </div>
-      )}
 
-      {/* Pestaña 2: Mazo Táctico */}
-      {activeTab === 'DECK' && (
-        <div className="bg-[#0A0D0F] border-2 border-[#2C3E35] p-6 shadow-2xl my-auto">
-          <div className="flex justify-between items-center border-b border-[#2C3E35] pb-3 mb-6">
-            <h3 className="font-sports text-3xl text-[#C5A059] uppercase">
-              CARTAS DE ESTRATEGIA Y BOOSTS DE PARTIDO (4/15 EQUIPADAS)
-            </h3>
-            <span className="font-mono text-xs text-[#E6DFD3]">PUNTOS DE MAZO: 6 / 20</span>
-          </div>
+      </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            {tacticalDeck.map((card) => (
-              <div
-                key={card.id}
-                className="bg-[#121619] border-2 border-[#C5A059] p-4 flex flex-col justify-between shadow-lg"
-              >
-                <div>
-                  <div className="flex justify-between items-center border-b border-[#2C3E35] pb-1 mb-2">
-                    <span className="font-mono text-[9px] text-[#C5A059] uppercase">
-                      {card.type}
-                    </span>
-                    <span className="font-sports text-lg text-[#F7F5F0]">
-                      COSTO: {card.cost}
-                    </span>
-                  </div>
-                  <h4 className="font-sports text-2xl text-[#F7F5F0] leading-tight uppercase mb-2">
-                    {card.name}
-                  </h4>
-                  <p className="font-mono text-xs text-[#E6DFD3] leading-relaxed">
-                    {card.desc}
-                  </p>
-                </div>
-                <button
-                  onClick={() => soundFx.playCardSelect()}
-                  className="mt-4 w-full border border-[#2C3E35] hover:border-[#C5A059] bg-[#1A3323] py-1 font-mono text-xs text-[#F7F5F0] transition-colors"
-                >
-                  REMOVER DEL MAZO
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Pie de Página */}
-      <div className="font-mono text-[10px] text-[#2C3E35] uppercase tracking-widest text-center mt-4">
-        KOSHIEN TEAM MANAGEMENT ENGINE • 2026
+      <div className="text-[10px] text-[#2C3E35] uppercase tracking-widest text-center mt-4 font-mono">
+        KOSHIEN LINEUP & FIELD ENGINE • 2026
       </div>
     </div>
   );

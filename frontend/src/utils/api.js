@@ -220,7 +220,7 @@ export const games = {
 };
 
 // ---------------------------------------------------------------------------
-// user — Perfil e inventario
+// user — Perfil, inventario y alineación
 // ---------------------------------------------------------------------------
 
 export const user = {
@@ -237,8 +237,30 @@ export const user = {
    * @returns {UserInventoryResponseSchema}
    */
   getInventory: (userId) => _request(`/api/v1/user/${userId}/inventory`),
-};
 
+  /**
+   * Obtiene la alineación (lineup) activa del usuario desde la base de datos.
+   * @param {string} userId
+   * @returns {Promise<Object>}
+   */
+  getLineup: (userId) => _request(`/api/v1/user/${userId}/lineup`),
+
+  /**
+   * Actualiza o crea la alineación activa del usuario en la base de datos.
+   * @param {string} userId
+   * @param {Object} lineupData - Objeto con el mapeo de posiciones {"P": card, "C": card, ...}
+   * @returns {Promise<Object>}
+   */
+  updateLineup: (userId, lineupData) =>
+    _request(`/api/v1/user/${userId}/lineup`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        name: 'Lineup Principal',
+        is_active: true,
+        slots: lineupData,
+      }),
+    }),
+};
 // ---------------------------------------------------------------------------
 // cards — Catálogo de equipos y cartas
 // ---------------------------------------------------------------------------

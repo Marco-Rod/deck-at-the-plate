@@ -2,23 +2,15 @@
  * App.jsx — Punto de entrada y enrutador de vistas
  * ==================================================
  * Gestiona la navegación entre pantallas mediante un estado `currentView`.
- * No usa React Router: el flujo es lineal y predecible para un juego 1v1.
  *
  * Flujo de navegación:
- *   AUTH → LOBBY → ROSTER_SELECTION → STADIUM (partida en curso)
- *                ↘ MY_TEAM
- *                ↘ SHOWCASE
- *
- * Estados de `currentView`:
- *   'LOBBY'             → Pantalla principal con matchmaking
- *   'ROSTER_SELECTION'  → Selección de pitcher y lineup antes de la partida
- *   'STADIUM'           → Pantalla de juego en tiempo real (TSX componentizado)
- *   'MY_TEAM'           → Gestión de roster y mazo táctico
- *   'SHOWCASE'          → Álbum de cartas coleccionadas
+ *   AUTH ──(Login)────> LOBBY ──> ROSTER_SELECTION ──> STADIUM (Partida)
+ *        └──(Register)─> ONBOARDING ──(Complete)──> LOBBY
  */
 
 import React, { useState, useEffect } from 'react';
 import { AuthScreen } from './pages/AuthScreen';
+import OnboardingScreen from './pages/OnboardingScreen'; // Importamos el nuevo onboarding
 import { LobbyScreen } from './pages/LobbyScreen';
 import { CardShowcaseScreen } from './pages/CardShowcaseScreen';
 import { MyTeamScreen } from './pages/MyTeamScreen';
@@ -29,6 +21,10 @@ import { auth as authApi } from './utils/api';
 export default function App() {
   const [user, setUser] = useState(null);
   const [currentView, setCurrentView] = useState('LOBBY');
+  
+  // Estado para capturar el userId tras el registro y enviarlo a OnboardingScreen
+  const [pendingOnboardingUserId, setPendingOnboardingUserId] = useState(null);
+
   // Configuración pendiente del modo/dificultad elegida en el Lobby
   const [pendingGameConfig, setPendingGameConfig] = useState(null);
   // ID real de la partida creada en el backend tras confirmar el roster
@@ -47,27 +43,41 @@ export default function App() {
     setCurrentView('LOBBY');
   };
 
+  /**
+   * Llamado desde AuthScreen tras un registro exitoso.
+   * Cambia la vista a ONBOARDING para que el usuario elija equipo y abra su starter pack.
+   */
+  const handleRegisterSuccess = (userId) => {
+    setPendingOnboardingUserId(userId);
+    setCurrentView('ONBOARDING');
+  };
+
+  /**
+   * Llamado desde OnboardingScreen al presionar "Ir al Menú Principal".
+   */
+  const handleOnboardingComplete = () => {
+    const currentUser = authApi.getCurrentUser();
+    if (currentUser) {
+      setUser(currentUser);
+    }
+    setPendingOnboardingUserId(null);
+    setCurrentView('LOBBY');
+  };
+
   const handleLogout = () => {
     authApi.logout();
     setUser(null);
     setActiveGameId(null);
     setPendingGameConfig(null);
+    setPendingOnboardingUserId(null);
     setCurrentView('LOBBY');
   };
 
-  /**
-   * Llamado desde LobbyScreen cuando el usuario pulsa "Iniciar partida".
-   * Guarda la configuración (modo/dificultad) y navega a la selección de roster.
-   */
   const handleStartGame = (config) => {
     setPendingGameConfig(config);
     setCurrentView('ROSTER_SELECTION');
   };
 
-  /**
-   * Llamado desde RosterSelectionScreen cuando el usuario confirma su roster.
-   * El `gameId` es el ID real retornado por POST /api/v1/games/create.
-   */
   const handleRosterConfirmed = (gameId) => {
     setActiveGameId(gameId);
     setCurrentView('STADIUM');
@@ -81,17 +91,30 @@ export default function App() {
 
   return (
     <div className="min-h-screen text-[#F7F5F0] bg-[#121619]">
-      {!user ? (
-        <AuthScreen onLoginSuccess={handleLoginSuccess} />
+      {/* VISTA 1: AUTENTICACIÓN (LOGIN O REGISTRO) */}
+      {!user && currentView !== 'ONBOARDING' ? (
+        <AuthScreen
+          onLoginSuccess={handleLoginSuccess}
+          onRegisterSuccess={handleRegisterSuccess}
+        />
 
-      ) : currentView === 'STADIUM' ? (
+      ) : /* VISTA 2: ONBOARDING DE REGISTRO (ELECCIÓN DE FRANCHISE Y APERTURA DE SOBRE) */
+      currentView === 'ONBOARDING' ? (
+        <OnboardingScreen
+          userId={pendingOnboardingUserId || user?.userId}
+          onComplete={handleOnboardingComplete}
+        />
+
+      ) : /* VISTA 3: PANTALLA DE JUEGO (ESTADIO 1V1) */
+      currentView === 'STADIUM' ? (
         <StadiumShowcaseScreen
           gameId={activeGameId}
           userId={user.userId}
           onBack={handleLeaveGame}
         />
 
-      ) : currentView === 'ROSTER_SELECTION' ? (
+      ) : /* VISTA 4: SELECCIÓN DE ROSTER */
+      currentView === 'ROSTER_SELECTION' ? (
         <RosterSelectionScreen
           user={user}
           gameConfig={pendingGameConfig}
@@ -99,16 +122,18 @@ export default function App() {
           onBack={() => setCurrentView('LOBBY')}
         />
 
-      ) : currentView === 'MY_TEAM' ? (
+      ) : /* VISTA 5: MI EQUIPO Y GESTIÓN DE ROSTER */
+      currentView === 'MY_TEAM' ? (
         <MyTeamScreen
           user={user}
           onBack={() => setCurrentView('LOBBY')}
         />
 
-      ) : currentView === 'SHOWCASE' ? (
+      ) : /* VISTA 6: ÁLBUM / SHOWCASE */
+      currentView === 'SHOWCASE' ? (
         <CardShowcaseScreen onBack={() => setCurrentView('LOBBY')} />
 
-      ) : (
+      ) : /* VISTA DEFAULT: LOBBY PRINCIPAL */ (
         <LobbyScreen
           user={user}
           onStartGame={handleStartGame}
