@@ -2,11 +2,24 @@
 Script de Seed: Poblamiento de Datos Iniciales (28 Cartas Únicas)
 ==================================================================
 Ejecutar en Docker:
-    docker compose exec backend python -m app.seeds.seed_cards
+    docker compose exec baseball_backend python app/seeds/seed_cards.py
 """
+import sys
+import os
+
+# Solución al ModuleNotFoundError: agregar la raíz del proyecto al sys.path
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.abspath(os.path.join(current_dir, "../../"))
+sys.path.insert(0, parent_dir)
+sys.path.insert(0, os.path.abspath(os.path.join(current_dir, "../")))
+
 from sqlalchemy.orm import Session
-from app.database import SessionLocal, engine, Base
-from app.models import PlayerCardModel, CardRarity, Team
+try:
+    from app.database import SessionLocal, engine, Base
+    from app.models import PlayerCardModel, CardRarity, Team
+except ModuleNotFoundError:
+    from database import SessionLocal, engine, Base
+    from models import PlayerCardModel, CardRarity, Team
 
 Base.metadata.create_all(bind=engine)
 
@@ -17,7 +30,6 @@ INITIAL_TEAMS = [
 
 INITIAL_CARDS = [
     # ==================== DODGERS (LAD) - 14 PLAYERS ====================
-    # --- PITCHERS (LAD) ---
     {
         "id": "card_yamamoto_18", "team_id": "LAD", "name": "Y. Yamamoto", "number": "18", "position": "SP",
         "overall": 91, "rarity": CardRarity.DIAMOND, "is_two_way": False, "velocity": 96, "control": 92, "movement": 88,
@@ -57,8 +69,6 @@ INITIAL_CARDS = [
             {"pitch_type": "SLIDER", "velocity": 84, "control": 75, "movement": 92}
         ]
     },
-
-    # --- POSITION PLAYERS (LAD) ---
     {"id": "card_betts_50", "team_id": "LAD", "name": "Mookie Betts", "number": "50", "position": "SS", "overall": 90, "rarity": CardRarity.GOLD, "is_two_way": False, "contact": 88, "power": 85, "velocity": 40, "control": 40, "movement": 40, "repertoire": []},
     {
         "id": "card_ohtani_17", "team_id": "LAD", "name": "Shohei Ohtani", "number": "17", "position": "TWP", "overall": 99, "rarity": CardRarity.DIAMOND, "is_two_way": True, "contact": 92, "power": 98, "velocity": 98, "control": 88, "movement": 92,
@@ -78,7 +88,6 @@ INITIAL_CARDS = [
     {"id": "card_hernandez_37", "team_id": "LAD", "name": "Teoscar Hernández", "number": "37", "position": "DH", "overall": 84, "rarity": CardRarity.SILVER, "is_two_way": False, "contact": 78, "power": 87, "velocity": 30, "control": 30, "movement": 30, "repertoire": []},
 
     # ==================== YANKEES (NYY) - 14 PLAYERS ====================
-    # --- PITCHERS (NYY) ---
     {
         "id": "card_cole_45", "team_id": "NYY", "name": "Gerrit Cole", "number": "45", "position": "SP",
         "overall": 92, "rarity": CardRarity.DIAMOND, "is_two_way": False, "velocity": 98, "control": 90, "movement": 86,
@@ -116,8 +125,6 @@ INITIAL_CARDS = [
             {"pitch_type": "CHANGE", "velocity": 86, "control": 84, "movement": 88}
         ]
     },
-
-    # --- POSITION PLAYERS (NYY) ---
     {"id": "card_judge_99", "team_id": "NYY", "name": "Aaron Judge", "number": "99", "position": "CF", "overall": 96, "rarity": CardRarity.DIAMOND, "is_two_way": False, "contact": 86, "power": 99, "velocity": 30, "control": 30, "movement": 30, "repertoire": []},
     {"id": "card_soto_22", "team_id": "NYY", "name": "Juan Soto", "number": "22", "position": "RF", "overall": 93, "rarity": CardRarity.GOLD, "is_two_way": False, "contact": 90, "power": 91, "velocity": 30, "control": 30, "movement": 30, "repertoire": []},
     {"id": "card_stanton_27", "team_id": "NYY", "name": "Giancarlo Stanton", "number": "27", "position": "DH", "overall": 85, "rarity": CardRarity.SILVER, "is_two_way": False, "contact": 70, "power": 94, "velocity": 30, "control": 30, "movement": 30, "repertoire": []},

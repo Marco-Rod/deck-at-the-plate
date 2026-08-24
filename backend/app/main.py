@@ -18,7 +18,7 @@ Las tablas se crean automáticamente con Base.metadata.create_all al iniciar
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.database import engine, Base
-from app.routers import cards, games, gameplay, ws, user, shop, auth
+from app.routers import cards, games, gameplay, ws, user, shop, auth, teams
 
 app = FastAPI(
     title="Deck at the Plate - API 1v1",
@@ -50,7 +50,7 @@ app.include_router(gameplay.router)
 app.include_router(ws.router)
 app.include_router(user.router)
 app.include_router(shop.router)
-
+app.include_router(teams.router)
 
 @app.get("/")
 def read_root():

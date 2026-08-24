@@ -1,5 +1,5 @@
 from app.schemas.cards import TeamBaseSchema, PlayerCardSchema, TeamRosterResponseSchema
-from app.schemas.user import WalletSchema, UserProfileResponseSchema, UserInventoryResponseSchema, RegisterRequest, LoginResponse
+from app.schemas.user import WalletSchema, UserProfileResponseSchema, UserInventoryResponseSchema, RegisterRequest, LoginResponse, CreateTeamRequestSchema, UserTeamResponseSchema
 from app.schemas.shop import StarterPackResponseSchema, OpenPackResponseSchema
 from app.schemas.game import (
     CreateGameRequest,
@@ -10,7 +10,7 @@ from app.schemas.game import (
     PlayResultResponse,
     ChangePitcherRequest,
     StealBaseRequest
-    )
+)
 
 __all__ = [
     "TeamBaseSchema",
@@ -31,4 +31,6 @@ __all__ = [
     "StealBaseRequest",
     "RegisterRequest",
     "LoginResponse",
+    "CreateTeamRequestSchema",
+    "UserTeamResponseSchema"
 ]

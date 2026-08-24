@@ -1,5 +1,5 @@
 import React from 'react';
-import { PitchType, PlayerRole, PITCH_TYPE_LABELS } from '../../types/stadium';
+import { PitchType, PlayerRole } from '../../types/stadium';
 
 interface PitchZoneGridProps {
   role: PlayerRole;
@@ -7,6 +7,7 @@ interface PitchZoneGridProps {
   selectedPitch: PitchType;
   onSelectZone: (zone: number) => void;
   onSelectPitch: (pitch: PitchType) => void;
+  repertoire?: { pitch_type: string; velocity?: number }[];
 }
 
 export const PitchZoneGrid: React.FC<PitchZoneGridProps> = ({
@@ -15,32 +16,37 @@ export const PitchZoneGrid: React.FC<PitchZoneGridProps> = ({
   selectedPitch,
   onSelectZone,
   onSelectPitch,
+  repertoire,
 }) => {
-  // Códigos MLB estándar — deben coincidir con PitchType en types/stadium.ts
-  const pitches: PitchType[] = ['FF', 'SL', 'CU', 'CH'];
+  // Si la carta tiene repertorio real definido desde la DB, usamos esos lanzamientos.
+  // De lo contrario, usamos una lista segura de fallbacks universales.
+  const availablePitches: string[] =
+    repertoire && repertoire.length > 0
+      ? repertoire.map((p) => p.pitch_type)
+      : ['4-SEAM', 'SLIDER', 'CHANGE'];
 
   return (
     <div className="z-10 flex flex-col items-center gap-3 my-auto">
       {role === 'PITCHER' && (
-        <div className="flex gap-1 bg-[#0A0D0F] p-1 border border-[#2C3E35]">
-          {pitches.map((pitch: PitchType) => (
+        <div className="flex flex-wrap justify-center gap-1 bg-[#0A0D0F] p-1 border border-[#2C3E35]">
+          {availablePitches.map((pitch: string) => (
             <button
               key={pitch}
               type="button"
               onClick={() => onSelectPitch(pitch)}
-              className={`px-3 py-1 font-mono text-[10px] uppercase transition-colors ${
+              className={`px-3 py-1 font-mono text-[10px] uppercase transition-colors cursor-pointer ${
                 selectedPitch === pitch
-                  ? 'bg-[#1A3323] text-[#C5A059] border border-[#C5A059]'
-                  : 'text-[#E6DFD3] opacity-60'
+                  ? 'bg-[#1A3323] text-[#C5A059] border border-[#C5A059] font-bold shadow-[0_0_8px_rgba(197,160,89,0.5)]'
+                  : 'text-[#E6DFD3] opacity-60 hover:opacity-100'
               }`}
             >
-              {PITCH_TYPE_LABELS[pitch]}
+              {pitch}
             </button>
           ))}
           <button
             type="button"
             onClick={() => onSelectPitch('IBB')}
-            className={`px-2 py-1 font-mono text-[10px] uppercase transition-colors ${
+            className={`px-2 py-1 font-mono text-[10px] uppercase transition-colors cursor-pointer ${
               selectedPitch === 'IBB'
                 ? 'bg-[#C5A059] text-[#121619] font-bold border border-[#F7F5F0]'
                 : 'text-[#C5A059] border border-[#C5A059]/40 opacity-80'
@@ -67,7 +73,7 @@ export const PitchZoneGrid: React.FC<PitchZoneGridProps> = ({
               key={zone}
               type="button"
               onClick={() => onSelectZone(zone)}
-              className={`w-16 h-16 border flex items-center justify-center font-mono text-xs transition-all ${
+              className={`w-16 h-16 border flex items-center justify-center font-mono text-xs transition-all cursor-pointer ${
                 selectedZone === zone
                   ? 'border-[#C5A059] bg-[#1A3323] text-[#C5A059] font-bold shadow-[0_0_15px_rgba(197,160,89,0.6)]'
                   : 'border-[#2C3E35] text-[#E6DFD3] hover:border-[#C5A059]/60'

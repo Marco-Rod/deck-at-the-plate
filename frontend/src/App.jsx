@@ -10,7 +10,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { AuthScreen } from './pages/AuthScreen';
-import OnboardingScreen from './pages/OnboardingScreen'; // Importamos el nuevo onboarding
+import OnboardingScreen from './pages/OnboardingScreen';
 import { LobbyScreen } from './pages/LobbyScreen';
 import { CardShowcaseScreen } from './pages/CardShowcaseScreen';
 import { MyTeamScreen } from './pages/MyTeamScreen';
@@ -25,7 +25,7 @@ export default function App() {
   // Estado para capturar el userId tras el registro y enviarlo a OnboardingScreen
   const [pendingOnboardingUserId, setPendingOnboardingUserId] = useState(null);
 
-  // Configuración pendiente del modo/dificultad elegida en el Lobby
+  // Configuración pendiente del modo/dificultad/rival elegida en el Lobby
   const [pendingGameConfig, setPendingGameConfig] = useState(null);
   // ID real de la partida creada en el backend tras confirmar el roster
   const [activeGameId, setActiveGameId] = useState(null);
@@ -109,7 +109,7 @@ export default function App() {
       currentView === 'STADIUM' ? (
         <StadiumShowcaseScreen
           gameId={activeGameId}
-          userId={user.userId}
+          userId={user?.userId}
           onBack={handleLeaveGame}
         />
 

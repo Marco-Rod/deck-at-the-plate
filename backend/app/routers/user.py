@@ -1,9 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.schemas import UserProfileResponseSchema, UserInventoryResponseSchema
+from app.schemas import UserProfileResponseSchema, UserInventoryResponseSchema, CreateTeamRequestSchema, UserTeamResponseSchema
 from app.database import get_db
-from app.models import User, UserWallet, UserCardInventory, PlayerCardModel, UserLineup
+from app.models import User, UserWallet, UserCardInventory, PlayerCardModel, UserLineup, UserTeam
 
 router = APIRouter(prefix="/api/v1/user", tags=["User & Inventory"])
 
@@ -105,3 +105,80 @@ def save_user_lineup(user_id: str, payload: dict, db: Session = Depends(get_db))
     db.commit()
     db.refresh(lineup)
     return lineup
+
+
+@router.post("/{user_id}/team", response_model=UserTeamResponseSchema)
+def create_user_team(user_id: str, payload: CreateTeamRequestSchema, db: Session = Depends(get_db)):
+    """Crea el club personalizado para el usuario."""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+
+    existing_team = db.query(UserTeam).filter(UserTeam.user_id == user_id).first()
+    if existing_team:
+        raise HTTPException(status_code=400, detail="El usuario ya tiene un club registrado")
+
+    new_team = UserTeam(
+        user_id=user_id,
+        name=payload.name,
+        short_name=payload.short_name.upper(),
+        city=payload.city,
+        stadium_name=payload.stadium_name,
+        primary_color=payload.primary_color,
+        secondary_color=payload.secondary_color,
+        logo_id=payload.logo_id,
+        base_franchise=payload.base_franchise
+    )
+    db.add(new_team)
+    db.commit()
+    db.refresh(new_team)
+    return new_team
+
+@router.get("/{user_id}/team", response_model=UserTeamResponseSchema)
+def get_user_team(user_id: str, db: Session = Depends(get_db)):
+    """Obtiene los datos del club personalizado del usuario."""
+    team = db.query(UserTeam).filter(UserTeam.user_id == user_id).first()
+    if not team:
+        raise HTTPException(status_code=404, detail="El usuario no ha fundado ningún club")
+    return team
+
+
+@router.get("/{user_id}/team-stats")
+def get_user_team_stats(user_id: str, db: Session = Depends(get_db)):
+    """
+    Calcula dinámicamente el OVR General, Bateo (BAT) y Pitcheo (PIT)
+    basado en las cartas de la alineación activa guardada en la BD.
+    """
+    lineup = db.query(UserLineup).filter(
+        UserLineup.user_id == user_id, 
+        UserLineup.is_active == True
+    ).first()
+
+    if not lineup or not lineup.slots:
+        return {"overall": 70, "batOvr": 70, "pitOvr": 70}
+
+    batters_ovr = []
+    pitchers_ovr = []
+
+    # Iterar sobre las posiciones asignadas en el diamante
+    for slot_pos, card in lineup.slots.items():
+        if not card or not isinstance(card, dict):
+            continue
+
+        ovr = card.get("overall", 70)
+        pos = card.get("position", "")
+
+        if pos in ["SP", "RP", "CP"] or slot_pos == "P":
+            pitchers_ovr.append(ovr)
+        else:
+            batters_ovr.append(ovr)
+
+    bat_ovr = round(sum(batters_ovr) / len(batters_ovr)) if batters_ovr else 70
+    pit_ovr = round(sum(pitchers_ovr) / len(pitchers_ovr)) if pitchers_ovr else 70
+    overall = round((bat_ovr + pit_ovr) / 2)
+
+    return {
+        "overall": overall,
+        "batOvr": bat_ovr,
+        "pitOvr": pit_ovr
+    }

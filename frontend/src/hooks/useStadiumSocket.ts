@@ -3,23 +3,6 @@
  * =================================================================
  * Gestiona la conexión en tiempo real con el servidor de juego y expone
  * el estado del partido y las funciones para enviar acciones vía REST.
- *
- * Flujo de comunicación:
- *   - La conexión WS es unidireccional desde el servidor: solo recibe eventos.
- *   - Las acciones del jugador (pitch, swing, tácticas) se envían vía REST
- *     usando los helpers de api.js.
- *   - El servidor emite los siguientes eventos:
- *       INIT_GAME_STATE   → Estado inicial al conectarse.
- *       PITCH_COMMITTED   → El lanzador registró su picheo.
- *       PLAY_RESOLVED     → El at-bat se resolvió con su resultado.
- *       STEAL_RESOLVED    → Un intento de robo fue resuelto.
- *
- * URL del WebSocket:
- *   ws://<host>/ws/games/<gameId>/<userId>
- *
- * Parámetros:
- *   gameId  — ID de la sesión de juego (ej. "game_a1b2c3d4")
- *   userId  — ID del usuario autenticado (para Fog of War en el servidor)
  */
 
 import { useEffect, useState, useCallback, useRef } from 'react';
@@ -28,6 +11,7 @@ import {
   PitchType,
   PlayResolvedPayload,
   PitchCommittedPayload,
+  InitGameStatePayload,
 } from '../types/stadium';
 import { games as gamesApi } from '../utils/api';
 
@@ -52,12 +36,9 @@ interface UseStadiumSocketReturn {
   sendTactic: (tacticId: string, playerRole: 'PITCHER' | 'BATTER') => Promise<void>;
 }
 
-/**
- * Convierte el payload de PLAY_RESOLVED del backend al formato GameStateWS del frontend.
- */
-function mapPayloadToGameState(payload: PlayResolvedPayload): GameStateWS {
-  const stateData = payload.state_data as Record<string, unknown>;
-  const runners = (stateData?.runners as Record<string, string | null>) || { '1b': null, '2b': null, '3b': null };
+function parseStateData(payload: { current_inning: number; is_top_inning: boolean; score_home: number; score_away: number; balls: number; strikes: number; outs: number; state_data: Record<string, unknown> }): GameStateWS {
+  const stateData = payload.state_data || {};
+  const runners = (stateData.runners as Record<string, string | null>) || { '1b': null, '2b': null, '3b': null };
 
   return {
     currentInning: payload.current_inning,
@@ -68,13 +49,14 @@ function mapPayloadToGameState(payload: PlayResolvedPayload): GameStateWS {
     strikes: payload.strikes,
     outs: payload.outs,
     runners: {
-      b1: runners['1b'] ? runners['1b'] : null,
-      b2: runners['2b'] ? runners['2b'] : null,
-      b3: runners['3b'] ? runners['3b'] : null,
+      b1: runners['1b'] || null,
+      b2: runners['2b'] || null,
+      b3: runners['3b'] || null,
     },
-    lastEvent: payload.event,
-    isGameOver: !!(stateData?.is_game_over),
-    winnerMessage: stateData?.winner_message as string | undefined,
+    activePitcherId: stateData.active_pitcher as string | undefined,
+    activeBatterId: stateData.active_batter as string | undefined,
+    isGameOver: !!(stateData.is_game_over),
+    winnerMessage: stateData.winner_message as string | undefined,
   };
 }
 
@@ -91,7 +73,6 @@ export const useStadiumSocket = (
   useEffect(() => {
     if (!gameId || !userId) return;
 
-    // URL correcta del backend: /ws/games/{game_id}/{user_id}
     const wsHost = (import.meta.env.VITE_API_URL || 'http://localhost:8000')
       .replace(/^http/, 'ws');
     const wsUrl = `${wsHost}/ws/games/${gameId}/${userId}`;
@@ -101,47 +82,48 @@ export const useStadiumSocket = (
 
     ws.onopen = () => {
       setIsConnected(true);
-      console.log(`[WS] Conectado a la partida ${gameId}`);
+      console.log(`[WS] Conectado exitosamente a ${gameId}`);
     };
 
     ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data) as { type: string; [key: string]: unknown };
+  try {
+    const data = JSON.parse(event.data);
 
-        switch (data.type) {
-          case 'INIT_GAME_STATE': {
-            // Estado inicial al conectarse — se cargará vía REST en el futuro
-            console.log('[WS] INIT_GAME_STATE recibido');
-            break;
-          }
-
-          case 'PITCH_COMMITTED': {
-            const payload = data as unknown as PitchCommittedPayload;
-            setHasPitched(payload.has_pitched);
-            break;
-          }
-
-          case 'PLAY_RESOLVED': {
-            const payload = data as unknown as PlayResolvedPayload;
-            const newState = mapPayloadToGameState(payload);
-            setGameState(newState);
-            setLastResult(payload.description);
-            setHasPitched(false); // El picheo ya fue procesado
-            break;
-          }
-
-          case 'STEAL_RESOLVED': {
-            setLastResult((data.description as string) || null);
-            break;
-          }
-
-          default:
-            console.warn('[WS] Tipo de evento desconocido:', data.type);
-        }
-      } catch (err) {
-        console.error('[WS] Error parseando mensaje:', err);
+    switch (data.type) {
+      case 'INIT_GAME_STATE': {
+        const payload = data as InitGameStatePayload;
+        setGameState(parseStateData(payload));
+        break;
       }
-    };
+
+      case 'PITCH_COMMITTED': {
+        const payload = data as PitchCommittedPayload;
+        // Solo actualizamos que ya se realizó el picheo (para habilitar el botón del bateador)
+        setHasPitched(payload.has_pitched);
+        break;
+      }
+
+      case 'PLAY_RESOLVED': {
+        const payload = data as PlayResolvedPayload;
+        setGameState(parseStateData(payload));
+        // Solo asignamos a lastResult el resultado real de la jugada (ej: "HIT 1B", "OUT", etc.)
+        setLastResult(payload.description);
+        setHasPitched(false);
+        break;
+      }
+
+      case 'STEAL_RESOLVED': {
+        setLastResult((data.description as string) || null);
+        break;
+      }
+
+      default:
+        console.warn('[WS] Evento no manejado:', data.type);
+    }
+  } catch (err) {
+    console.error('[WS] Error parseando mensaje:', err);
+  }
+};
 
     ws.onclose = () => {
       setIsConnected(false);
@@ -153,14 +135,12 @@ export const useStadiumSocket = (
     };
 
     return () => {
-      ws.close();
+      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+        ws.close();
+      }
     };
   }, [gameId, userId]);
 
-  /**
-   * Envía el picheo del lanzador vía REST.
-   * El backend guarda el picheo y emite PITCH_COMMITTED a ambos clientes.
-   */
   const sendPitch = useCallback(
     async (zone: number, pitchType: PitchType): Promise<void> => {
       const payload: PitchPayload = { pitch_type: pitchType, zone };
@@ -169,10 +149,6 @@ export const useStadiumSocket = (
     [gameId]
   );
 
-  /**
-   * Envía el swing del bateador vía REST.
-   * El backend resuelve la jugada y emite PLAY_RESOLVED a ambos clientes.
-   */
   const sendSwing = useCallback(
     async (
       swingType: SwingPayload['swing_type'],
@@ -189,9 +165,6 @@ export const useStadiumSocket = (
     [gameId]
   );
 
-  /**
-   * Activa una carta táctica antes del enfrentamiento.
-   */
   const sendTactic = useCallback(
     async (tacticId: string, playerRole: 'PITCHER' | 'BATTER'): Promise<void> => {
       await gamesApi.playTactic(gameId, {

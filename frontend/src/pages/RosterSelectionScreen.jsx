@@ -1,180 +1,192 @@
 import React, { useState, useEffect } from 'react';
 import { soundFx } from '../utils/audioManager';
-import { PlayerCard } from '../components/cards/PlayerCard';
 import { user as userApi, games as gamesApi } from '../utils/api';
 
 export const RosterSelectionScreen = ({ user, gameConfig, onRosterConfirmed, onBack }) => {
-  const [pitchers, setPitchers] = useState([]);
-  const [batters, setBatters] = useState([]);
-  const [selectedPitcher, setSelectedPitcher] = useState(null);
-  const [lineup, setLineup] = useState([]);
+  const [activeLineup, setActiveLineup] = useState({});
   const [loading, setLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
+  const [creatingGame, setCreatingGame] = useState(false);
   const [error, setError] = useState(null);
 
-  // Cargar inventario real del usuario para poblar la selección
+  // Cargar la alineación activa del usuario desde la base de datos
   useEffect(() => {
     if (!user?.userId) return;
 
-    userApi.getInventory(user.userId)
-      .then((data) => {
-        const allCards = (data.inventory || []).map(item => item.card);
-        const pitcherCards = allCards.filter(c => c && ['SP', 'RP', 'TWP'].includes(c.position));
-        const batterCards  = allCards.filter(c => c && !['SP', 'RP'].includes(c.position));
-
-        setPitchers(pitcherCards);
-        setBatters(batterCards);
-
-        // Pre-seleccionar el primer pitcher disponible
-        if (pitcherCards.length > 0) setSelectedPitcher(pitcherCards[0]);
-        // Pre-seleccionar los primeros 9 bateadores
-        setLineup(batterCards.slice(0, 9));
+    setLoading(true);
+    userApi.getLineup(user.userId)
+      .then(data => {
+        if (data && data.slots) {
+          setActiveLineup(data.slots);
+        }
       })
-      .catch((err) => {
-        console.error('Error cargando inventario:', err);
-        setError('No se pudo cargar tu inventario. Verifica tu conexión.');
+      .catch(err => {
+        console.error("Error al cargar la alineación:", err);
+        setError("No se pudo cargar la alineación activa.");
       })
       .finally(() => setLoading(false));
   }, [user?.userId]);
 
-  const toggleBatter = (card) => {
-    setLineup(prev => {
-      const isSelected = prev.find(b => b.id === card.id);
-      if (isSelected) return prev.filter(b => b.id !== card.id);
-      if (prev.length >= 9) return prev; // Máximo 9 bateadores
-      return [...prev, card];
-    });
-  };
-
-  const handleStartGame = async () => {
-    if (!selectedPitcher || lineup.length < 9) {
-      setError('Necesitas un lanzador y 9 bateadores para iniciar.');
-      return;
-    }
-
-    soundFx.playGameStart();
-    setSubmitting(true);
+  const handleConfirmAndPlay = async () => {
+    if (soundFx?.playGameStart) soundFx.playGameStart();
+    setCreatingGame(true);
     setError(null);
 
     try {
-      // Crear la partida en el backend con el roster seleccionado
-      const gameData = await gamesApi.create({
+      // Extraer IDs de bateadores en orden
+      const homeLineupIds = ['DH', '1B', '2B', '3B', 'SS', 'LF', 'CF', 'RF', 'C']
+        .map(pos => activeLineup[pos]?.id)
+        .filter(Boolean);
+
+      const homePitcherId = activeLineup['P']?.id;
+
+      if (!homePitcherId || homeLineupIds.length < 9) {
+        throw new Error("Alineación incompleta. Por favor, asigna 9 bateadores y 1 pitcher en 'Gestionar Mi Equipo'.");
+      }
+
+      // Invocar la API para crear la partida en PostgreSQL
+      const gameSession = await gamesApi.create({
         home_user_id: user.userId,
-        away_user_id: 'CPU_BOT',
+        away_user_id: gameConfig?.rival?.id || 'JAL',
         game_mode: gameConfig?.mode || 'PVE',
         difficulty: gameConfig?.difficulty || 'MEDIUM',
-        home_pitcher_id: selectedPitcher.id,
-        away_pitcher_id: selectedPitcher.id, // CPU usa el mismo pitcher como placeholder
-        home_lineup: lineup.map(b => b.id),
-        away_lineup: lineup.map(b => b.id),  // CPU lineup placeholder
-        home_tactics_deck: ["tac_vision_boost", "tac_power_boost", "tac_contact_boost", "tac_slider_break", "tac_velocity_boost"],
-        away_tactics_deck: ["tac_vision_boost", "tac_debuff_vision", "tac_slider_break", "tac_velocity_boost", "tac_power_boost"],
+        home_pitcher_id: homePitcherId,
+        away_pitcher_id: homePitcherId, // Se asignará automáticamente en el backend para la CPU
+        home_lineup: homeLineupIds,
+        away_lineup: homeLineupIds,     // Se generará en el backend
+        home_tactics_deck: ["t1", "t2", "t3", "t4", "t1"],
+        away_tactics_deck: ["t1", "t2", "t3", "t4", "t1"],
       });
 
-      onRosterConfirmed(gameData.id);
+      // Pasar el ID real de la partida a App.jsx para cambiar a la vista STADIUM
+      onRosterConfirmed(gameSession.id);
+
     } catch (err) {
-      setError(`Error al crear la partida: ${err.message}`);
-      setSubmitting(false);
+      console.error("Error al crear la partida:", err);
+      setError(err.message || "Error al conectar con el servidor.");
+      setCreatingGame(false);
     }
   };
 
+  const pitcher = activeLineup['P'];
+
   return (
-    <div className="min-h-screen w-full flex flex-col items-center justify-between p-4 bg-[#121619]">
-      {/* Cabecera */}
-      <div className="w-full max-w-4xl flex justify-between items-center border-b-2 border-[#C5A059] pb-3 mb-4">
+    <div className="min-h-screen w-full flex flex-col justify-between p-6 bg-[#121619] text-[#F7F5F0] font-mono select-none">
+      
+      {/* HEADER */}
+      <div className="w-full flex justify-between items-center border-b-2 border-[#C5A059] pb-3 mb-4">
         <div>
-          <span className="font-mono text-xs text-[#C5A059] uppercase block">PREPARACIÓN DE ESCUADRA</span>
-          <h2 className="font-sports text-4xl text-[#F7F5F0] uppercase leading-none">SELECCIÓN DE ROSTER</h2>
-          {gameConfig && (
-            <span className="font-mono text-[10px] text-[#E6DFD3]">
-              MODO: {gameConfig.mode} | DIFICULTAD: {gameConfig.difficulty}
-            </span>
-          )}
+          <span className="text-xs text-[#C5A059] uppercase block tracking-widest">
+            MATCHMAKING • CONFIRMACIÓN DE ROSTER
+          </span>
+          <h2 className="font-sports text-4xl uppercase text-white leading-none mt-1">
+            PREPARAR ENCUENTRO VS {gameConfig?.rival?.name || 'CPU'}
+          </h2>
         </div>
+
         <button
-          onClick={() => { soundFx.playClick(); onBack(); }}
-          className="border border-[#2C3E35] hover:border-[#C5A059] px-4 py-2 font-mono text-xs text-[#E6DFD3] transition-colors"
+          onClick={onBack}
+          disabled={creatingGame}
+          className="border border-[#2C3E35] hover:border-[#C5A059] bg-[#0A0D0F] px-5 py-3 text-xs text-[#F7F5F0] transition-colors cursor-pointer"
         >
           VOLVER AL LOBBY
         </button>
       </div>
 
-      {/* Estado de carga / error */}
-      {loading && (
-        <p className="font-mono text-xs text-[#C5A059] my-auto">Cargando tu inventario...</p>
-      )}
-      {error && (
-        <p className="font-mono text-xs text-red-400 text-center my-4 border border-red-400/30 p-3 w-full max-w-4xl">{error}</p>
-      )}
-
-      {/* Contenido Principal */}
-      {!loading && (
-        <div className="w-full max-w-4xl grid grid-cols-1 md:grid-cols-2 gap-6 my-auto">
-          {/* Selección de Pitcher Abridor */}
-          <div className="bg-[#121619] border-2 border-[#C5A059] p-4 shadow-2xl">
-            <h3 className="font-sports text-2xl text-[#C5A059] uppercase border-b border-[#2C3E35] pb-2 mb-4">
-              LANZADOR ABRIDOR
+      {/* ÁREA DE CONFIRMACIÓN */}
+      <div className="max-w-4xl mx-auto w-full my-auto grid grid-cols-1 md:grid-cols-2 gap-6">
+        
+        {/* MI EQUIPO (HOME) */}
+        <div className="bg-[#0A0D0F] border-2 border-[#C5A059] p-5 rounded shadow-2xl flex flex-col justify-between">
+          <div>
+            <span className="text-xs text-[#C5A059] uppercase block mb-1">EQUIPO LOCAL (TÚ)</span>
+            <h3 className="font-sports text-3xl text-white uppercase border-b border-[#2C3E35] pb-2 mb-4">
+              MI ALINEACIÓN
             </h3>
-            {pitchers.length === 0 ? (
-              <p className="font-mono text-xs text-[#E6DFD3] opacity-60 text-center py-4">
-                Sin lanzadores en inventario. Abre un sobre primero.
-              </p>
-            ) : (
-              <div className="flex gap-4 overflow-x-auto pb-2">
-                {pitchers.map((pitcher) => (
-                  <PlayerCard
-                    key={pitcher.id}
-                    player={pitcher}
-                    role="PITCHER"
-                    isSelected={selectedPitcher?.id === pitcher.id}
-                    onClick={(p) => setSelectedPitcher(p)}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
 
-          {/* Selección de Lineup */}
-          <div className="bg-[#121619] border-2 border-[#C5A059] p-4 shadow-2xl">
-            <h3 className="font-sports text-2xl text-[#C5A059] uppercase border-b border-[#2C3E35] pb-2 mb-4">
-              LINEUP ACTIVO ({lineup.length}/9)
-            </h3>
-            {batters.length === 0 ? (
-              <p className="font-mono text-xs text-[#E6DFD3] opacity-60 text-center py-4">
-                Sin bateadores en inventario.
-              </p>
+            {loading ? (
+              <p className="text-xs text-gray-400 py-6 text-center">Cargando alineación...</p>
             ) : (
-              <div className="flex gap-4 overflow-x-auto pb-2 flex-wrap">
-                {batters.map((batter) => (
-                  <PlayerCard
-                    key={batter.id}
-                    player={batter}
-                    role="BATTER"
-                    isSelected={!!lineup.find(b => b.id === batter.id)}
-                    onClick={toggleBatter}
-                  />
-                ))}
+              <div className="space-y-2 text-xs">
+                <div className="bg-[#121619] p-2.5 border border-[#C5A059]/50 flex justify-between items-center rounded">
+                  <span className="text-[#C5A059] font-bold">⚾ PITCHER TITULAR:</span>
+                  <span className="text-white font-sports text-base">{pitcher ? pitcher.name : 'SIN ASIGNAR'} ({pitcher?.overall || '--'} OVR)</span>
+                </div>
+
+                <div className="bg-[#121619] p-3 border border-[#2C3E35] rounded space-y-1 max-h-48 overflow-y-auto">
+                  <span className="text-[10px] text-gray-400 block uppercase mb-1">ORDEN AL BATE (9 TITULARES)</span>
+                  {['DH', '1B', '2B', '3B', 'SS', 'LF', 'CF', 'RF', 'C'].map((pos, idx) => {
+                    const card = activeLineup[pos];
+                    return (
+                      <div key={pos} className="flex justify-between items-center text-[11px] border-b border-[#2C3E35]/40 py-1">
+                        <span className="text-gray-400">#{idx + 1} {pos}</span>
+                        <span className="text-white font-bold">{card ? card.name : 'VACÍO'}</span>
+                        <span className="text-[#C5A059]">{card ? `${card.overall} OVR` : '--'}</span>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             )}
           </div>
         </div>
+
+        {/* RIVAL CPU (AWAY) */}
+        <div className="bg-[#0A0D0F] border-2 border-[#2C3E35] p-5 rounded shadow-2xl flex flex-col justify-between">
+          <div>
+            <span className="text-xs text-gray-400 uppercase block mb-1">EQUIPO VISITANTE</span>
+            <h3 className="font-sports text-3xl text-[#C5A059] uppercase border-b border-[#2C3E35] pb-2 mb-4">
+              {gameConfig?.rival?.name || 'CHARROS'} ({gameConfig?.rival?.city || 'JALISCO'})
+            </h3>
+
+            <div className="bg-[#121619] p-4 border border-[#2C3E35] rounded text-center space-y-3">
+              <div 
+                className="w-20 h-20 rounded-full mx-auto flex items-center justify-center font-sports text-3xl text-white border-2 border-white/20 shadow-xl"
+                style={{ backgroundColor: gameConfig?.rival?.color || '#002B66' }}
+              >
+                {gameConfig?.rival?.badge || 'JAL'}
+              </div>
+
+              <div>
+                <span className="text-xs text-gray-400 block font-mono">FRANQUICIA CPU</span>
+                <h4 className="font-sports text-2xl text-white">{gameConfig?.rival?.name}</h4>
+              </div>
+
+              <div className="flex justify-center gap-4 text-xs font-mono pt-2 border-t border-[#2C3E35]">
+                <div>
+                  <span className="text-gray-400 block text-[9px]">OVERALL</span>
+                  <span className="text-[#C5A059] font-bold text-lg font-sports">{gameConfig?.rival?.ovr || 80}</span>
+                </div>
+                <div>
+                  <span className="text-gray-400 block text-[9px]">DIFICULTAD</span>
+                  <span className="text-[#C5A059] font-bold text-lg font-sports">{gameConfig?.difficulty || 'MEDIUM'}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      {/* MENSAJE DE ERROR */}
+      {error && (
+        <div className="max-w-xl mx-auto w-full bg-red-950/80 border border-red-500 p-3 rounded text-center text-red-300 text-xs mb-3 font-mono">
+          ⚠️ {error}
+        </div>
       )}
 
-      {/* Botón de Confirmación */}
-      <div className="w-full max-w-4xl mt-6">
+      {/* BOTÓN INICIAR PARTIDO */}
+      <div className="max-w-md mx-auto w-full">
         <button
-          onClick={handleStartGame}
-          disabled={submitting || !selectedPitcher || lineup.length < 9}
-          onMouseEnter={() => soundFx.playCardSelect()}
-          className="w-full bg-[#1A3323] hover:bg-[#2D5A3F] disabled:opacity-40 disabled:cursor-not-allowed text-[#F7F5F0] border-2 border-[#C5A059] py-4 font-sports text-3xl tracking-widest transition-all active:scale-95 shadow-2xl"
+          onClick={handleConfirmAndPlay}
+          disabled={creatingGame || loading}
+          className="w-full bg-[#1A3323] hover:bg-[#2D5A3F] border-2 border-[#C5A059] text-[#C5A059] py-4 font-sports text-3xl tracking-widest transition-all active:scale-95 shadow-2xl cursor-pointer disabled:opacity-50 uppercase"
         >
-          {submitting ? 'CREANDO PARTIDA...' : 'CONFIRMAR ROSTER Y SALIR AL CAMPO'}
+          {creatingGame ? 'CARGANDO ESTADIO...' : '⚡ ENTRAR AL CAMPO DE JUEGO'}
         </button>
-        {lineup.length < 9 && !loading && (
-          <p className="font-mono text-[10px] text-[#C5A059] text-center mt-2">
-            Selecciona {9 - lineup.length} bateador(es) más para completar el lineup.
-          </p>
-        )}
+      </div>
+
+      <div className="text-[10px] text-[#2C3E35] uppercase tracking-widest text-center mt-4">
+        KOSHIEN MATCHMAKING ENGINE • 2026
       </div>
     </div>
   );

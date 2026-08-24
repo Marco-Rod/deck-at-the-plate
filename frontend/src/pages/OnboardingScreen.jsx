@@ -1,14 +1,23 @@
 import React, { useState, useMemo } from 'react';
-import { shop } from '../utils/api';
+import { user as userApi, shop as shopApi } from '../utils/api';
 import { PlayerCard } from '../components/cards/PlayerCard';
+import { soundFx } from '../utils/audioManager';
 
-const TEAMS = [
+const PRESET_COLORS = [
+  { primary: '#C5A059', secondary: '#1A3323', name: 'Dorado / Verde Tactical' },
+  { primary: '#005A9C', secondary: '#FFFFFF', name: 'Azul Real / Blanco' },
+  { primary: '#132448', secondary: '#BD3039', name: 'Marina / Rojo' },
+  { primary: '#E3D4AD', secondary: '#0C2340', name: 'Crema / Azul Noche' },
+];
+
+const FRANCHISES = [
   {
     id: 'LAD',
     name: 'Los Angeles Dodgers',
     city: 'Los Angeles',
     color: '#005A9C',
     badge: 'LAD',
+    description: 'Soberbios en Pitcheo & Bateo',
   },
   {
     id: 'NYY',
@@ -16,6 +25,7 @@ const TEAMS = [
     city: 'New York',
     color: '#0C2340',
     badge: 'NYY',
+    description: 'Poder Ofensivo Devastador',
   },
 ];
 
@@ -28,24 +38,66 @@ const RARITY_WEIGHTS = {
 };
 
 export default function OnboardingScreen({ userId, onComplete }) {
-  const [step, setStep] = useState('SELECT_TEAM'); // 'SELECT_TEAM' | 'PACK_UNBOX' | 'SHOW_CARDS'
-  const [selectedTeam, setSelectedTeam] = useState('LAD');
+  // Pasos: 'CREATE_TEAM' -> 'SELECT_FRANCHISE' -> 'PACK_UNBOX' -> 'SHOW_CARDS'
+  const [step, setStep] = useState('CREATE_TEAM');
   const [loading, setLoading] = useState(false);
-  const [claimedCards, setClaimedCards] = useState([]);
   const [error, setError] = useState(null);
-  
-  // Estado para controlar la tarjeta seleccionada y mostrar el modal
+
+  // Estado del Formulario de Club
+  const [teamForm, setTeamForm] = useState({
+    name: '',
+    short_name: '',
+    city: 'Zapopan',
+    stadium_name: 'Estadio Municipal',
+    primary_color: '#C5A059',
+    secondary_color: '#1A3323',
+    logo_id: 'logo_baseball_01',
+  });
+
+  const [selectedFranchise, setSelectedFranchise] = useState('LAD');
+  const [claimedCards, setClaimedCards] = useState([]);
   const [selectedCard, setSelectedCard] = useState(null);
 
-  const handleConfirmTeam = async () => {
-    setLoading(true);
-    setError(null);
+  // 1. Manejar Creación del Club
+  const handleCreateTeam = async (e) => {
+    e.preventDefault();
+    if (!teamForm.name || !teamForm.short_name) {
+      setError('Por favor ingresa el nombre y las siglas de tu club.');
+      return;
+    }
+
     try {
-      const response = await shop.claimStarterPack(userId, selectedTeam);
+      setLoading(true);
+      setError(null);
+      if (soundFx?.playClick) soundFx.playClick();
+
+      await userApi.createTeam(userId, {
+        ...teamForm,
+        base_franchise: selectedFranchise,
+      });
+
+      setStep('SELECT_FRANCHISE');
+    } catch (err) {
+      console.error('Error al fundar el club:', err);
+      setError(err.message || 'No se pudo crear el club.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 2. Manejar Reclamo de Sobre Inicial
+  const handleClaimStarterPack = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      if (soundFx?.playPackOpen) soundFx.playPackOpen();
+
+      const response = await shopApi.claimStarterPack(userId, selectedFranchise);
       setClaimedCards(response.cards || []);
       setStep('PACK_UNBOX');
     } catch (err) {
-      setError(err.message || 'Error al asignar el sobre inicial.');
+      console.error('Error al reclamar el sobre:', err);
+      setError(err.message || 'Error al obtener el sobre inicial.');
     } finally {
       setLoading(false);
     }
@@ -67,25 +119,132 @@ export default function OnboardingScreen({ userId, onComplete }) {
   return (
     <div className="min-h-screen bg-[#0A0D0F] text-[#E6DFD3] flex flex-col items-center justify-center p-6 font-mono select-none">
       
-      {/* PASO 1: SELECCIÓN DE FRANQUICIA */}
-      {step === 'SELECT_TEAM' && (
-        <div className="max-w-xl w-full border-2 border-[#C5A059]/50 p-8 bg-[#121619] shadow-2xl text-center">
-          <span className="text-xs text-[#C5A059] uppercase tracking-widest block mb-2">
-            ★ Funda tu Club ★
-          </span>
-          <h2 className="text-3xl font-extrabold text-white uppercase tracking-wider mb-6 font-sports">
-            Selecciona tu Franquicia
-          </h2>
+      {/* PASO 1: FORMULARIO DE FUNDACIÓN DE CLUB */}
+      {step === 'CREATE_TEAM' && (
+        <div className="max-w-xl w-full border-2 border-[#C5A059]/50 p-8 bg-[#121619] shadow-2xl">
+          <div className="text-center mb-6 border-b border-[#2C3E35] pb-4">
+            <span className="text-xs text-[#C5A059] uppercase tracking-widest block mb-1">
+              ★ Paso 1 de 2 ★
+            </span>
+            <h2 className="text-3xl font-extrabold text-white uppercase tracking-wider font-sports">
+              Funda tu Club de Béisbol
+            </h2>
+            <p className="text-xs text-gray-400 mt-1">
+              Define la identidad de tu franquicia personalizada para competir.
+            </p>
+          </div>
 
-          <div className="grid grid-cols-2 gap-4 mb-8">
-            {TEAMS.map((team) => (
+          {error && <p className="text-red-400 text-xs mb-4 text-center">{error}</p>}
+
+          <form onSubmit={handleCreateTeam} className="space-y-4">
+            <div className="grid grid-cols-3 gap-3">
+              <div className="col-span-2">
+                <label className="text-[10px] text-[#C5A059] uppercase block mb-1">Nombre del Club</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ej. Tigres"
+                  value={teamForm.name}
+                  onChange={(e) => setTeamForm({ ...teamForm, name: e.target.value })}
+                  className="w-full bg-[#0A0D0F] border border-[#2C3E35] focus:border-[#C5A059] p-2 text-sm text-white outline-none rounded"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] text-[#C5A059] uppercase block mb-1">Siglas (3)</label>
+                <input
+                  type="text"
+                  required
+                  maxLength={3}
+                  placeholder="TIG"
+                  value={teamForm.short_name}
+                  onChange={(e) => setTeamForm({ ...teamForm, short_name: e.target.value.toUpperCase() })}
+                  className="w-full bg-[#0A0D0F] border border-[#2C3E35] focus:border-[#C5A059] p-2 text-sm text-white uppercase text-center outline-none rounded"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[10px] text-[#C5A059] uppercase block mb-1">Ciudad / Estado</label>
+                <input
+                  type="text"
+                  value={teamForm.city}
+                  onChange={(e) => setTeamForm({ ...teamForm, city: e.target.value })}
+                  className="w-full bg-[#0A0D0F] border border-[#2C3E35] focus:border-[#C5A059] p-2 text-sm text-white outline-none rounded"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] text-[#C5A059] uppercase block mb-1">Estadio</label>
+                <input
+                  type="text"
+                  value={teamForm.stadium_name}
+                  onChange={(e) => setTeamForm({ ...teamForm, stadium_name: e.target.value })}
+                  className="w-full bg-[#0A0D0F] border border-[#2C3E35] focus:border-[#C5A059] p-2 text-sm text-white outline-none rounded"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="text-[10px] text-[#C5A059] uppercase block mb-2">Paleta de Colores del Club</label>
+              <div className="grid grid-cols-2 gap-2">
+                {PRESET_COLORS.map((color, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => setTeamForm({
+                      ...teamForm,
+                      primary_color: color.primary,
+                      secondary_color: color.secondary,
+                    })}
+                    className={`p-2 border flex items-center justify-between text-left rounded transition-all cursor-pointer ${
+                      teamForm.primary_color === color.primary
+                        ? 'border-[#C5A059] bg-[#1A3323]'
+                        : 'border-[#2C3E35] bg-[#0A0D0F]'
+                    }`}
+                  >
+                    <span className="text-[10px] text-gray-300">{color.name}</span>
+                    <div className="flex gap-1">
+                      <div className="w-4 h-4 rounded-full border border-white/20" style={{ backgroundColor: color.primary }} />
+                      <div className="w-4 h-4 rounded-full border border-white/20" style={{ backgroundColor: color.secondary }} />
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full mt-4 bg-[#1A3323] hover:bg-[#2D5A3F] border-2 border-[#C5A059] text-[#F7F5F0] font-sports text-2xl tracking-widest uppercase transition-all cursor-pointer disabled:opacity-50 py-3"
+            >
+              {loading ? 'Fundando Club...' : 'Confirmar e Ir a Franquicia ➔'}
+            </button>
+          </form>
+        </div>
+      )}
+
+      {/* PASO 2: SELECCIÓN DE FRANQUICIA BASE Y SOBRE */}
+      {step === 'SELECT_FRANCHISE' && (
+        <div className="max-w-xl w-full border-2 border-[#C5A059]/50 p-8 bg-[#121619] shadow-2xl text-center">
+          <span className="text-xs text-[#C5A059] uppercase tracking-widest block mb-1">
+            ★ Paso 2 de 2 ★
+          </span>
+          <h2 className="text-3xl font-extrabold text-white uppercase tracking-wider mb-2 font-sports">
+            Selecciona tu Franquicia Base
+          </h2>
+          <p className="text-xs text-gray-400 mb-6">
+            Tu club <span className="text-[#C5A059] font-bold">"{teamForm.name}"</span> recibirá su sobre inicial con jugadores de este equipo.
+          </p>
+
+          <div className="grid grid-cols-2 gap-4 mb-6">
+            {FRANCHISES.map((team) => (
               <button
                 key={team.id}
                 type="button"
-                onClick={() => setSelectedTeam(team.id)}
-                className={`p-6 border-2 transition-all flex flex-col items-center gap-3 cursor-pointer ${
-                  selectedTeam === team.id
-                    ? 'border-[#C5A059] bg-[#1A2228] scale-105 shadow-[0_0_20px_rgba(197,160,89,0.3)]'
+                onClick={() => setSelectedFranchise(team.id)}
+                className={`p-5 border-2 transition-all flex flex-col items-center gap-2 cursor-pointer rounded ${
+                  selectedFranchise === team.id
+                    ? 'border-[#C5A059] bg-[#1A3323] scale-105 shadow-[0_0_20px_rgba(197,160,89,0.3)]'
                     : 'border-[#2C3E35] bg-[#0A0D0F] opacity-60 hover:opacity-100'
                 }`}
               >
@@ -95,7 +254,8 @@ export default function OnboardingScreen({ userId, onComplete }) {
                 >
                   {team.badge}
                 </div>
-                <span className="font-bold text-sm text-white">{team.name}</span>
+                <span className="font-bold text-sm text-white uppercase font-sports">{team.name}</span>
+                <span className="text-[10px] text-gray-400">{team.description}</span>
               </button>
             ))}
           </div>
@@ -105,22 +265,22 @@ export default function OnboardingScreen({ userId, onComplete }) {
           <button
             type="button"
             disabled={loading}
-            onClick={handleConfirmTeam}
+            onClick={handleClaimStarterPack}
             className="w-full py-4 bg-[#1A3323] hover:bg-[#2D5A3F] border-2 border-[#C5A059] text-[#F7F5F0] font-sports text-2xl tracking-widest uppercase transition-all cursor-pointer disabled:opacity-50"
           >
-            {loading ? 'Asignando Mazo...' : 'Confirmar y Reclamar Sobre'}
+            {loading ? 'Asignando Mazo...' : '⚡ Confirmar y Reclamar Sobre'}
           </button>
         </div>
       )}
 
-      {/* PASO 2: ANIMACIÓN INTERACTIVA DEL SOBRE */}
+      {/* PASO 3: ANIMACIÓN INTERACTIVA DEL SOBRE */}
       {step === 'PACK_UNBOX' && (
         <div className="text-center flex flex-col items-center justify-center gap-4">
           <span className="text-xs text-[#C5A059] uppercase tracking-widest">
             ¡Bienvenido a la Liga!
           </span>
           <h2 className="text-3xl font-extrabold text-white uppercase tracking-wide font-sports">
-            Sobre de Bienvenida Concedido
+            Sobre de Bienvenida Concedido a {teamForm.name || 'tu Club'}
           </h2>
 
           <button
@@ -145,7 +305,7 @@ export default function OnboardingScreen({ userId, onComplete }) {
         </div>
       )}
 
-      {/* PASO 3: REVELACIÓN DEL MAZO ORDENADO */}
+      {/* PASO 4: REVELACIÓN DEL MAZO ORDENADO */}
       {step === 'SHOW_CARDS' && (
         <div className="w-full max-w-6xl flex flex-col items-center gap-6">
           <div className="text-center">
@@ -189,7 +349,6 @@ export default function OnboardingScreen({ userId, onComplete }) {
             onClick={(e) => e.stopPropagation()}
             className="bg-[#121619] border-2 border-[#C5A059] p-6 max-w-md w-full shadow-[0_0_50px_rgba(197,160,89,0.3)] relative flex flex-col items-center gap-4"
           >
-            {/* Botón cerrar */}
             <button
               type="button"
               onClick={() => setSelectedCard(null)}
@@ -202,12 +361,10 @@ export default function OnboardingScreen({ userId, onComplete }) {
               ★ Detalle del Atleta ★
             </span>
 
-            {/* Carta en tamaño grande */}
             <div className="scale-110 my-2">
               <PlayerCard card={selectedCard} player={selectedCard} cardData={selectedCard} />
             </div>
 
-            {/* Información y Atributos detallados */}
             <div className="w-full bg-[#0A0D0F] border border-[#2C3E35] p-4 text-xs font-mono space-y-2 mt-2">
               <div className="flex justify-between border-b border-[#2C3E35] pb-1">
                 <span className="text-gray-400">POSICIÓN:</span>
@@ -222,7 +379,6 @@ export default function OnboardingScreen({ userId, onComplete }) {
                 <span className="text-white font-bold">{selectedCard.team_id}</span>
               </div>
 
-              {/* Atributos de Bateo */}
               <div className="grid grid-cols-2 gap-2 pt-2">
                 <div className="bg-[#121619] p-2 border border-[#2C3E35]">
                   <span className="text-gray-400 block text-[10px]">PODER (PWR)</span>
@@ -234,7 +390,6 @@ export default function OnboardingScreen({ userId, onComplete }) {
                 </div>
               </div>
 
-              {/* Atributos de Picheo (si aplica) */}
               {(selectedCard.position === 'SP' || selectedCard.position === 'RP' || selectedCard.position === 'CP' || selectedCard.is_two_way) && (
                 <>
                   <div className="grid grid-cols-3 gap-2 pt-1">
@@ -252,7 +407,6 @@ export default function OnboardingScreen({ userId, onComplete }) {
                     </div>
                   </div>
 
-                  {/* Repertorio de Pitcheo */}
                   {selectedCard.repertoire && selectedCard.repertoire.length > 0 && (
                     <div className="pt-2">
                       <span className="text-gray-400 block text-[10px] mb-1">REPERTORIO DE LANZAMIENTOS:</span>

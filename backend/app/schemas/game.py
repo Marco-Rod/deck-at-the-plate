@@ -5,15 +5,15 @@ from typing import List, Optional, Dict, Any
 # Crear sesión de juego
 class CreateGameRequest(BaseModel):
     home_user_id: str
-    away_user_id: Optional[str] = "CPU_BOT"  # Opcional en PvE
+    away_user_id: Optional[str] = "CPU_BOT"
     game_mode: str = Field("PVP", description="'PVP' o 'PVE'")
     difficulty: Optional[str] = Field("MEDIUM", description="'EASY', 'MEDIUM' o 'HARD'")
-    home_pitcher_id: str
-    away_pitcher_id: str
-    home_lineup: List[str] = Field(..., min_items=9, max_items=9)
-    away_lineup: List[str] = Field(..., min_items=9, max_items=9)
-    home_tactics_deck: List[str] = Field(..., min_items=5, max_items=15)
-    away_tactics_deck: List[str] = Field(..., min_items=5, max_items=15)
+    home_pitcher_id: Optional[str] = None
+    away_pitcher_id: Optional[str] = None
+    home_lineup: Optional[List[str]] = Field(default_factory=list)
+    away_lineup: Optional[List[str]] = Field(default_factory=list)
+    home_tactics_deck: Optional[List[str]] = Field(default_factory=list)
+    away_tactics_deck: Optional[List[str]] = Field(default_factory=list)
 
 # Respuesta del estado de la partida
 class GameSessionResponse(BaseModel):

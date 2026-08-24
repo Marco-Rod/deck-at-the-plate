@@ -7,10 +7,10 @@
  *  - Base URL configurable desde la variable de entorno VITE_API_URL.
  *  - Adjunta automáticamente el JWT Bearer token desde localStorage en cada request.
  *  - Lanza errores descriptivos cuando el servidor retorna status >= 400.
- *  - Expone funciones organizadas por dominio: auth, games, user, cards, shop.
+ *  - Expone funciones organizadas por dominio: auth, games, user, cards, teams, shop.
  *
  * Uso:
- *  import { auth, games, user } from '../utils/api';
+ *  import { auth, games, user, teams } from '../utils/api';
  *  const { access_token } = await auth.login('usuario', 'contraseña');
  *  const game = await games.create({ ... });
  */
@@ -220,7 +220,7 @@ export const games = {
 };
 
 // ---------------------------------------------------------------------------
-// user — Perfil, inventario y alineación
+// user — Perfil, inventario, alineación y club
 // ---------------------------------------------------------------------------
 
 export const user = {
@@ -260,7 +260,34 @@ export const user = {
         slots: lineupData,
       }),
     }),
+
+  /**
+   * Registra un nuevo club personalizado para el usuario.
+   * @param {string} userId
+   * @param {Object} teamData
+   * @returns {Promise<Object>}
+   */
+  createTeam: (userId, teamData) =>
+    _request(`/api/v1/user/${userId}/team`, {
+      method: 'POST',
+      body: JSON.stringify(teamData),
+    }),
+
+  /**
+   * Obtiene los datos del club personalizado del usuario.
+   * @param {string} userId
+   * @returns {Promise<Object>}
+   */
+  getTeam: (userId) => _request(`/api/v1/user/${userId}/team`),
+
+  /**
+   * Obtiene las métricas calculadas del equipo del usuario (Overall, Bateo, Pitcheo).
+   * @param {string} userId - ID del usuario.
+   * @returns {Promise<{overall: number, batOvr: number, pitOvr: number}>}
+   */
+  getTeamStats: (userId) => _request(`/api/v1/user/${userId}/team-stats`),
 };
+
 // ---------------------------------------------------------------------------
 // cards — Catálogo de equipos y cartas
 // ---------------------------------------------------------------------------
@@ -285,6 +312,18 @@ export const cards = {
    * @returns {PlayerCardSchema}
    */
   getCard: (cardId) => _request(`/api/v1/cards/${cardId}`),
+};
+
+// ---------------------------------------------------------------------------
+// teams — Equipos CPU y rivales
+// ---------------------------------------------------------------------------
+
+export const teams = {
+  /**
+   * Obtiene la lista de equipos CPU disponibles con sus métricas (OVR, BAT, PIT).
+   * @returns {Promise<Array>}
+   */
+  getCpuTeams: () => _request('/api/v1/teams/cpu'),
 };
 
 // ---------------------------------------------------------------------------

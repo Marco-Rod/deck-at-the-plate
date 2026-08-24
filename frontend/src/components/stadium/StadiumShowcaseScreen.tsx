@@ -1,24 +1,12 @@
-/**
- * StadiumShowcaseScreen — Pantalla principal de juego en tiempo real
- * ===================================================================
- * Compone todos los subcomponentes del estadio y los conecta al backend
- * mediante el hook useStadiumSocket (WebSocket + REST).
- *
- * Props:
- *   gameId  — ID real de la partida creada en el backend (ej. "game_a1b2c3d4").
- *             Se pasa desde App.jsx tras confirmar el roster.
- *   userId  — ID del usuario autenticado. El servidor lo usa para aplicar
- *             el Fog of War (ocultar el pitch al bateador).
- *   onBack  — Callback para volver al Lobby.
- */
-
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Scoreboard } from './Scoreboard';
 import { PitchZoneGrid } from './PitchZoneGrid';
 import { PlayerCard } from './PlayerCard';
 import { TacticalHand } from './TacticalHand';
 import { PlayResultOverlay } from './PlayResultOverlay';
+import { GameOverModal } from './GameOverModal'; // <-- Importar el nuevo modal
 import { useStadiumSocket } from '../../hooks/useStadiumSocket';
+import { cards as cardsApi, user as userApi } from '../../utils/api';
 import {
   PitchType,
   PlayerData,
@@ -27,9 +15,7 @@ import {
 } from '../../types/stadium';
 
 interface StadiumShowcaseScreenProps {
-  /** ID real de la partida (ej. "game_a1b2c3d4"). Requerido para WS y REST. */
   gameId: string | null;
-  /** ID del usuario autenticado. Determina el Fog of War en el servidor. */
   userId: string;
   onBack: () => void;
 }
@@ -39,45 +25,76 @@ export const StadiumShowcaseScreen: React.FC<StadiumShowcaseScreenProps> = ({
   userId,
   onBack,
 }) => {
-  const [role, setRole] = useState<PlayerRole>('PITCHER');
   const [selectedZone, setSelectedZone] = useState<number>(5);
-  const [selectedPitch, setSelectedPitch] = useState<PitchType>('FF');
+  const [selectedPitch, setSelectedPitch] = useState<PitchType>('4-SEAM');
+  const [selectedSwing, setSelectedSwing] = useState<'NORMAL' | 'POWER' | 'TAKE' | 'BUNT'>('NORMAL');
   const [selectedTacticalId, setSelectedTacticalId] = useState<string | null>(null);
 
-  // Hook de comunicación con el backend (WS + REST)
+  const [pitcherCard, setPitcherCard] = useState<PlayerData | null>(null);
+  const [batterCard, setBatterCard] = useState<PlayerData | null>(null);
+  const [userTeam, setUserTeam] = useState<any>(null);
+
   const { gameState, lastResult, hasPitched, isConnected, sendPitch, sendSwing, sendTactic } =
     useStadiumSocket(gameId ?? '', userId);
 
-  // Datos demo del pitcher (se reemplazarán con datos reales del gameState)
-  const pitcherCard: PlayerData = {
-    id: 'p1',
-    name: 'Y. YAMAMOTO',
-    number: '18',
-    overall: 91,
-    position: 'SP',
-    photo: 'https://a.espncdn.com/combiner/i?img=/i/headshots/mlb/players/full/4982607.png&w=350&h=254',
-    stats: [
-      { label: 'VEL', val: 96 },
-      { label: 'CTL', val: 92 },
-      { label: 'MOV', val: 88 },
-      { label: 'STA', val: 85 },
-    ],
-  };
+  const role: PlayerRole = gameState?.isTopInning ? 'PITCHER' : 'BATTER';
 
-  const batterCard: PlayerData = {
-    id: 'b1',
-    name: 'AARON JUDGE',
-    number: '99',
-    overall: 96,
-    position: 'CF',
-    photo: 'https://a.espncdn.com/combiner/i?img=/i/headshots/mlb/players/full/33192.png&w=350&h=254',
-    stats: [
-      { label: 'PWR', val: 99 },
-      { label: 'CON', val: 86 },
-      { label: 'VIS', val: 82 },
-      { label: 'SPD', val: 74 },
-    ],
-  };
+  useEffect(() => {
+    if (!userId) return;
+    userApi.getTeam(userId).then(setUserTeam).catch(() => null);
+  }, [userId]);
+
+  useEffect(() => {
+    if (gameState?.activePitcherId) {
+      cardsApi.getCard(gameState.activePitcherId)
+        .then((c: any) => {
+          if (c) {
+            setPitcherCard({
+              id: c.id,
+              name: c.name,
+              number: c.number || '17',
+              overall: c.overall || 99,
+              position: c.position || 'SP',
+              photo: c.photo,
+              repertoire: c.repertoire || [],
+              stats: [
+                { label: 'VEL', val: c.velocity || 98 },
+                { label: 'CTL', val: c.control || 88 },
+                { label: 'MOV', val: c.movement || 92 },
+                { label: 'STA', val: c.stamina || 80 },
+              ]
+            });
+            if (c.repertoire && c.repertoire.length > 0) {
+              setSelectedPitch(c.repertoire[0].pitch_type);
+            }
+          }
+        })
+        .catch(() => null);
+    }
+
+    if (gameState?.activeBatterId) {
+      cardsApi.getCard(gameState.activeBatterId)
+        .then((c: any) => {
+          if (c) {
+            setBatterCard({
+              id: c.id,
+              name: c.name,
+              number: c.number || '17',
+              overall: c.overall || 99,
+              position: c.position || 'DH',
+              photo: c.photo,
+              stats: [
+                { label: 'PWR', val: c.power || 98 },
+                { label: 'CON', val: c.contact || 92 },
+                { label: 'VIS', val: c.vision || 80 },
+                { label: 'SPD', val: c.speed || 80 },
+              ]
+            });
+          }
+        })
+        .catch(() => null);
+    }
+  }, [gameState?.activePitcherId, gameState?.activeBatterId]);
 
   const tacticalHand: TacticalCard[] = [
     {
@@ -130,35 +147,40 @@ export const StadiumShowcaseScreen: React.FC<StadiumShowcaseScreenProps> = ({
         await sendTactic(selectedTacticalId, 'BATTER');
         setSelectedTacticalId(null);
       }
-      await sendSwing('NORMAL', selectedZone, selectedPitch);
+      await sendSwing(selectedSwing, selectedZone, selectedPitch);
     }
   };
 
   return (
     <div className="min-h-screen w-full flex flex-col justify-between p-4 bg-[#121619] text-[#F7F5F0] relative overflow-hidden select-none">
+      
+      {/* MODAL DE FIN DE PARTIDO */}
+      {gameState?.isGameOver && (
+        <GameOverModal
+          winnerMessage={gameState.winnerMessage}
+          homeScore={gameState.homeScore}
+          awayScore={gameState.awayScore}
+          homeTeamName={userTeam?.short_name || 'HOME'}
+          awayTeamName="CPU"
+          onReturnToLobby={onBack}
+        />
+      )}
+
       {/* Header */}
       <header className="w-full flex justify-between items-center border-b-2 border-[#C5A059]/40 pb-3 mb-3 z-30">
         <div>
           <h2 className="font-sports text-3xl text-[#F7F5F0] uppercase tracking-wider leading-none">
-            CAMPO DE JUEGO
+            {userTeam ? `${userTeam.name} VS CPU` : 'CAMPO DE JUEGO'}
           </h2>
           <span className={`font-mono text-[10px] ${isConnected ? 'text-emerald-400' : 'text-red-400'}`}>
             {isConnected ? '● CONECTADO EN VIVO' : '○ DESCONECTADO'}
           </span>
         </div>
         <div className="flex items-center gap-3">
-          {/* Selector de rol temporal — en PvP real el rol lo determina el servidor */}
-          <button
-            type="button"
-            onClick={() => setRole(r => r === 'PITCHER' ? 'BATTER' : 'PITCHER')}
-            className="bg-[#1A3323] border border-[#C5A059] px-3 py-1.5 font-mono text-xs text-[#C5A059]"
-          >
-            ROL: {role}
-          </button>
           <button
             type="button"
             onClick={onBack}
-            className="bg-[#0A0D0F] border border-[#C5A059] px-4 py-2 font-mono text-xs text-[#C5A059] font-bold"
+            className="bg-[#0A0D0F] border border-[#C5A059] px-4 py-2 font-mono text-xs text-[#C5A059] font-bold cursor-pointer hover:bg-[#1A3323]"
           >
             ⚙️ LOBBY
           </button>
@@ -166,23 +188,32 @@ export const StadiumShowcaseScreen: React.FC<StadiumShowcaseScreenProps> = ({
       </header>
 
       {/* Marcador */}
-      {gameState && <Scoreboard gameState={gameState} role={role} />}
+      {gameState && (
+        <Scoreboard 
+          gameState={gameState} 
+          role={role} 
+          homeTeamName={userTeam?.short_name || 'HOME'}
+          awayTeamName="CPU"
+        />
+      )}
 
       {/* Campo Principal */}
       <main className="w-full max-w-6xl mx-auto border-2 border-[#C5A059]/50 p-6 relative flex justify-between items-center min-h-[500px] shadow-2xl overflow-hidden rounded-sm bg-[#0A0D0F]">
         <PlayerCard player={pitcherCard} role="PITCHER" />
+        
         <PitchZoneGrid
           role={role}
           selectedZone={selectedZone}
           selectedPitch={selectedPitch}
           onSelectZone={setSelectedZone}
           onSelectPitch={setSelectedPitch}
+          repertoire={pitcherCard?.repertoire}
         />
+        
         <PlayerCard player={batterCard} role="BATTER" />
 
-        {/* Aviso visible solo para el bateador cuando el pitcher ya pichó */}
         {hasPitched && role === 'BATTER' && (
-          <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-[#C5A059] text-[#0A0D0F] px-4 py-1 font-mono text-xs font-bold z-20">
+          <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-[#C5A059] text-[#0A0D0F] px-4 py-1 font-mono text-xs font-bold z-20 animate-bounce">
             ¡El lanzador ya pichó! Selecciona tu swing.
           </div>
         )}

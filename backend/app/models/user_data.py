@@ -18,6 +18,7 @@ class User(Base):
     favorite_team_id = Column(String(3), ForeignKey("teams.id"), nullable=True)
     has_completed_onboarding = Column(Boolean, default=False)
     lineups = relationship("UserLineup", back_populates="user", cascade="all, delete-orphan")
+    team = relationship("UserTeam", back_populates="user", uselist=False)
 
 class UserWallet(Base):
     __tablename__ = "user_wallets"
@@ -57,3 +58,30 @@ class UserLineup(Base):
 
     # Relación bidireccional con el usuario
     user = relationship("User", back_populates="lineups")
+
+
+class UserTeam(Base):
+    __tablename__ = "user_teams"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, unique=True, index=True)
+    
+    # Identidad del Club Personalizado
+    name = Column(String(50), nullable=False)        # Ej. "Tigres"
+    short_name = Column(String(3), nullable=False)   # Ej. "TIG"
+    city = Column(String(50), default="Jalisco")     # Ej. "Zapopan"
+    stadium_name = Column(String(50), default="Estadio Municipal")
+    
+    # Personalización Estética
+    primary_color = Column(String(7), default="#C5A059")   # Hex
+    secondary_color = Column(String(7), default="#1A3323") # Hex
+    logo_id = Column(String(50), default="logo_baseball_01")
+    
+    # Franquicia MLB seleccionada para el sobre base (Dodgers, Yankees, etc.)
+    base_franchise = Column(String(10), nullable=False, default="LAD")
+    
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relación
+    user = relationship("User", back_populates="team")

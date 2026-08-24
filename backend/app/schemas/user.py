@@ -1,5 +1,5 @@
 from pydantic import BaseModel, ConfigDict, Field
-from typing import List
+from typing import List, Optional
 from datetime import datetime
 from app.schemas.cards import PlayerCardSchema
 
@@ -38,9 +38,37 @@ class RegisterRequest(BaseModel):
     password: str = Field(..., min_length=6, description="Contraseña (mínimo 6 caracteres)")
     has_completed_onboarding: bool = False
 
+
 class LoginResponse(BaseModel):
     """Respuesta del endpoint de login con el JWT y datos básicos del usuario."""
     access_token: str
     token_type: str = "bearer"
     user_id: str
     username: str
+
+
+class CreateTeamRequestSchema(BaseModel):
+    name: str                  # Ej. "Tigres de Seattle"
+    short_name: str            # Ej. "TIG"
+    city: Optional[str] = "Seattle"
+    stadium_name: Optional[str] = "Estadio Municipal"
+    primary_color: Optional[str] = "#C5A059"
+    secondary_color: Optional[str] = "#1A3323"
+    logo_id: Optional[str] = "logo_baseball_01"
+    base_franchise: str        # Ej. "LAD" o "NYY"
+
+
+class UserTeamResponseSchema(BaseModel):
+    id: int
+    user_id: str
+    name: str
+    short_name: str
+    city: str
+    stadium_name: str
+    primary_color: str
+    secondary_color: str
+    logo_id: str
+    base_franchise: str
+
+    class Config:
+        from_attributes = True

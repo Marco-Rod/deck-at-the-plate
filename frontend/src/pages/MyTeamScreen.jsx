@@ -32,11 +32,10 @@ const FIELD_SECTORS = [
   },
 ];
 
-const ALL_SLOTS = FIELD_SECTORS.flatMap(s => s.slots);
-
 export const MyTeamScreen = ({ user, onBack }) => {
   const { t } = useTranslation();
   const [inventory, setInventory] = useState([]);
+  const [userTeam, setUserTeam] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [savingStatus, setSavingStatus] = useState(null);
@@ -44,29 +43,29 @@ export const MyTeamScreen = ({ user, onBack }) => {
   const [fieldLineup, setFieldLineup] = useState({});
   const [activeSlot, setActiveSlot] = useState('P');
 
-  // Cargar inventario y lineup remoto/local
+  // Cargar inventario, lineup y datos del club
   useEffect(() => {
     if (!user?.userId) return;
 
     setLoading(true);
+    
+    // 1. Obtener la identidad del club
+    userApi.getTeam(user.userId)
+      .then(data => setUserTeam(data))
+      .catch(err => console.error("El usuario no tiene club registrado:", err));
+
+    // 2. Cargar inventario y lineup desde el Backend
     userApi.getInventory(user.userId)
       .then(async (data) => {
-        const rawInventory = (data.inventory || []).map(i => i.card).filter(Boolean);
+        const rawInventory = (data.inventory || []).map(i => i.card || i).filter(c => c && c.id);
         setInventory(rawInventory);
 
         try {
-          // 1. Intentar obtener el lineup desde la API
           const remoteLineup = await userApi.getLineup(user.userId);
           if (remoteLineup && remoteLineup.slots && Object.keys(remoteLineup.slots).length > 0) {
             setFieldLineup(remoteLineup.slots);
           } else {
-            // 2. Fallback a localStorage o autocompletado
-            const saved = localStorage.getItem(`user_lineup_${user.userId}`);
-            if (saved) {
-              setFieldLineup(JSON.parse(saved));
-            } else {
-              autoAssignLineup(rawInventory);
-            }
+            autoAssignLineup(rawInventory);
           }
         } catch {
           autoAssignLineup(rawInventory);
@@ -81,7 +80,7 @@ export const MyTeamScreen = ({ user, onBack }) => {
       .finally(() => setLoading(false));
   }, [user?.userId]);
 
-  // Persistir en backend y localStorage
+  // Persistir alineación en Backend (PostgreSQL) y localStorage
   const syncLineup = async (updatedLineup) => {
     setFieldLineup(updatedLineup);
     localStorage.setItem(`user_lineup_${user?.userId}`, JSON.stringify(updatedLineup));
@@ -179,32 +178,46 @@ export const MyTeamScreen = ({ user, onBack }) => {
   return (
     <div className="min-h-screen w-full flex flex-col justify-between p-6 bg-[#121619] text-[#F7F5F0] font-mono select-none">
       
-      {/* CABECERA SUPERIOR */}
+      {/* CABECERA SUPERIOR PERSONALIZADA DEL CLUB */}
       <div className="w-full flex justify-between items-center border-b-2 border-[#C5A059] pb-3 mb-4">
-        <div>
-          <div className="flex items-center gap-3">
-            <span className="text-xs text-[#C5A059] uppercase block font-mono">ESTRATEGIA & ALINEACIÓN DEFENSIVA</span>
-            {savingStatus && (
-              <span className="text-[10px] bg-[#1A3323] text-[#C5A059] px-2 py-0.5 border border-[#C5A059] rounded animate-pulse">
-                {savingStatus}
+        <div className="flex items-center gap-4">
+          {userTeam && (
+            <div 
+              className="w-14 h-14 rounded-full flex items-center justify-center font-sports text-xl text-white border-2 border-white/20 shadow-lg shrink-0"
+              style={{ backgroundColor: userTeam.primary_color }}
+            >
+              {userTeam.short_name}
+            </div>
+          )}
+          <div>
+            <div className="flex items-center gap-3 mb-1">
+              <span className="text-xs text-[#C5A059] uppercase block font-mono tracking-widest">
+                {userTeam ? `${userTeam.city} • ${userTeam.stadium_name}` : 'ESTRATEGIA & ALINEACIÓN'}
               </span>
-            )}
+              {savingStatus && (
+                <span className="text-[9px] bg-[#1A3323] text-[#C5A059] px-2 py-0.5 border border-[#C5A059] rounded animate-pulse">
+                  {savingStatus}
+                </span>
+              )}
+            </div>
+            <h2 className="font-sports text-4xl uppercase leading-none text-white tracking-wide">
+              {userTeam ? userTeam.name : 'MI EQUIPO'}
+            </h2>
           </div>
-          <h2 className="font-sports text-4xl uppercase leading-none">MI EQUIPO</h2>
         </div>
 
         <div className="flex items-center gap-3">
           <button
             type="button"
             onClick={() => autoAssignLineup()}
-            className="bg-[#1A3323] hover:bg-[#2D5A3F] border border-[#C5A059] text-[#C5A059] px-4 py-2 text-xs uppercase tracking-wider transition-all cursor-pointer active:scale-95 font-sports"
+            className="bg-[#1A3323] hover:bg-[#2D5A3F] border border-[#C5A059] text-[#C5A059] px-4 py-3 text-xs uppercase tracking-wider transition-all cursor-pointer active:scale-95 font-sports"
           >
             ⚡ AUTO-LINEUP ÓPTIMO
           </button>
           <button
             type="button"
             onClick={onBack}
-            className="border border-[#2C3E35] hover:border-[#C5A059] bg-[#0A0D0F] px-5 py-2 text-xs text-[#F7F5F0] transition-colors cursor-pointer font-mono"
+            className="border border-[#2C3E35] hover:border-[#C5A059] bg-[#0A0D0F] px-5 py-3 text-xs text-[#F7F5F0] transition-colors cursor-pointer font-mono"
           >
             VOLVER AL LOBBY
           </button>
@@ -214,7 +227,7 @@ export const MyTeamScreen = ({ user, onBack }) => {
       {/* VISTA PRINCIPAL (9 COLS CAMPO / 3 COLS CANDIDATOS) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 my-auto">
         
-        {/* VISTA DEL CAMPO ORGANIZADA EN SECTORES (lg:col-span-9) */}
+        {/* VISTA DEL CAMPO */}
         <div className="lg:col-span-9 bg-[#0A0D0F] border-2 border-[#2C3E35] p-6 shadow-2xl relative min-h-[520px] flex flex-col justify-around overflow-hidden">
           
           <div className="absolute inset-0 pointer-events-none flex items-center justify-center opacity-20 select-none">
@@ -290,7 +303,7 @@ export const MyTeamScreen = ({ user, onBack }) => {
           ))}
         </div>
 
-        {/* CANDIDATOS PARA LA POSICIÓN COMPACTOS (lg:col-span-3) */}
+        {/* CANDIDATOS POR POSICIÓN */}
         <div className="lg:col-span-3 bg-[#0A0D0F] border-2 border-[#2C3E35] p-3 shadow-2xl flex flex-col">
           <div className="border-b border-[#2C3E35] pb-2 mb-3">
             <span className="text-[10px] text-gray-400 block uppercase font-mono">CANDIDATOS PARA</span>

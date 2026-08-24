@@ -10,13 +10,16 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import GameSession, PlayerCardModel
+from app.models import GameSession, PlayerCardModel, UserLineup
 from app.schemas import CreateGameRequest, GameSessionResponse
 
 from app.engine.deck_manager import initialize_tactics_state
 from app.engine.fog_of_war import sanitize_state_for_player
 
 router = APIRouter(prefix="/api/v1/games", tags=["Gestión de Sesión 1v1"])
+
+# Mazos de tácticas predeterminados por defecto
+DEFAULT_TACTICS_DECK = ["t1", "t2", "t3", "t4", "t1"]
 
 @router.post("/create", response_model=GameSessionResponse, status_code=status.HTTP_201_CREATED, summary="Iniciar nueva partida 1v1")
 def create_game_session(payload: CreateGameRequest, db: Session = Depends(get_db)):
@@ -31,20 +34,56 @@ def create_game_session(payload: CreateGameRequest, db: Session = Depends(get_db
     """
     away_id = payload.away_user_id if payload.game_mode == "PVP" else "CPU_BOT"
 
-    # Validar que existan los pitchers seleccionados usando el modelo correcto
-    home_pitcher = db.query(PlayerCardModel).filter(PlayerCardModel.id == payload.home_pitcher_id).first()
-    away_pitcher = db.query(PlayerCardModel).filter(PlayerCardModel.id == payload.away_pitcher_id).first()
+    # 1. Obtener lineup del jugador local si no viene provisto
+    home_lineup_ids = payload.home_lineup
+    home_pitcher_id = payload.home_pitcher_id
 
-    if not home_pitcher or not away_pitcher:
+    if not home_lineup_ids or len(home_lineup_ids) < 9:
+        user_lineup = db.query(UserLineup).filter(
+            UserLineup.user_id == payload.home_user_id,
+            UserLineup.is_active == True
+        ).first()
+        if user_lineup and user_lineup.slots:
+            home_lineup_ids = [
+                card["id"] for slot, card in user_lineup.slots.items() 
+                if slot != "P" and isinstance(card, dict) and "id" in card
+            ][:9]
+            if "P" in user_lineup.slots and isinstance(user_lineup.slots["P"], dict):
+                home_pitcher_id = user_lineup.slots["P"]["id"]
+
+    # 2. Si es PvE y faltan datos de la CPU, rellenar automáticamente con el equipo CPU rival
+    away_lineup_ids = payload.away_lineup
+    away_pitcher_id = payload.away_pitcher_id
+
+    if payload.game_mode == "PVE":
+        # Buscar cartas asociadas al equipo CPU rival
+        cpu_team_id = payload.away_user_id if payload.away_user_id != "CPU_BOT" else "JAL"
+        cpu_cards = db.query(PlayerCardModel).filter(PlayerCardModel.team_id == cpu_team_id).all()
+        
+        if not cpu_cards:
+            cpu_cards = db.query(PlayerCardModel).all()
+
+        pitchers = [c for c in cpu_cards if c.position in ["SP", "RP", "CP"]]
+        batters = [c for c in cpu_cards if c.position not in ["SP", "RP", "CP"]]
+
+        if not away_pitcher_id and pitchers:
+            away_pitcher_id = pitchers[0].id
+        if (not away_lineup_ids or len(away_lineup_ids) < 9) and batters:
+            away_lineup_ids = [c.id for c in batters[:9]]
+            while len(away_lineup_ids) < 9 and cpu_cards:
+                away_lineup_ids.append(cpu_cards[0].id)
+
+    # Validaciones de seguridad
+    if not home_pitcher_id or not away_pitcher_id:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Uno o ambos lanzadores seleccionados no existen en el catálogo."
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Se requiere un lanzador válido para ambos equipos."
         )
 
-    tactics_state = initialize_tactics_state(
-        payload.home_tactics_deck,
-        payload.away_tactics_deck
-    )
+    home_tactics = payload.home_tactics_deck or DEFAULT_TACTICS_DECK
+    away_tactics = payload.away_tactics_deck or DEFAULT_TACTICS_DECK
+
+    tactics_state = initialize_tactics_state(home_tactics, away_tactics)
 
     game = GameSession(
         id=f"game_{uuid.uuid4().hex[:8]}",
@@ -53,18 +92,18 @@ def create_game_session(payload: CreateGameRequest, db: Session = Depends(get_db
         state_data={
             "mode": payload.game_mode,
             "difficulty": payload.difficulty,
-            "home_lineup": payload.home_lineup,
-            "away_lineup": payload.away_lineup,
+            "home_lineup": home_lineup_ids,
+            "away_lineup": away_lineup_ids,
             "home_batter_index": 0,
             "away_batter_index": 0,
             "tactics": tactics_state,
-            "active_pitcher": payload.away_pitcher_id,  # El visitante lanza primero
-            "active_batter": payload.home_lineup[0],    # El local batea primero (Baja)
+            "active_pitcher": away_pitcher_id,  # El visitante lanza primero en la Alta
+            "active_batter": home_lineup_ids[0] if home_lineup_ids else None,
             "runners": {"1b": None, "2b": None, "3b": None},
             "current_pitch": None,
             "active_tactics": {"home": None, "away": None},
             "pitch_counts": {},
-            "last_event": "Juego iniciado",
+            "last_event": "Juego iniciado vs CPU",
             "is_game_over": False,
         }
     )
@@ -85,7 +124,6 @@ def get_game_session(
     Obtiene el estado de la partida aplicando Niebla de Guerra. 
     Si el bateador consulta, no verá la zona ni el tipo de pitcheo del rival.
     """
-    
     game = db.query(GameSession).filter(GameSession.id == game_id).first()
     if not game:
         raise HTTPException(
@@ -93,7 +131,6 @@ def get_game_session(
             detail=f"No se encontró la sesión de juego '{game_id}'."
         )
 
-    # Sanitizar el estado filtrando datos ocultos
     sanitized_state = sanitize_state_for_player(
         state_data=game.state_data,
         requesting_user_id=user_id,
@@ -102,7 +139,6 @@ def get_game_session(
         is_top_inning=game.is_top_inning
     )
 
-    # Retornar una copia con el estado filtrado
     return GameSessionResponse(
         id=game.id,
         home_user_id=game.home_user_id,
