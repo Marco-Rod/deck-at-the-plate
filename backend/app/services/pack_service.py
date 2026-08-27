@@ -32,31 +32,35 @@ class PackService:
         Asigna un mazo inicial de 13 cartas optimizado:
         
         Composición:
-        - 5 jugadores inf/outf del equipo elegido (sin duplicar posiciones)
+        - 5 jugadores inf/outf del equipo elegido (diversificando posiciones)
         - 2 lanzadores del equipo elegido
-        - 6 jugadores aleatorios de otros equipos (sin duplicar posiciones)
+        - 6 jugadores aleatorios de otros equipos (cubriendo posiciones faltantes)
         
         Total: 13 cartas (9 fielders + 4 pitchers)
         
-        Evita duplicación de posiciones para cubrir todas las posiciones del campo.
+        Garantiza cobertura de todas las posiciones del campo necesarias para un lineup.
         """
         team_id = team_id.upper()
         
         selected_cards = []
         
+        # Posiciones requeridas para un lineup: P, C, 1B, 2B, 3B, SS, LF, CF, RF
+        REQUIRED_POSITIONS = {"P", "C", "1B", "2B", "3B", "SS", "LF", "CF", "RF"}
+        PITCHER_POSITIONS = {"SP", "RP", "CP"}
+        
         # 1. OBTENER JUGADORES DEL EQUIPO ELEGIDO
         team_fielders = db.query(PlayerCardModel).filter(
             PlayerCardModel.team_id == team_id,
-            PlayerCardModel.position.notin_(["SP", "RP", "CP"]),
+            PlayerCardModel.position.notin_(PITCHER_POSITIONS),
             ~PlayerCardModel.is_two_way
         ).all()
         
         team_pitchers = db.query(PlayerCardModel).filter(
             PlayerCardModel.team_id == team_id,
-            PlayerCardModel.position.in_(["SP", "RP", "CP"])
+            PlayerCardModel.position.in_(PITCHER_POSITIONS)
         ).all()
         
-        # 2. SELECCIONAR 5 FIELDERS DEL EQUIPO (SIN DUPLICAR POSICIONES)
+        # 2. SELECCIONAR 5 FIELDERS DEL EQUIPO (DIVERSIFICANDO POSICIONES)
         if len(team_fielders) >= 5:
             # Agrupar por posición
             fielders_by_pos = {}
@@ -66,17 +70,18 @@ class PackService:
                     fielders_by_pos[pos] = []
                 fielders_by_pos[pos].append(card)
             
-            # Seleccionar uno de cada posición hasta llegar a 5
+            # Seleccionar uno de cada posición única hasta llegar a 5
             selected_from_team_fielders = []
-            for pos, cards in fielders_by_pos.items():
+            for pos in sorted(fielders_by_pos.keys()):
                 if len(selected_from_team_fielders) < 5:
-                    selected_from_team_fielders.append(random.choice(cards))
+                    selected_from_team_fielders.append(random.choice(fielders_by_pos[pos]))
             
             # Si aún necesitamos más, agregar más de otras posiciones
             remaining_fielders = [c for c in team_fielders if c not in selected_from_team_fielders]
             while len(selected_from_team_fielders) < 5 and remaining_fielders:
-                selected_from_team_fielders.append(random.choice(remaining_fielders))
-                remaining_fielders.remove(selected_from_team_fielders[-1])
+                card = random.choice(remaining_fielders)
+                selected_from_team_fielders.append(card)
+                remaining_fielders.remove(card)
             
             selected_cards.extend(selected_from_team_fielders)
         else:
@@ -89,13 +94,27 @@ class PackService:
             selected_cards.extend(team_pitchers)
         
         # 4. OBTENER JUGADORES DE OTROS EQUIPOS (PARA COMPLETAR 6 MÁS)
+        # Primero, verificar qué posiciones ya están cubiertas
+        covered_positions = {}
+        for card in selected_cards:
+            pos = card.position
+            covered_positions[pos] = covered_positions.get(pos, 0) + 1
+        
+        # Identificar posiciones de campo que faltan
+        missing_positions = []
+        for pos in REQUIRED_POSITIONS:
+            if pos == "P":
+                continue  # P es lanzador, ya manejado
+            if covered_positions.get(pos, 0) == 0:
+                missing_positions.append(pos)
+        
         cards_needed = 13 - len(selected_cards)  # Normalmente 6
         
         other_team_cards = db.query(PlayerCardModel).filter(
             PlayerCardModel.team_id != team_id
         ).all()
         
-        # Agrupar por posición para evitar duplicación
+        # Agrupar cartas de otros equipos por posición
         other_cards_by_pos = {}
         for card in other_team_cards:
             pos = card.position
@@ -103,24 +122,23 @@ class PackService:
                 other_cards_by_pos[pos] = []
             other_cards_by_pos[pos].append(card)
         
-        # Seleccionar cartas de otros equipos evitando duplicar posiciones ya seleccionadas
-        selected_positions = {}
-        for card in selected_cards:
-            pos = card.position
-            selected_positions[pos] = selected_positions.get(pos, 0) + 1
-        
         other_team_selected = []
-        for pos, cards in other_cards_by_pos.items():
-            # Si esta posición ya está saturada en el pack, saltarla
-            if selected_positions.get(pos, 0) >= 2:
-                continue
-            
-            # Agregar una carta de esta posición
-            if cards and len(other_team_selected) < cards_needed:
-                other_team_selected.append(random.choice(cards))
-                selected_positions[pos] = selected_positions.get(pos, 0) + 1
         
-        # Si aún faltan cartas, agregar cualquiera (podría haber duplicación menor)
+        # FASE 1: Priorizar llenar las posiciones faltantes
+        for pos in missing_positions:
+            if len(other_team_selected) < cards_needed and pos in other_cards_by_pos:
+                other_team_selected.append(random.choice(other_cards_by_pos[pos]))
+                covered_positions[pos] = covered_positions.get(pos, 0) + 1
+        
+        # FASE 2: Si aún faltan cartas, llenar con otras posiciones
+        for pos, cards in other_cards_by_pos.items():
+            if len(other_team_selected) < cards_needed and cards:
+                # Solo agregar si no excedemos 2 por posición
+                if covered_positions.get(pos, 0) < 2:
+                    other_team_selected.append(random.choice(cards))
+                    covered_positions[pos] = covered_positions.get(pos, 0) + 1
+        
+        # FASE 3: Si aún faltan cartas (situación poco probable), agregar cualquiera
         if len(other_team_selected) < cards_needed:
             remaining = [c for c in other_team_cards if c not in other_team_selected]
             while len(other_team_selected) < cards_needed and remaining:
