@@ -122,33 +122,52 @@ class PackService:
         
         cards_needed = 13 - len(selected_cards)  # Normalmente 6
         
-        # Obtener todas las cartas de otros equipos, AGRUPADAS POR RAREZA
+        # Obtener todas las cartas de otros equipos
         other_team_cards = db.query(PlayerCardModel).filter(
             PlayerCardModel.team_id != team_id
         ).all()
         
-        # Agrupar por rareza Y posición
-        other_cards_by_rarity = {}
-        other_cards_by_pos = {}
-        for card in other_team_cards:
+        # Separar cartas por equipo para dar prioridad al equipo favorito del usuario
+        # Si el usuario tiene un equipo favorito diferente al elegido, darlo prioridad
+        user = db.query(User).filter(User.id == user_id).first()
+        favorite_team_id = user.favorite_team_id if user else None
+        
+        # Dividir cartas: equipo favorito vs otros
+        favorite_team_cards = []
+        other_cards = []
+        
+        if favorite_team_id and favorite_team_id != team_id:
+            for card in other_team_cards:
+                if card.team_id == favorite_team_id:
+                    favorite_team_cards.append(card)
+                else:
+                    other_cards.append(card)
+        else:
+            # Si no hay equipo favorito o es el mismo, todas van a "otros"
+            other_cards = other_team_cards
+        
+        # Agrupar cartas por rareza (priorizando equipo favorito)
+        favorite_by_rarity = {}
+        other_by_rarity = {}
+        
+        for card in favorite_team_cards:
             rarity = card.rarity.value if card.rarity else "COMMON"
-            pos = card.position
-            
-            # Agrupar por rareza
-            if rarity not in other_cards_by_rarity:
-                other_cards_by_rarity[rarity] = []
-            other_cards_by_rarity[rarity].append(card)
-            
-            # Agrupar por posición
-            if pos not in other_cards_by_pos:
-                other_cards_by_pos[pos] = []
-            other_cards_by_pos[pos].append(card)
+            if rarity not in favorite_by_rarity:
+                favorite_by_rarity[rarity] = []
+            favorite_by_rarity[rarity].append(card)
+        
+        for card in other_cards:
+            rarity = card.rarity.value if card.rarity else "COMMON"
+            if rarity not in other_by_rarity:
+                other_by_rarity[rarity] = []
+            other_by_rarity[rarity].append(card)
         
         other_team_selected = []
         selected_set = set()  # Tracking de cartas ya seleccionadas
         rarity_count = {}
         
         # FASE 1: Seleccionar por rareza DESEADA (SILVER → BRONZE → COMMON)
+        # Priorizar equipo favorito del usuario
         rarity_priority = ["SILVER", "BRONZE", "COMMON"]
         
         for rarity in rarity_priority:
@@ -156,43 +175,87 @@ class PackService:
             if target_count == 0:
                 continue
             
-            available_in_rarity = [c for c in other_cards_by_rarity.get(rarity, []) if c.id not in selected_set]
             cards_added_for_rarity = 0
             
-            # Intentar llenar posiciones faltantes primero
-            for pos in missing_positions:
-                if cards_added_for_rarity >= target_count or len(other_team_selected) >= cards_needed:
-                    break
+            # Primero intentar con cartas del equipo favorito
+            if favorite_team_id and favorite_team_id != team_id:
+                favorite_available = [c for c in favorite_by_rarity.get(rarity, []) if c.id not in selected_set]
                 
-                matching = [c for c in available_in_rarity if c.position == pos and c.id not in selected_set]
-                if matching:
-                    card = random.choice(matching)
+                # Llenar posiciones faltantes primero
+                for pos in missing_positions:
+                    if cards_added_for_rarity >= target_count or len(other_team_selected) >= cards_needed:
+                        break
+                    
+                    matching = [c for c in favorite_available if c.position == pos and c.id not in selected_set]
+                    if matching:
+                        card = random.choice(matching)
+                        other_team_selected.append(card)
+                        selected_set.add(card.id)
+                        rarity_count[rarity] = rarity_count.get(rarity, 0) + 1
+                        cards_added_for_rarity += 1
+                
+                # Rellenar cuota con otras posiciones del equipo favorito
+                while cards_added_for_rarity < target_count and len(other_team_selected) < cards_needed:
+                    favorite_available = [c for c in favorite_by_rarity.get(rarity, []) if c.id not in selected_set]
+                    if not favorite_available:
+                        break
+                    card = random.choice(favorite_available)
                     other_team_selected.append(card)
                     selected_set.add(card.id)
                     rarity_count[rarity] = rarity_count.get(rarity, 0) + 1
                     cards_added_for_rarity += 1
             
-            # Rellenar el resto de la cuota de esta rareza (sin restricción de posición)
-            while cards_added_for_rarity < target_count and len(other_team_selected) < cards_needed:
-                available_in_rarity = [c for c in other_cards_by_rarity.get(rarity, []) if c.id not in selected_set]
-                if not available_in_rarity:
-                    break
-                card = random.choice(available_in_rarity)
-                other_team_selected.append(card)
-                selected_set.add(card.id)
-                rarity_count[rarity] = rarity_count.get(rarity, 0) + 1
-                cards_added_for_rarity += 1
+            # Luego intentar con otros equipos si aún falta
+            if cards_added_for_rarity < target_count and len(other_team_selected) < cards_needed:
+                other_available = [c for c in other_by_rarity.get(rarity, []) if c.id not in selected_set]
+                
+                # Llenar posiciones faltantes primero
+                for pos in missing_positions:
+                    if cards_added_for_rarity >= target_count or len(other_team_selected) >= cards_needed:
+                        break
+                    
+                    matching = [c for c in other_available if c.position == pos and c.id not in selected_set]
+                    if matching:
+                        card = random.choice(matching)
+                        other_team_selected.append(card)
+                        selected_set.add(card.id)
+                        rarity_count[rarity] = rarity_count.get(rarity, 0) + 1
+                        cards_added_for_rarity += 1
+                
+                # Rellenar cuota con otras posiciones
+                while cards_added_for_rarity < target_count and len(other_team_selected) < cards_needed:
+                    other_available = [c for c in other_by_rarity.get(rarity, []) if c.id not in selected_set]
+                    if not other_available:
+                        break
+                    card = random.choice(other_available)
+                    other_team_selected.append(card)
+                    selected_set.add(card.id)
+                    rarity_count[rarity] = rarity_count.get(rarity, 0) + 1
+                    cards_added_for_rarity += 1
         
         # FASE 2: Si aún faltan cartas, llenar con cualquiera (sin importar rareza)
         if len(other_team_selected) < cards_needed:
-            remaining = [c for c in other_team_cards if c.id not in selected_set]
-            while len(other_team_selected) < cards_needed and remaining:
-                card = random.choice(remaining)
-                other_team_selected.append(card)
-                selected_set.add(card.id)
-                card_rarity = card.rarity.value if card.rarity else "COMMON"
-                rarity_count[card_rarity] = rarity_count.get(card_rarity, 0) + 1
-                remaining.remove(card)
+            # Primero intentar con equipo favorito
+            if favorite_team_id and favorite_team_id != team_id:
+                remaining = [c for c in favorite_team_cards if c.id not in selected_set]
+                while len(other_team_selected) < cards_needed and remaining:
+                    card = random.choice(remaining)
+                    other_team_selected.append(card)
+                    selected_set.add(card.id)
+                    card_rarity = card.rarity.value if card.rarity else "COMMON"
+                    rarity_count[card_rarity] = rarity_count.get(card_rarity, 0) + 1
+                    remaining.remove(card)
+            
+            # Luego con otros equipos
+            if len(other_team_selected) < cards_needed:
+                remaining = [c for c in other_cards if c.id not in selected_set]
+                while len(other_team_selected) < cards_needed and remaining:
+                    card = random.choice(remaining)
+                    other_team_selected.append(card)
+                    selected_set.add(card.id)
+                    card_rarity = card.rarity.value if card.rarity else "COMMON"
+                    rarity_count[card_rarity] = rarity_count.get(card_rarity, 0) + 1
+                    remaining.remove(card)
         
         selected_cards.extend(other_team_selected)
         
