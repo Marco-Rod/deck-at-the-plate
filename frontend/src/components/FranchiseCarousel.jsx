@@ -87,7 +87,7 @@ export const FranchiseCarousel = ({ teams, selectedTeamId, onSelectTeam }) => {
                 }`}
               >
                 <div
-                  className={`flex flex-col items-center gap-3 p-4 rounded-xl border-2 transition-all ${
+                  className={`flex flex-col items-center gap-3 p-4 rounded-xl border-2 transition-all w-40 h-48 ${
                     isSelected && isCenter
                       ? 'border-[#C5A059] bg-[#1A3323] shadow-[0_0_30px_rgba(197,160,89,0.5)]'
                       : 'border-[#2C3E35] bg-[#0A0D0F]'
@@ -95,18 +95,20 @@ export const FranchiseCarousel = ({ teams, selectedTeamId, onSelectTeam }) => {
                 >
                   {/* Logo/Badge */}
                   <div
-                    className="w-16 h-16 rounded-full flex items-center justify-center text-2xl font-bold text-white border-2 border-[#C5A059] shadow-lg"
+                    className="w-16 h-16 rounded-full flex items-center justify-center text-2xl font-bold text-white border-2 border-[#C5A059] shadow-lg flex-shrink-0"
                     style={{ backgroundColor: team.color }}
                   >
                     {team.badge}
                   </div>
 
                   {/* Nombre */}
-                  <div className="text-center">
-                    <p className="font-bold text-sm text-white uppercase font-sports leading-tight">
+                  <div className="text-center flex-1 flex flex-col items-center justify-center min-h-0">
+                    <p className="font-bold text-sm text-white uppercase font-sports leading-tight line-clamp-2 break-words">
                       {team.name}
                     </p>
-                    <p className="text-xs text-gray-400">{team.city}</p>
+                    <p className="text-xs text-gray-400 line-clamp-1">
+                      {team.city}
+                    </p>
                   </div>
                 </div>
               </div>

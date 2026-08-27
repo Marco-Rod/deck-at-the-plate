@@ -17,6 +17,8 @@ Las tablas se crean automáticamente con Base.metadata.create_all al iniciar
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from app.database import engine, Base
 from app.routers import cards, games, gameplay, ws, user, shop, auth, teams
 
@@ -51,6 +53,46 @@ app.include_router(ws.router)
 app.include_router(user.router)
 app.include_router(shop.router)
 app.include_router(teams.router)
+
+# Exception handler personalizado para errores de validación
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request, exc: RequestValidationError):
+    """
+    Convierte errores de validación de Pydantic en respuestas legibles.
+    Extrae el primer error y retorna un mensaje amigable al usuario.
+    """
+    errors = exc.errors()
+    if errors:
+        first_error = errors[0]
+        
+        # Obtener información del campo y el tipo de error
+        field = first_error.get("loc", [])[-1] if first_error.get("loc") else "unknown"
+        error_type = first_error.get("type", "validation_error")
+        msg = first_error.get("msg", "Validación fallida")
+        
+        # Mapear tipos de error a mensajes amigables
+        error_messages = {
+            "string_too_short": f"El campo '{field}' debe tener al menos 6 caracteres",
+            "string_too_long": f"El campo '{field}' excede la longitud máxima permitida",
+            "value_error": f"Valor inválido para '{field}'",
+        }
+        
+        user_message = error_messages.get(error_type, msg)
+        
+        return JSONResponse(
+            status_code=422,
+            content={
+                "detail": user_message,
+                "field": field,
+                "type": error_type
+            }
+        )
+    
+    # Fallback si no hay errores específicos
+    return JSONResponse(
+        status_code=422,
+        content={"detail": "Error de validación en la solicitud"}
+    )
 
 @app.get("/")
 def read_root():

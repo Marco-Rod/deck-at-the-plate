@@ -11,31 +11,22 @@ router = APIRouter(prefix="/api/v1/shop", tags=["Shop & Packs"])
 
 @router.post("/starter-pack", response_model=StarterPackResponseSchema)
 def claim_starter_pack(user_id: str, team_id: str, db: Session = Depends(get_db)):
-    """Entrega el mazo de bienvenida (Starter Pack) al usuario."""
-    """Asigna las 25 cartas iniciales del sobre al club creado por el usuario."""
+    """
+    Entrega el mazo de bienvenida (Starter Pack) al usuario.
+    Asigna 13 cartas inteligentemente:
+    - 5 fielders del equipo elegido
+    - 2 pitchers del equipo elegido  
+    - 6 cartas random de otros equipos
+    """
     user_team = db.query(UserTeam).filter(UserTeam.user_id == user_id).first()
     
     # Si no ha creado un club, requerimos que cree su franquicia primero
     if not user_team:
         raise HTTPException(status_code=400, detail="Debes fundar tu club antes de reclamar el sobre inicial")
 
-    # Usamos la franquicia base asociada al club (LAD, NYY, etc.)
-    franchise = user_team.base_franchise
-
-    # Asignación de las 25 cartas (Pitchers y Bateadores) al inventario del usuario
-    cards = db.query(PlayerCardModel).filter(PlayerCardModel.team_id == franchise).all()
-    if not cards:
-        # Fallback si no hay cartas filtradas por franquicia
-        cards = db.query(PlayerCardModel).limit(25).all()
-    for card in cards:
-        inventory_item = UserCardInventory(
-            user_id=user_id,
-            card_id=card.id
-        )
-        db.add(inventory_item)
-
-    db.commit()
-            
+    # Usar la nueva lógica de asignación inteligente
+    cards = PackService.assign_starter_pack(db, user_id=user_id, team_id=team_id)
+    
     return {
         "message": "Starter pack asignado exitosamente",
         "user_id": user_id,

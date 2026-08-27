@@ -53,7 +53,17 @@ async function _request(path, options = {}) {
     let errorDetail = `Error ${response.status}`;
     try {
       const errorBody = await response.json();
-      errorDetail = errorBody.detail || errorDetail;
+      
+      // Si detail es un array (errores de validación de Pydantic), tomar el primer error
+      if (Array.isArray(errorBody.detail)) {
+        if (errorBody.detail.length > 0 && typeof errorBody.detail[0] === 'object') {
+          errorDetail = errorBody.detail[0].msg || errorBody.detail[0].detail || 'Error de validación';
+        } else if (errorBody.detail.length > 0) {
+          errorDetail = errorBody.detail[0];
+        }
+      } else if (typeof errorBody.detail === 'string') {
+        errorDetail = errorBody.detail;
+      }
     } catch {
       // El body no es JSON, usar el status text
       errorDetail = response.statusText || errorDetail;
