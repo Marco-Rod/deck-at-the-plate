@@ -29,7 +29,7 @@ class PackService:
     @staticmethod
     def assign_starter_pack(db: Session, user_id: str, team_id: str) -> List[PlayerCardModel]:
         """
-        Asigna un mazo inicial de 13 cartas optimizado:
+        Asigna un mazo inicial de 13 cartas optimizado con distribución de raridades:
         
         Composición:
         - 5 jugadores inf/outf del equipo elegido (diversificando posiciones)
@@ -37,6 +37,11 @@ class PackService:
         - 6 jugadores aleatorios de otros equipos (cubriendo posiciones faltantes)
         
         Total: 13 cartas (9 fielders + 4 pitchers)
+        
+        Distribución de raridades:
+        - 2 SILVER (mejor calidad)
+        - 4 BRONZE 
+        - 7 COMMON (mayoría)
         
         Garantiza cobertura de todas las posiciones del campo necesarias para un lineup.
         """
@@ -48,17 +53,24 @@ class PackService:
         REQUIRED_POSITIONS = {"P", "C", "1B", "2B", "3B", "SS", "LF", "CF", "RF"}
         PITCHER_POSITIONS = {"SP", "RP", "CP"}
         
-        # 1. OBTENER JUGADORES DEL EQUIPO ELEGIDO
+        # Distribución de raridades deseada para el pack
+        RARITY_DISTRIBUTION = {
+            "SILVER": 2,
+            "BRONZE": 4,
+            "COMMON": 7,
+        }
+        
+        # 1. OBTENER JUGADORES DEL EQUIPO ELEGIDO (todos ordenados por rareza)
         team_fielders = db.query(PlayerCardModel).filter(
             PlayerCardModel.team_id == team_id,
             PlayerCardModel.position.notin_(PITCHER_POSITIONS),
             ~PlayerCardModel.is_two_way
-        ).all()
+        ).order_by(PlayerCardModel.rarity).all()
         
         team_pitchers = db.query(PlayerCardModel).filter(
             PlayerCardModel.team_id == team_id,
             PlayerCardModel.position.in_(PITCHER_POSITIONS)
-        ).all()
+        ).order_by(PlayerCardModel.rarity).all()
         
         # 2. SELECCIONAR 5 FIELDERS DEL EQUIPO (DIVERSIFICANDO POSICIONES)
         if len(team_fielders) >= 5:
@@ -110,40 +122,73 @@ class PackService:
         
         cards_needed = 13 - len(selected_cards)  # Normalmente 6
         
+        # Obtener todas las cartas de otros equipos, AGRUPADAS POR RAREZA
         other_team_cards = db.query(PlayerCardModel).filter(
             PlayerCardModel.team_id != team_id
         ).all()
         
-        # Agrupar cartas de otros equipos por posición
+        # Agrupar por rareza Y posición
+        other_cards_by_rarity = {}
         other_cards_by_pos = {}
         for card in other_team_cards:
+            rarity = card.rarity.value if card.rarity else "COMMON"
             pos = card.position
+            
+            # Agrupar por rareza
+            if rarity not in other_cards_by_rarity:
+                other_cards_by_rarity[rarity] = []
+            other_cards_by_rarity[rarity].append(card)
+            
+            # Agrupar por posición
             if pos not in other_cards_by_pos:
                 other_cards_by_pos[pos] = []
             other_cards_by_pos[pos].append(card)
         
         other_team_selected = []
+        rarity_count = {}
         
-        # FASE 1: Priorizar llenar las posiciones faltantes
-        for pos in missing_positions:
-            if len(other_team_selected) < cards_needed and pos in other_cards_by_pos:
-                other_team_selected.append(random.choice(other_cards_by_pos[pos]))
-                covered_positions[pos] = covered_positions.get(pos, 0) + 1
+        # FASE 1: Llenar según la distribución de raridades, priorizando posiciones faltantes
+        for rarity, target_count in sorted(RARITY_DISTRIBUTION.items(), reverse=True):
+            cards_for_this_rarity = 0
+            
+            # Obtener cartas de esta rareza
+            available_in_rarity = other_cards_by_rarity.get(rarity, [])
+            if not available_in_rarity:
+                continue
+            
+            # Mientras necesitemos cartas y haya cartas de esta rareza
+            while cards_for_this_rarity < target_count and len(other_team_selected) < cards_needed and available_in_rarity:
+                # Priorizar posiciones faltantes
+                card_to_add = None
+                
+                # Buscar una carta de posición faltante en esta rareza
+                for pos in missing_positions:
+                    matching_cards = [c for c in available_in_rarity if c.position == pos and c not in other_team_selected]
+                    if matching_cards:
+                        card_to_add = random.choice(matching_cards)
+                        break
+                
+                # Si no hay posición faltante en esta rareza, tomar cualquiera
+                if not card_to_add:
+                    candidates = [c for c in available_in_rarity if c not in other_team_selected]
+                    if candidates:
+                        card_to_add = random.choice(candidates)
+                
+                if card_to_add:
+                    other_team_selected.append(card_to_add)
+                    rarity_count[rarity] = rarity_count.get(rarity, 0) + 1
+                    cards_for_this_rarity += 1
+                    available_in_rarity.remove(card_to_add)
+                else:
+                    break
         
-        # FASE 2: Si aún faltan cartas, llenar con otras posiciones
-        for pos, cards in other_cards_by_pos.items():
-            if len(other_team_selected) < cards_needed and cards:
-                # Solo agregar si no excedemos 2 por posición
-                if covered_positions.get(pos, 0) < 2:
-                    other_team_selected.append(random.choice(cards))
-                    covered_positions[pos] = covered_positions.get(pos, 0) + 1
-        
-        # FASE 3: Si aún faltan cartas (situación poco probable), agregar cualquiera
+        # FASE 2: Si aún faltan cartas, llenar con cualquiera disponible
         if len(other_team_selected) < cards_needed:
             remaining = [c for c in other_team_cards if c not in other_team_selected]
             while len(other_team_selected) < cards_needed and remaining:
                 card = random.choice(remaining)
                 other_team_selected.append(card)
+                rarity_count[card.rarity.value if card.rarity else "COMMON"] = rarity_count.get(card.rarity.value if card.rarity else "COMMON", 0) + 1
                 remaining.remove(card)
         
         selected_cards.extend(other_team_selected)

@@ -72,18 +72,24 @@ Testing completed for dynamic franchise selection carousel with intelligent star
 2. Random sample of 2
 ```
 
-### Other Teams Selection (6 random)
+### Other Teams Selection (6 random with position priority)
 ```
-1. Query all other teams' cards
-2. Group by position
-3. Avoid duplicating positions (max 2 per position in full pack)
-4. Select 6 cards respecting position limits
+PHASE 1: Fill missing field positions (1B, 3B, SS, LF, CF, RF, etc.)
+  - Identify positions not covered by team selection
+  - Prioritize filling these gaps from other teams
+
+PHASE 2: Fill remaining slots respecting position limits
+  - Max 2 per position
+  - Select from any available position
+
+PHASE 3: Fill any remaining slots (fallback)
+  - Add remaining cards if needed
 ```
 
-### Position Deduplication
-- Tracks position count across all 13 cards
-- Ensures no position appears more than 2 times
-- Prevents field saturation (covers 9 of 9 field positions)
+### Position Coverage Guarantee
+- All 9 field positions (P, C, 1B, 2B, 3B, SS, LF, CF, RF) must be covered
+- Prevents scenarios where lineup cannot be completed due to missing positions
+- Ensures balanced position distribution
 
 ## Data Flow
 

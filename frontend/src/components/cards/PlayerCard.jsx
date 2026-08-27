@@ -143,7 +143,7 @@ export const PlayerCard = ({ player, cardData, isSelected, onClick, role = "BATT
             <div className="font-sports text-xl text-[#F7F5F0] truncate leading-none uppercase">
               {card.name || "Jugador"}
             </div>
-            <div className="flex justify-between text-[8px] font-mono text-[#E6DFD3] mt-1">
+            <div className="flex justify-between text-[8px] font-mono text-[#E6DFD3] mt-1 mb-1">
               {role === "PITCHER" ? (
                 <>
                   <span>{t('card.velocity')}: {card.velocity || 95}</span>
@@ -155,6 +155,10 @@ export const PlayerCard = ({ player, cardData, isSelected, onClick, role = "BATT
                   <span>{t('card.contact')}: {card.contact || 82}</span>
                 </>
               )}
+            </div>
+            {/* Equipo */}
+            <div className="text-[8px] font-mono tracking-widest uppercase text-[#C5A059] border-t pt-1" style={{ borderColor: `${rarityConfig.border}40` }}>
+              {card.team_id || card.teamId || "UNKNOWN"}
             </div>
           </div>
 
