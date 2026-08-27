@@ -49,7 +49,7 @@ export const AuthScreen = ({ onLoginSuccess, onRegisterSuccess }) => {
   };
 
   return (
-    <div className="min-h-screen w-full flex flex-col items-center justify-center p-4 bg-[#121619] select-none">
+    <div className="min-h-screen w-full flex flex-col items-center justify-center p-4 select-none">
       {/* Botón Selector de Idioma */}
       <div className="w-full max-w-md flex justify-end mb-2">
         <button

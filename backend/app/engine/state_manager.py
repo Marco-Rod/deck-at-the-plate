@@ -56,7 +56,14 @@ def process_at_bat_transition(
     if event in ("STRIKE_SWINGING", "STRIKE_LOOKING"):
         game.strikes += 1
     elif event == "BALL":
-        game.balls += 1
+        # ⭐ NUEVO: Si es IBB (base intencional), saltamos directo a 4 bolas
+        current_pitch = state.get("current_pitch", {})
+        actual_pitch = current_pitch.get("pitch_type") if isinstance(current_pitch, dict) else None
+        
+        if actual_pitch == "IBB":
+            game.balls = 4  # Forzar a 4 para que se detecte como WALK instantáneamente
+        else:
+            game.balls += 1
     elif event == "FOUL" and game.strikes < 2:
         # El foul solo suma strike si el bateador tiene menos de 2 strikes
         game.strikes += 1
@@ -87,8 +94,12 @@ def process_at_bat_transition(
         current_runners = state.get("runners", {"1b": None, "2b": None, "3b": None})
         active_batter = state.get("active_batter", "BATTER")
 
+        print(f"🏃 [RUNNER ADVANCE] event={final_event}, batter={active_batter}, runners_before={current_runners}")
+        
         updated_runners, runs_scored = advance_runners(current_runners, final_event, active_batter)
         state["runners"] = updated_runners
+
+        print(f"✅ [RUNNERS UPDATED] runners_after={updated_runners}, runs_scored={runs_scored}")
 
         if runs_scored > 0:
             if game.is_top_inning:
@@ -129,6 +140,9 @@ def process_at_bat_transition(
 
             # Limpiar bases al cambiar de media entrada
             state["runners"] = {"1b": None, "2b": None, "3b": None}
+            
+            # ⭐ IMPORTANTE: Limpiar current_pitch al cambiar de inning
+            state["current_pitch"] = None
 
             if game.is_top_inning:
                 # Alta → Baja: el mismo inning, ahora batea el local
@@ -138,10 +152,31 @@ def process_at_bat_transition(
                 game.is_top_inning = True
                 game.current_inning += 1
 
+            # Al cambiar de media entrada, actualizar el pitcher y el primer bateador activos.
+            # En la Alta (is_top_inning=True): home lanza, away batea.
+            # En la Baja (is_top_inning=False): away lanza, home batea.
+            if game.is_top_inning:
+                # Recién pasamos a la Alta: home_pitcher lanza, primer bateador away batea
+                home_pitcher = state.get("home_pitcher_id") or state.get("active_pitcher")
+                state["active_pitcher"] = home_pitcher
+                away_idx = state.get("away_batter_index", 0)
+                away_lineup = state.get("away_lineup", [])
+                if away_lineup:
+                    state["active_batter"] = away_lineup[away_idx]
+            else:
+                # Recién pasamos a la Baja: away_pitcher lanza, primer bateador home batea
+                away_pitcher = state.get("away_pitcher_id") or state.get("active_pitcher")
+                state["active_pitcher"] = away_pitcher
+                home_idx = state.get("home_batter_index", 0)
+                home_lineup = state.get("home_lineup", [])
+                if home_lineup:
+                    state["active_batter"] = home_lineup[home_idx]
+
             # --- Ghost runner en extra innings ---
-            # Solo se coloca al inicio de cada media entrada a partir del inning 10.
+            # Se coloca al inicio de cada media entrada a partir del inning total_innings+1.
             # El corredor es el último bateador que hizo out en la media entrada anterior.
-            if game.current_inning >= 10:
+            total_innings = state.get("total_innings", 9)
+            if game.current_inning >= total_innings + 1:
                 ghost_runner_id = state.get("last_out_batter", "GHOST_RUNNER")
                 state["runners"] = {"1b": None, "2b": ghost_runner_id, "3b": None}
 

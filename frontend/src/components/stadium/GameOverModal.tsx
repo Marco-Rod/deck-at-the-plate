@@ -6,6 +6,7 @@ interface GameOverModalProps {
   awayScore: number;
   homeTeamName: string;
   awayTeamName: string;
+  userRole?: 'HOME' | 'AWAY'; // ⭐ NUEVO: posición del usuario
   onReturnToLobby: () => void;
 }
 
@@ -15,8 +16,14 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
   awayScore,
   homeTeamName,
   awayTeamName,
+  userRole = 'HOME', // ⭐ NUEVO: por defecto HOME
   onReturnToLobby,
 }) => {
+  // ⭐ ARREGLADO: Intercambiar scores según userRole (igual que Scoreboard)
+  const userScore = userRole === 'HOME' ? homeScore : awayScore;
+  const cpuScore = userRole === 'HOME' ? awayScore : homeScore;
+  const userTeamName = userRole === 'HOME' ? homeTeamName : awayTeamName;
+  const cpuTeamName = userRole === 'HOME' ? awayTeamName : homeTeamName;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md">
       <div className="bg-[#0A0D0F] border-2 border-[#C5A059] p-8 max-w-md w-full shadow-[0_0_50px_rgba(197,160,89,0.4)] text-center font-mono">
@@ -31,13 +38,13 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
         {/* Resumen Final de Carreras */}
         <div className="bg-[#121619] border border-[#2C3E35] p-4 my-6 flex justify-around items-center">
           <div className="flex flex-col items-center">
-            <span className="text-xs text-gray-400 mb-1">{homeTeamName}</span>
-            <span className="font-sports text-3xl text-[#C5A059]">{homeScore}</span>
+            <span className="text-xs text-gray-400 mb-1">{userTeamName}</span>
+            <span className="font-sports text-3xl text-[#C5A059]">{userScore}</span>
           </div>
           <span className="font-sports text-2xl text-gray-600">-</span>
           <div className="flex flex-col items-center">
-            <span className="text-xs text-gray-400 mb-1">{awayTeamName}</span>
-            <span className="font-sports text-3xl text-[#F7F5F0]">{awayScore}</span>
+            <span className="text-xs text-gray-400 mb-1">{cpuTeamName}</span>
+            <span className="font-sports text-3xl text-[#F7F5F0]">{cpuScore}</span>
           </div>
         </div>
 

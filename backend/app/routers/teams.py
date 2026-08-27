@@ -7,7 +7,7 @@ router = APIRouter(prefix="/api/v1/teams", tags=["Teams"])
 
 @router.get("/cpu")
 def get_cpu_teams(db: Session = Depends(get_db)):
-    """Devuelve los equipos CPU disponibles con sus medias globales calculadas."""
+    """Devuelve todos los equipos disponibles como rivales CPU con sus medias globales calculadas."""
     teams = db.query(Team).all()
     result = []
 

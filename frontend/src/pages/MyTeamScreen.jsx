@@ -176,7 +176,7 @@ export const MyTeamScreen = ({ user, onBack }) => {
   };
 
   return (
-    <div className="min-h-screen w-full flex flex-col justify-between p-6 bg-[#121619] text-[#F7F5F0] font-mono select-none">
+    <div className="min-h-screen w-full flex flex-col justify-between p-6 text-[#F7F5F0] font-mono select-none">
       
       {/* CABECERA SUPERIOR PERSONALIZADA DEL CLUB */}
       <div className="w-full flex justify-between items-center border-b-2 border-[#C5A059] pb-3 mb-4">

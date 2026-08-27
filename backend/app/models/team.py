@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String
+from sqlalchemy import Column, String, Boolean
 from sqlalchemy.orm import relationship
 from app.database import Base
 
@@ -11,6 +11,7 @@ class Team(Base):
     city = Column(String(100), nullable=False)
     primary_color = Column(String(7), default="#121619")
     secondary_color = Column(String(7), default="#C5A059")
+    is_cpu = Column(Boolean, default=False, index=True)  # Flag para equipos CPU vs Jugador
 
     # Relación con las cartas de jugadores pertenecientes a la franquicia
     cards = relationship("PlayerCardModel", back_populates="team")

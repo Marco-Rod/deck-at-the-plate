@@ -5,7 +5,7 @@
  *
  * Flujo de navegación:
  *   AUTH ──(Login)────> LOBBY ──> ROSTER_SELECTION ──> STADIUM (Partida)
- *        └──(Register)─> ONBOARDING ──(Complete)──> LOBBY
+ *       └──(Register)─> ONBOARDING ──(Complete)──> LOBBY
  */
 
 import React, { useState, useEffect } from 'react';
@@ -90,58 +90,67 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen text-[#F7F5F0] bg-[#121619]">
-      {/* VISTA 1: AUTENTICACIÓN (LOGIN O REGISTRO) */}
-      {!user && currentView !== 'ONBOARDING' ? (
-        <AuthScreen
-          onLoginSuccess={handleLoginSuccess}
-          onRegisterSuccess={handleRegisterSuccess}
-        />
+    <div 
+      className="min-h-screen text-[#F7F5F0] relative bg-cover bg-center bg-no-repeat overflow-x-hidden select-none flex flex-col"
+      style={{ backgroundImage: `url('/stadium.png')` }} // <-- Apunta directo a la carpeta public de forma estática
+    >
+      {/* Capa oscura global (Overlay) con un desenfoque muy sutil para destacar la interfaz en todas las pantallas */}
+      <div className="absolute inset-0 bg-[#0A0D0F]/75 backdrop-blur-[1px] pointer-events-none z-0" />
 
-      ) : /* VISTA 2: ONBOARDING DE REGISTRO (ELECCIÓN DE FRANCHISE Y APERTURA DE SOBRE) */
-      currentView === 'ONBOARDING' ? (
-        <OnboardingScreen
-          userId={pendingOnboardingUserId || user?.userId}
-          onComplete={handleOnboardingComplete}
-        />
+      {/* Contenedor dinámico de las pantallas de tu juego (por encima del fondo global) */}
+      <div className="relative z-10 flex-1 flex flex-col">
+        {/* VISTA 1: AUTENTICACIÓN (LOGIN O REGISTRO) */}
+        {!user && currentView !== 'ONBOARDING' ? (
+          <AuthScreen
+            onLoginSuccess={handleLoginSuccess}
+            onRegisterSuccess={handleRegisterSuccess}
+          />
 
-      ) : /* VISTA 3: PANTALLA DE JUEGO (ESTADIO 1V1) */
-      currentView === 'STADIUM' ? (
-        <StadiumShowcaseScreen
-          gameId={activeGameId}
-          userId={user?.userId}
-          onBack={handleLeaveGame}
-        />
+        ) : /* VISTA 2: ONBOARDING DE REGISTRO (ELECCIÓN DE FRANCHISE Y APERTURA DE SOBRE) */
+        currentView === 'ONBOARDING' ? (
+          <OnboardingScreen
+            userId={pendingOnboardingUserId || user?.userId}
+            onComplete={handleOnboardingComplete}
+          />
 
-      ) : /* VISTA 4: SELECCIÓN DE ROSTER */
-      currentView === 'ROSTER_SELECTION' ? (
-        <RosterSelectionScreen
-          user={user}
-          gameConfig={pendingGameConfig}
-          onRosterConfirmed={handleRosterConfirmed}
-          onBack={() => setCurrentView('LOBBY')}
-        />
+        ) : /* VISTA 3: PANTALLA DE JUEGO (ESTADIO 1V1) */
+        currentView === 'STADIUM' ? (
+          <StadiumShowcaseScreen
+            gameId={activeGameId}
+            userId={user?.userId}
+            onBack={handleLeaveGame}
+          />
 
-      ) : /* VISTA 5: MI EQUIPO Y GESTIÓN DE ROSTER */
-      currentView === 'MY_TEAM' ? (
-        <MyTeamScreen
-          user={user}
-          onBack={() => setCurrentView('LOBBY')}
-        />
+        ) : /* VISTA 4: SELECCIÓN DE ROSTER */
+        currentView === 'ROSTER_SELECTION' ? (
+          <RosterSelectionScreen
+            user={user}
+            gameConfig={pendingGameConfig}
+            onRosterConfirmed={handleRosterConfirmed}
+            onBack={() => setCurrentView('LOBBY')}
+          />
 
-      ) : /* VISTA 6: ÁLBUM / SHOWCASE */
-      currentView === 'SHOWCASE' ? (
-        <CardShowcaseScreen onBack={() => setCurrentView('LOBBY')} />
+        ) : /* VISTA 5: MI EQUIPO Y GESTIÓN DE ROSTER */
+        currentView === 'MY_TEAM' ? (
+          <MyTeamScreen
+            user={user}
+            onBack={() => setCurrentView('LOBBY')}
+          />
 
-      ) : /* VISTA DEFAULT: LOBBY PRINCIPAL */ (
-        <LobbyScreen
-          user={user}
-          onStartGame={handleStartGame}
-          onOpenMyTeam={() => setCurrentView('MY_TEAM')}
-          onOpenShowcase={() => setCurrentView('SHOWCASE')}
-          onLogout={handleLogout}
-        />
-      )}
+        ) : /* VISTA 6: ÁLBUM / SHOWCASE */
+        currentView === 'SHOWCASE' ? (
+          <CardShowcaseScreen onBack={() => setCurrentView('LOBBY')} />
+
+        ) : /* VISTA DEFAULT: LOBBY PRINCIPAL */ (
+          <LobbyScreen
+            user={user}
+            onStartGame={handleStartGame}
+            onOpenMyTeam={() => setCurrentView('MY_TEAM')}
+            onOpenShowcase={() => setCurrentView('SHOWCASE')}
+            onLogout={handleLogout}
+          />
+        )}
+      </div>
     </div>
   );
 }

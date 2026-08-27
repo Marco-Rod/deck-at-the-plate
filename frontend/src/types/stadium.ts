@@ -54,11 +54,19 @@ export interface GameStateWS {
   strikes: number;
   outs: number;
   runners: { b1: string | null; b2: string | null; b3: string | null };
+  totalInnings?: number;
   lastEvent?: string;
   isGameOver?: boolean;
   winnerMessage?: string;
   activePitcherId?: string;
   activeBatterId?: string;
+  rivalTeamName?: string;
+  state_data?: Record<string, unknown>;
+  pitcher_strikeouts?: Record<string, number>; // {pitcher_id: strikeout_count}
+  batter_stats?: Record<string, { at_bats: number; hits: number; doubles: number; triples: number; home_runs: number; rbi: number; runs: number; strikeouts: number; walks: number }>; // ⭐ NUEVO
+  homeHits?: number; // ⭐ NUEVO: Total hits HOME team
+  awayHits?: number; // ⭐ NUEVO: Total hits AWAY team
+  inning_runs?: Record<string, number>; // ⭐ NUEVO: {"1_true": 2, "1_false": 1, "6_false": 2} = inning_is_top: runs
 }
 
 export interface PlayResolvedPayload {
@@ -73,6 +81,12 @@ export interface PlayResolvedPayload {
   current_inning: number;
   is_top_inning: boolean;
   state_data: Record<string, unknown>;
+  inning_completed?: boolean;
+  pitcher_strikeouts?: Record<string, number>;
+  batter_stats?: Record<string, { at_bats: number; hits: number; doubles: number; triples: number; home_runs: number; rbi: number; runs: number; strikeouts: number; walks: number }>;
+  home_hits?: number; // ⭐ NUEVO
+  away_hits?: number; // ⭐ NUEVO
+  inning_runs?: Record<string, number>; // ⭐ NUEVO: {"1_true": 2, "1_false": 1}
 }
 
 export interface PitchCommittedPayload {

@@ -1,4 +1,5 @@
 import React from 'react';
+import { motion } from 'framer-motion';
 import { PitchType, PlayerRole } from '../../types/stadium';
 
 interface PitchZoneGridProps {
@@ -8,6 +9,7 @@ interface PitchZoneGridProps {
   onSelectZone: (zone: number) => void;
   onSelectPitch: (pitch: PitchType) => void;
   repertoire?: { pitch_type: string; velocity?: number }[];
+  disabled?: boolean;
 }
 
 export const PitchZoneGrid: React.FC<PitchZoneGridProps> = ({
@@ -17,6 +19,7 @@ export const PitchZoneGrid: React.FC<PitchZoneGridProps> = ({
   onSelectZone,
   onSelectPitch,
   repertoire,
+  disabled = false,
 }) => {
   // Si la carta tiene repertorio real definido desde la DB, usamos esos lanzamientos.
   // De lo contrario, usamos una lista segura de fallbacks universales.
@@ -26,34 +29,69 @@ export const PitchZoneGrid: React.FC<PitchZoneGridProps> = ({
       : ['4-SEAM', 'SLIDER', 'CHANGE'];
 
   return (
-    <div className="z-10 flex flex-col items-center gap-3 my-auto">
+    <div className={`z-10 flex flex-col items-center gap-3 my-auto transition-opacity ${disabled ? 'opacity-40 pointer-events-none' : ''}`}>
       {role === 'PITCHER' && (
-        <div className="flex flex-wrap justify-center gap-1 bg-[#0A0D0F] p-1 border border-[#2C3E35]">
-          {availablePitches.map((pitch: string) => (
-            <button
-              key={pitch}
-              type="button"
-              onClick={() => onSelectPitch(pitch)}
-              className={`px-3 py-1 font-mono text-[10px] uppercase transition-colors cursor-pointer ${
-                selectedPitch === pitch
-                  ? 'bg-[#1A3323] text-[#C5A059] border border-[#C5A059] font-bold shadow-[0_0_8px_rgba(197,160,89,0.5)]'
-                  : 'text-[#E6DFD3] opacity-60 hover:opacity-100'
-              }`}
-            >
-              {pitch}
-            </button>
-          ))}
-          <button
+        <div className="flex flex-wrap justify-center gap-1.5 bg-[#0A0D0F] p-1.5 border border-[#C5A059]/40 rounded-xs shadow-xl">
+          {availablePitches.map((pitch: string) => {
+            const isPitchSelected = selectedPitch === pitch;
+
+            return (
+              <motion.button
+                key={pitch}
+                type="button"
+                onClick={() => onSelectPitch(pitch as PitchType)}
+                className={`relative px-3 py-1.5 font-mono text-[10px] uppercase cursor-pointer rounded-xs overflow-hidden ${
+                  isPitchSelected
+                    ? 'bg-[#1A3323] text-[#C5A059] border border-[#C5A059] font-bold z-10'
+                    : 'bg-[#0A0D0F] text-[#E6DFD3] border border-[#2C3E35] opacity-70 hover:opacity-100'
+                }`}
+                // Animación al pasar el cursor y al hacer clic
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                // Pulso luminoso constante si el lanzamiento está seleccionado
+                animate={
+                  isPitchSelected
+                    ? {
+                        boxShadow: [
+                          '0 0 8px rgba(197, 160, 89, 0.4)',
+                          '0 0 16px rgba(197, 160, 89, 0.8)',
+                          '0 0 8px rgba(197, 160, 89, 0.4)',
+                        ],
+                      }
+                    : { boxShadow: '0 0 0px rgba(0,0,0,0)' }
+                }
+                transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
+              >
+                <span className="relative z-10">{pitch}</span>
+              </motion.button>
+            );
+          })}
+
+          <motion.button
             type="button"
-            onClick={() => onSelectPitch('IBB')}
-            className={`px-2 py-1 font-mono text-[10px] uppercase transition-colors cursor-pointer ${
+            onClick={() => onSelectPitch('IBB' as PitchType)}
+            className={`relative px-2.5 py-1.5 font-mono text-[10px] uppercase cursor-pointer rounded-xs overflow-hidden ${
               selectedPitch === 'IBB'
-                ? 'bg-[#C5A059] text-[#121619] font-bold border border-[#F7F5F0]'
-                : 'text-[#C5A059] border border-[#C5A059]/40 opacity-80'
+                ? 'bg-[#C5A059] text-[#121619] font-bold border border-[#F7F5F0] z-10'
+                : 'bg-[#0A0D0F] text-[#C5A059] border border-[#C5A059]/40 opacity-80 hover:opacity-100'
             }`}
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            animate={
+              selectedPitch === 'IBB'
+                ? {
+                    boxShadow: [
+                      '0 0 8px rgba(197, 160, 89, 0.5)',
+                      '0 0 18px rgba(247, 245, 240, 0.9)',
+                      '0 0 8px rgba(197, 160, 89, 0.5)',
+                    ],
+                  }
+                : { boxShadow: '0 0 0px rgba(0,0,0,0)' }
+            }
+            transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
           >
-            IBB (INTENC.)
-          </button>
+            <span className="relative z-10">IBB (INTENC.)</span>
+          </motion.button>
         </div>
       )}
 
@@ -68,20 +106,59 @@ export const PitchZoneGrid: React.FC<PitchZoneGridProps> = ({
             : 'PREDICE LA ZONA DE SWING'}
         </span>
         <div className="grid grid-cols-3 gap-2">
-          {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((zone: number) => (
-            <button
-              key={zone}
-              type="button"
-              onClick={() => onSelectZone(zone)}
-              className={`w-16 h-16 border flex items-center justify-center font-mono text-xs transition-all cursor-pointer ${
-                selectedZone === zone
-                  ? 'border-[#C5A059] bg-[#1A3323] text-[#C5A059] font-bold shadow-[0_0_15px_rgba(197,160,89,0.6)]'
-                  : 'border-[#2C3E35] text-[#E6DFD3] hover:border-[#C5A059]/60'
-              }`}
-            >
-              Z{zone}
-            </button>
-          ))}
+          {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((zone: number) => {
+            const isSelected = selectedZone === zone;
+
+            return (
+              <motion.button
+                key={zone}
+                type="button"
+                onClick={() => onSelectZone(zone)}
+                className={`relative w-16 h-16 border flex items-center justify-center font-mono text-xs cursor-pointer overflow-hidden ${
+                  isSelected
+                    ? 'border-[#C5A059] bg-[#1A3323] text-[#C5A059] font-bold z-10'
+                    : 'border-[#2C3E35] text-[#E6DFD3] hover:border-[#C5A059]/60 bg-[#0A0D0F]'
+                }`}
+                // Animación de escala y relieve al pasar el cursor
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+              >
+                {/* Efecto de brillo de pulso constante cuando la zona está seleccionada */}
+                {isSelected && (
+                  <motion.div
+                    className="absolute inset-0 border-2 border-[#C5A059] pointer-events-none"
+                    animate={{
+                      boxShadow: [
+                        'inset 0 0 5px rgba(197, 160, 89, 0.4), 0 0 5px rgba(197, 160, 89, 0.4)',
+                        'inset 0 0 15px rgba(197, 160, 89, 0.9), 0 0 20px rgba(197, 160, 89, 0.8)',
+                        'inset 0 0 5px rgba(197, 160, 89, 0.4), 0 0 5px rgba(197, 160, 89, 0.4)',
+                      ],
+                    }}
+                    transition={{
+                      duration: 1.8,
+                      repeat: Infinity,
+                      ease: 'easeInOut',
+                    }}
+                  />
+                )}
+
+                {/* Anillo de mira táctica flotante alrededor de la zona seleccionada */}
+                {isSelected && (
+                  <motion.div
+                    className="absolute inset-1 border border-dashed border-[#C5A059]/70 pointer-events-none rounded-xs"
+                    animate={{ rotate: 360 }}
+                    transition={{
+                      duration: 10,
+                      repeat: Infinity,
+                      ease: 'linear',
+                    }}
+                  />
+                )}
+
+                <span className="relative z-10">Z{zone}</span>
+              </motion.button>
+            );
+          })}
         </div>
       </div>
     </div>

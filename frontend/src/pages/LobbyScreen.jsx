@@ -6,7 +6,9 @@ import { user as userApi, teams as teamsApi } from '../utils/api';
 export const LobbyScreen = ({ user, onStartGame, onOpenMyTeam, onOpenShowcase, onLogout }) => {
   const { t, i18n } = useTranslation();
   const [gameMode, setGameMode] = useState('PVE');
-  const [difficulty, setDifficulty] = useState('MEDIUM');
+  const [difficulty, setDifficulty] = useState('EASY');  // ⭐ CHANGED: MEDIUM → EASY
+  const [totalInnings, setTotalInnings] = useState(3);    // ⭐ CHANGED: 9 → 3
+  const [playerPosition, setPlayerPosition] = useState('HOME');  // ⭐ Already HOME (correct)
   
   const [cpuRivals, setCpuRivals] = useState([]);
   const [rivalIndex, setRivalIndex] = useState(0);
@@ -75,12 +77,14 @@ export const LobbyScreen = ({ user, onStartGame, onOpenMyTeam, onOpenShowcase, o
     onStartGame({
       mode: gameMode,
       difficulty,
+      totalInnings,
+      playerPosition,  // ⭐ NUEVO: incluir posición elegida
       rival: currentRival
     });
   };
 
   return (
-    <div className="min-h-screen w-full flex flex-col justify-between p-4 md:p-6 bg-[#121619] font-mono select-none">
+    <div className="min-h-screen w-full flex flex-col justify-between p-4 md:p-6 font-mono select-none">
       
       {/* NAVBAR SUPERIOR DEL MÁNAGER */}
       <header className="w-full max-w-6xl mx-auto flex flex-wrap justify-between items-center bg-[#0A0D0F] border-2 border-[#C5A059] p-3 md:p-4 shadow-2xl gap-3 rounded">
@@ -324,30 +328,83 @@ export const LobbyScreen = ({ user, onStartGame, onOpenMyTeam, onOpenShowcase, o
                   </div>
                 </div>
 
-                {/* DIFICULTAD */}
-                <div className="bg-[#0A0D0F] border border-[#2C3E35] p-2.5 rounded">
-                  <span className="font-mono text-[10px] text-[#E6DFD3] uppercase block mb-1.5 text-center font-bold">
-                    DIFICULTAD DE LA CPU
-                  </span>
-                  <div className="grid grid-cols-3 gap-2">
-                    {[
-                      { key: 'EASY', label: 'FÁCIL' },
-                      { key: 'MEDIUM', label: 'MEDIA' },
-                      { key: 'HARD', label: 'DIFÍCIL' },
-                    ].map(({ key, label }) => (
-                      <button
-                        key={key}
-                        type="button"
-                        onClick={() => { if (soundFx?.playClick) soundFx.playClick(); setDifficulty(key); }}
-                        className={`py-1 font-sports text-base tracking-wider uppercase transition-colors rounded cursor-pointer ${
-                          difficulty === key
-                            ? 'bg-[#2D5A3F] text-[#F7F5F0] border border-[#C5A059]'
-                            : 'text-[#E6DFD3] opacity-50 hover:opacity-100 bg-[#121619]'
-                        }`}
-                      >
-                        {label}
-                      </button>
-                    ))}
+                {/* CONTENEDOR DE CONFIGURACIÓN (DIFICULTAD, INNINGS Y POSICIÓN) */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-2">
+                  
+                  {/* DIFICULTAD */}
+                  <div className="bg-[#0A0D0F] border border-[#2C3E35] p-2.5 rounded">
+                    <span className="font-mono text-[10px] text-[#E6DFD3] uppercase block mb-1.5 text-center font-bold">
+                      DIFICULTAD DE LA CPU
+                    </span>
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {[
+                        { key: 'EASY', label: 'FÁCIL' },
+                        { key: 'MEDIUM', label: 'MEDIA' },
+                        { key: 'HARD', label: 'DIFÍCIL' },
+                      ].map(({ key, label }) => (
+                        <button
+                          key={key}
+                          type="button"
+                          onClick={() => { if (soundFx?.playClick) soundFx.playClick(); setDifficulty(key); }}
+                          className={`py-1 font-sports text-sm tracking-wider uppercase transition-colors rounded cursor-pointer ${
+                            difficulty === key
+                              ? 'bg-[#2D5A3F] text-[#F7F5F0] border border-[#C5A059]'
+                              : 'text-[#E6DFD3] opacity-50 hover:opacity-100 bg-[#121619]'
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* INNINGS JUGADOS (3, 6, 9) */}
+                  <div className="bg-[#0A0D0F] border border-[#2C3E35] p-2.5 rounded">
+                    <span className="font-mono text-[10px] text-[#E6DFD3] uppercase block mb-1.5 text-center font-bold">
+                      INNINGS DEL PARTIDO
+                    </span>
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {[3, 6, 9].map((innings) => (
+                        <button
+                          key={innings}
+                          type="button"
+                          onClick={() => { if (soundFx?.playClick) soundFx.playClick(); setTotalInnings(innings); }}
+                          className={`py-1 font-sports text-sm tracking-wider uppercase transition-colors rounded cursor-pointer ${
+                            totalInnings === innings
+                              ? 'bg-[#2D5A3F] text-[#F7F5F0] border border-[#C5A059]'
+                              : 'text-[#E6DFD3] opacity-50 hover:opacity-100 bg-[#121619]'
+                          }`}
+                        >
+                          {innings} INN
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* ⭐ NUEVO: POSICIÓN (LOCAL/VISITANTE) */}
+                  <div className="bg-[#0A0D0F] border border-[#2C3E35] p-2.5 rounded">
+                    <span className="font-mono text-[10px] text-[#E6DFD3] uppercase block mb-1.5 text-center font-bold">
+                      TU POSICIÓN
+                    </span>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {[
+                        { key: 'HOME', label: '🏠 LOCAL' },
+                        { key: 'AWAY', label: '✈️ VISITANTE' },
+                      ].map(({ key, label }) => (
+                        <button
+                          key={key}
+                          type="button"
+                          onClick={() => { if (soundFx?.playClick) soundFx.playClick(); setPlayerPosition(key); }}
+                          className={`py-1 font-sports text-sm tracking-wider uppercase transition-colors rounded cursor-pointer ${
+                            playerPosition === key
+                              ? 'bg-[#2D5A3F] text-[#F7F5F0] border border-[#C5A059]'
+                              : 'text-[#E6DFD3] opacity-50 hover:opacity-100 bg-[#121619]'
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
               </>
@@ -360,7 +417,7 @@ export const LobbyScreen = ({ user, onStartGame, onOpenMyTeam, onOpenShowcase, o
             onClick={handleStartGame}
             className="w-full bg-[#1A3323] hover:bg-[#2D5A3F] text-[#C5A059] border-2 border-[#C5A059] py-3.5 font-sports text-2xl tracking-widest transition-all active:scale-95 shadow-xl mt-3 cursor-pointer uppercase"
           >
-            {gameMode === 'PVE' ? `⚡ INICIAR PARTIDA VS ${currentRival.id} (${currentRival.ovr || 80} OVR)` : 'ENCONTRAR RIVAL ONLINE'}
+            {gameMode === 'PVE' ? `⚡ INICIAR PARTIDA DE ${totalInnings} INN VS ${currentRival.id}` : 'ENCONTRAR RIVAL ONLINE'}
           </button>
         </section>
       </main>

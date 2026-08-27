@@ -25,10 +25,10 @@ except ModuleNotFoundError:
 Base.metadata.create_all(bind=engine)
 
 CPU_TEAMS = [
-    {"id": "JAL", "name": "Charros", "city": "Jalisco", "primary_color": "#002B66", "secondary_color": "#C5A059"},
-    {"id": "CUL", "name": "Tomateros", "city": "Culiacán", "primary_color": "#7A003C", "secondary_color": "#FFFFFF"},
-    {"id": "MTY", "name": "Sultanes", "city": "Monterrey", "primary_color": "#0B162C", "secondary_color": "#D3122A"},
-    {"id": "MXL", "name": "Águilas", "city": "Mexicali", "primary_color": "#D3122A", "secondary_color": "#002B66"},
+    {"id": "JAL", "name": "Charros", "city": "Jalisco", "primary_color": "#002B66", "secondary_color": "#C5A059", "is_cpu": True},
+    {"id": "CUL", "name": "Tomateros", "city": "Culiacán", "primary_color": "#7A003C", "secondary_color": "#FFFFFF", "is_cpu": True},
+    {"id": "MTY", "name": "Sultanes", "city": "Monterrey", "primary_color": "#0B162C", "secondary_color": "#D3122A", "is_cpu": True},
+    {"id": "MXL", "name": "Águilas", "city": "Mexicali", "primary_color": "#D3122A", "secondary_color": "#002B66", "is_cpu": True},
 ]
 
 CPU_CARDS = [
@@ -96,12 +96,18 @@ def seed_cpu_teams():
     db: Session = SessionLocal()
     try:
         teams_added = 0
+        teams_updated = 0
+        
         for team_data in CPU_TEAMS:
             existing = db.query(Team).filter(Team.id == team_data["id"]).first()
             if not existing:
                 team = Team(**team_data)
                 db.add(team)
                 teams_added += 1
+            else:
+                # Actualizar el equipo existente con is_cpu=True
+                existing.is_cpu = team_data.get("is_cpu", False)
+                teams_updated += 1
 
         db.flush()
 
@@ -114,7 +120,7 @@ def seed_cpu_teams():
                 cards_added += 1
 
         db.commit()
-        print(f"✅ Equipos CPU sembrados exitosamente: {teams_added} equipos y {cards_added} cartas creadas.")
+        print(f"✅ Equipos CPU sembrados exitosamente: {teams_added} equipos creados, {teams_updated} equipos actualizados, {cards_added} cartas nuevas.")
     except Exception as e:
         db.rollback()
         print(f"❌ Error al sembrar equipos CPU: {e}")

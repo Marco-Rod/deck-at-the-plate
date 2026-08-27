@@ -7,3 +7,4 @@ alembic==1.13.1
 PyJWT==2.8.0
 python-multipart==0.0.9
 passlib[bcrypt]==1.7.4
+requests==2.31.0

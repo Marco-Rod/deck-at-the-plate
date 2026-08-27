@@ -26,7 +26,7 @@ from typing import Dict, Any
 
 from app.auth import get_current_user
 from app.database import get_db
-from app.models import GameSession, PlayerCardModel, TacticCard
+from app.models import GameSession, PlayerCardModel, TacticCard, Team, GameEventLog
 from app.schemas import (
     PlayTacticRequest,
     PitchActionRequest,
@@ -52,8 +52,88 @@ router = APIRouter(prefix="/api/v1/games", tags=["Motor de Jugabilidad 1v1"])
 # Helpers privados
 # ---------------------------------------------------------------------------
 
-def _build_play_resolved_payload(game: GameSession, event: str, description: str) -> dict:
+def _build_play_resolved_payload(game: GameSession, event: str, description: str, inning_completed: bool = False, user_id: str = None, db: Session = None) -> dict:
     """Construye el payload estándar de WebSocket para PLAY_RESOLVED."""
+    state_with_role = dict(game.state_data or {})
+    if user_id:
+        state_with_role["user_role"] = "HOME" if user_id == game.home_user_id else "AWAY"
+    
+    # ⭐ Obtener estadísticas desde la BD
+    pitcher_strikeouts = {}
+    batter_stats = {}
+    home_hits_total = 0
+    away_hits_total = 0
+    inning_runs = {}  # ⭐ NUEVO: {inning: {top: runs, bottom: runs}}
+    
+    if db:
+        from app.engine.stats_recorder import get_game_box_score
+        try:
+            box_score = get_game_box_score(db, game.id)
+            
+            # Striker strikeouts
+            if box_score and box_score.get("pitchers"):
+                for pitcher_id, pitcher_stats in box_score["pitchers"].items():
+                    pitcher_strikeouts[pitcher_id] = pitcher_stats.get("strikeouts", 0)
+            
+            # Batter stats (simplificado: solo los datos clave)
+            if box_score and box_score.get("batters"):
+                # Obtener lineups desde state_data (más confiable)
+                home_lineup = state_with_role.get("home_lineup", [])
+                away_lineup = state_with_role.get("away_lineup", [])
+                
+                home_lineup_ids = set(str(p) if isinstance(p, str) else str(p.get("id", "")) for p in home_lineup if p)
+                away_lineup_ids = set(str(p) if isinstance(p, str) else str(p.get("id", "")) for p in away_lineup if p)
+                
+                print(f"⭐ [DEBUG HITS] home_lineup_ids({len(home_lineup_ids)}): {home_lineup_ids}")
+                print(f"⭐ [DEBUG HITS] away_lineup_ids({len(away_lineup_ids)}): {away_lineup_ids}")
+                
+                for batter_id, bat_stats in box_score["batters"].items():
+                    hits = bat_stats.get("hits", 0)
+                    batter_id_str = str(batter_id)
+                    
+                    batter_stats[batter_id] = {
+                        "at_bats": bat_stats.get("at_bats", 0),
+                        "hits": hits,
+                        "doubles": bat_stats.get("doubles", 0),
+                        "triples": bat_stats.get("triples", 0),
+                        "home_runs": bat_stats.get("home_runs", 0),
+                        "rbi": bat_stats.get("rbi", 0),
+                        "runs": bat_stats.get("runs", 0),
+                        "strikeouts": bat_stats.get("strikeouts", 0),
+                        "walks": bat_stats.get("walks", 0),
+                    }
+                    
+                    # Acumular hits por equipo (comparar tanto el objeto como string)
+                    if batter_id in home_lineup_ids or batter_id_str in home_lineup_ids:
+                        home_hits_total += hits
+                        print(f"⭐ [HITS] HOME batter {batter_id}: {hits} hits (total: {home_hits_total})")
+                    elif batter_id in away_lineup_ids or batter_id_str in away_lineup_ids:
+                        away_hits_total += hits
+                        print(f"⭐ [HITS] AWAY batter {batter_id}: {hits} hits (total: {away_hits_total})")
+                    else:
+                        print(f"⭐ [HITS] UNMAPPED batter {batter_id} ({batter_id_str}): {hits} hits (not in either lineup)")
+            
+            # ⭐ NUEVO: Calcular carreras por inning desde GameEventLog
+            if db:
+                events = db.query(GameEventLog).filter(GameEventLog.game_id == game.id).all()
+                
+                # Agrupar por inning y is_top_inning
+                for event_log in events:
+                    inning_key = f"{event_log.inning}_{event_log.is_top_inning}"
+                    if inning_key not in inning_runs:
+                        inning_runs[inning_key] = 0
+                    inning_runs[inning_key] += event_log.runs_scored
+                
+                print(f"⭐ [INNING RUNS] Desglose por entrada: {inning_runs}")
+                
+        except Exception as e:
+            print(f"⚠️ [STATS] Error obteniendo box score: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    # ⭐ DEBUG
+    print(f"📊 [PLAY_RESOLVED PAYLOAD] event={event}, pitchers={len(pitcher_strikeouts)}, batters={len(batter_stats)}, home_hits={home_hits_total}, away_hits={away_hits_total}")
+    
     return {
         "type": "PLAY_RESOLVED",
         "event": event,
@@ -65,7 +145,13 @@ def _build_play_resolved_payload(game: GameSession, event: str, description: str
         "score_away": game.score_away,
         "current_inning": game.current_inning,
         "is_top_inning": game.is_top_inning,
-        "state_data": game.state_data,
+        "state_data": state_with_role,
+        "inning_completed": inning_completed,
+        "pitcher_strikeouts": pitcher_strikeouts,
+        "batter_stats": batter_stats,  # ⭐ NUEVO
+        "home_hits": home_hits_total,  # ⭐ NUEVO
+        "away_hits": away_hits_total,  # ⭐ NUEVO
+        "inning_runs": inning_runs,    # ⭐ NUEVO: {inning_is_top: runs}
     }
 
 
@@ -125,12 +211,13 @@ async def _resolve_swing(
     guessed_pitch: str | None,
     db: Session,
     game_id: str,
-) -> tuple[str, str]:
+    user_id: str = None,  # ⭐ NUEVO: para incluir user_role en el payload
+) -> tuple[str, str, bool]:
     """
     Núcleo compartido entre execute_swing (humano) y la CPU en PvE.
 
     Ejecuta los pasos 1-6 del at-bat: fatiga, tácticas, cálculo, transición
-    y broadcast WS. Persiste el estado y retorna (event, description).
+    y broadcast WS. Persiste el estado y retorna (event, description, inning_ended).
 
     Args:
         game:          Instancia de GameSession (será mutada).
@@ -210,40 +297,99 @@ async def _resolve_swing(
     if inning_ended:
         description += " Tres outs registrados. Cambio de entrada."
 
+    # ⭐ NUEVO: Registrar evento en estadísticas
+    if at_bat_ended:
+        from app.engine.stats_recorder import record_game_event
+        
+        runs_scored = 0
+        rbi = 0
+        
+        # Calcular carreras y RBIs anotadas
+        if event not in ("STRIKEOUT", "OUT_FLY", "OUT_GROUND"):
+            current_runners = state.get("runners", {"1b": None, "2b": None, "3b": None})
+            # Carreras anotadas = corredores que avanzan
+            if event == "HOME_RUN":
+                runs_scored = 1 + sum(1 for r in current_runners.values() if r)  # Bateador + corredores
+                rbi = runs_scored
+            elif event == "HIT_3B":
+                runs_scored = sum(1 for r in ["2b", "3b"] if current_runners.get(r))
+                rbi = runs_scored
+            elif event == "HIT_2B":
+                runs_scored = sum(1 for r in ["3b"] if current_runners.get(r))
+                rbi = runs_scored
+            elif event == "HIT_1B":
+                runs_scored = 1 if current_runners.get("3b") else 0
+                rbi = runs_scored
+        
+        try:
+            record_game_event(
+                db=db,
+                game_id=game_id,
+                event_type=event,
+                inning=game.current_inning,
+                is_top_inning=game.is_top_inning,
+                batter_id=active_batter_id,
+                pitcher_id=active_pitcher_id,
+                balls=game.balls,
+                strikes=game.strikes,
+                outs=game.outs,
+                runners_on_base=state.get("runners", {}),
+                runs_scored=runs_scored,
+                rbi=rbi,
+            )
+            print(f"✅ [STATS] Evento registrado: {event}")
+        except Exception as e:
+            print(f"❌ [STATS ERROR] {e}")
+
     # --- 7. Persistir y hacer broadcast ---
     state["current_pitch"] = None
     state["last_event"] = event
     game.state_data = state
 
+    db.add(game)
     db.commit()
     db.refresh(game)
 
-    await manager.broadcast_to_game(game_id, _build_play_resolved_payload(game, event, description))
-    return event, description
+    # ⭐ ASEGURAR que los strikeouts están frescos de la BD antes de enviar por WebSocket
+    payload = _build_play_resolved_payload(game, event, description, inning_completed=inning_ended, user_id=user_id, db=db)
+    await manager.broadcast_to_game(game_id, payload)
+    return event, description, inning_ended
 
 
 def _is_cpu_turn(game: GameSession, state: dict, required_role: str) -> bool:
     """
     Determina si en este momento le toca actuar a la CPU.
 
-    En modo PvE el humano es siempre HOME:
-      - Top inning  → CPU (away) está pitcheando, humano batea.
-      - Bot inning  → Humano (home) pichea, CPU (away) batea.
+    En modo PvE:
+      - Si CPU es AWAY: Alta → CPU pichea, humano batea. Baja → humano pichea, CPU batea.
+      - Si CPU es HOME: Alta → CPU pichea, humano batea. Baja → humano pichea, CPU batea.
 
     Args:
         required_role: 'PITCHER' o 'BATTER' — el rol que se está evaluando.
     """
     if state.get("mode") != "PVE":
         return False
-    if game.away_user_id != "CPU_BOT":
-        return False
+    
+    # ⭐ ARREGLADO: Identificar dónde está la CPU
+    is_cpu_home = game.home_user_id == "CPU_BOT"
+    is_cpu_away = game.away_user_id == "CPU_BOT"
+    
+    if not (is_cpu_home or is_cpu_away):
+        return False  # No hay CPU en este juego
 
-    # En la Alta (top) la visita batea y el local pichea.
-    # En la Baja (bot) el local batea y la visita pichea.
     if required_role == "PITCHER":
-        return not game.is_top_inning  # CPU pichea solo en la baja (si es away)
+        # CPU pichea en la Alta si es local, o en la Baja si es visitante
+        if is_cpu_home:
+            return game.is_top_inning      # CPU local pichea en Alta
+        else:
+            return not game.is_top_inning  # CPU visitante pichea en Baja
+    
     if required_role == "BATTER":
-        return game.is_top_inning      # CPU batea en la alta
+        # CPU batea en la Alta si es visitante, o en la Baja si es local
+        if is_cpu_away:
+            return game.is_top_inning      # CPU visitante batea en Alta
+        else:
+            return not game.is_top_inning  # CPU local batea en Baja
 
     return False
 
@@ -251,29 +397,23 @@ def _is_cpu_turn(game: GameSession, state: dict, required_role: str) -> bool:
 async def trigger_cpu_response_if_needed(game: GameSession, state: dict, db: Session, game_id: str) -> None:
     """
     En partidas PvE, evalúa si le toca actuar a la CPU y ejecuta su acción.
-
-    Se llama al final de select_pitch y execute_swing (cuando el juego no terminó).
-
-    Casos:
-      A. El humano acaba de pichear (Bot inning):
-         → La CPU elige su swing y se resuelve la jugada completa.
-
-      B. El humano acaba de completar un at-bat como bateador (Top inning,
-         o justo cambió la media entrada y la CPU debe pichear primero):
-         → La CPU selecciona su picheo y emite PITCH_COMMITTED.
-         → El siguiente ciclo (cuando el humano haga swing) completará la jugada.
     """
     if state.get("mode") != "PVE" or state.get("is_game_over"):
         return
 
     difficulty = state.get("difficulty", "MEDIUM")
+    
+    print(f"🤖 DEBUG trigger_cpu_response_if_needed:")
+    print(f"   is_top_inning={game.is_top_inning}, home_user={game.home_user_id}, away_user={game.away_user_id}")
+    print(f"   cpu_turn_pitcher={_is_cpu_turn(game, state, 'PITCHER')}, cpu_turn_batter={_is_cpu_turn(game, state, 'BATTER')}")
+    print(f"   current_pitch={bool(state.get('current_pitch'))}")
 
     # Caso A: la CPU debe batear (hay un picheo humano pendiente)
-    # Ocurre en el Bot inning cuando el humano (home) acaba de pichear.
     if _is_cpu_turn(game, state, "BATTER") and state.get("current_pitch"):
+        print(f"   ✅ CPU debería batear (Caso A)")
         cpu_swing = get_cpu_swing_action(difficulty)
 
-        await _resolve_swing(
+        _, _, _ = await _resolve_swing(
             game=game,
             state=state,
             swing_type=cpu_swing["swing_type"],
@@ -281,19 +421,34 @@ async def trigger_cpu_response_if_needed(game: GameSession, state: dict, db: Ses
             guessed_pitch=cpu_swing.get("guessed_pitch"),
             db=db,
             game_id=game_id,
+            user_id=None,  # CPU swing, sin user_id específico
         )
         # Tras el swing de la CPU puede haber cambiado la media entrada.
-        # Si ahora le toca lanzar a la CPU (nueva Alta), generar el picheo.
         state = dict(game.state_data or {})
         if state.get("is_game_over"):
             return
 
     # Caso B: la CPU debe pichear (no hay picheo pendiente y es el turno de la CPU)
     if _is_cpu_turn(game, state, "PITCHER") and not state.get("current_pitch"):
+        print(f"   ✅ CPU debería pichear (Caso B)")
+        # Usar solo pitch types del repertorio real de la carta del pitcher activo
+        active_pitcher_id = state.get("active_pitcher")
         cpu_pitch = get_cpu_pitch_action(difficulty)
+
+        if active_pitcher_id:
+            pitcher_card = db.query(PlayerCardModel).filter(
+                PlayerCardModel.id == active_pitcher_id
+            ).first()
+            if pitcher_card and pitcher_card.repertoire:
+                available_types = [p["pitch_type"] for p in pitcher_card.repertoire]
+                if available_types:
+                    import random as _random
+                    cpu_pitch["pitch_type"] = _random.choice(available_types)
+
         state["current_pitch"] = cpu_pitch
         game.state_data = state
         db.commit()
+        print(f"   ✅ CPU picheo: {cpu_pitch['pitch_type']} a zona {cpu_pitch['zone']}")
 
         await manager.broadcast_to_game(game_id, {
             "type": "PITCH_COMMITTED",
@@ -386,11 +541,19 @@ async def select_pitch(
     if active_pitcher_id:
         pitcher_card = db.query(PlayerCardModel).filter(PlayerCardModel.id == active_pitcher_id).first()
         if pitcher_card and payload.pitch_type != "IBB":
+            # Validar que existe en repertorio
             pitch_stats = pitcher_card.get_pitch_stats(payload.pitch_type)
             if not pitch_stats:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"El lanzador {pitcher_card.name} no tiene el picheo '{payload.pitch_type}' en su repertorio."
+                )
+            
+            # ⭐ Validar que no exceda máximo de 4 pitcheos
+            if not pitcher_card.validate_repertoire():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"El lanzador {pitcher_card.name} tiene un repertorio inválido (máximo 4 pitcheos únicos)."
                 )
                 
     state["current_pitch"] = {
@@ -434,17 +597,28 @@ async def execute_swing(
     En PvE, tras resolver la jugada del humano, la CPU genera su picheo
     automáticamente si le corresponde pichear en la siguiente media entrada.
     """
+    print(f"🎯 DEBUG swing: game_id={game_id}, user_id={current_user_id}")
+    
     game = db.query(GameSession).filter(GameSession.id == game_id).first()
     if not game:
+        print(f"❌ ERROR: Juego no encontrado: {game_id}")
         raise HTTPException(status_code=404, detail="Sesión de juego no encontrada.")
 
-    verify_player_turn(game, current_user_id, required_role="BATTER")
+    print(f"   home_user_id={game.home_user_id}, away_user_id={game.away_user_id}, is_top_inning={game.is_top_inning}")
+    
+    try:
+        verify_player_turn(game, current_user_id, required_role="BATTER")
+    except HTTPException as e:
+        print(f"❌ TURN VERIFICATION FAILED: {e.detail}")
+        raise
 
     state = dict(game.state_data or {})
     if not state.get("current_pitch"):
+        print(f"❌ ERROR: No hay picheo previo en state")
         raise HTTPException(status_code=400, detail="El lanzador aún no ha realizado su picheo para este turno.")
 
-    event, description = await _resolve_swing(
+    print(f"   ✅ Swing válido, resolviendo jugada...")
+    event, description, inning_ended = await _resolve_swing(
         game=game,
         state=state,
         swing_type=payload.swing_type,
@@ -452,6 +626,7 @@ async def execute_swing(
         guessed_pitch=payload.guessed_pitch,
         db=db,
         game_id=game_id,
+        user_id=current_user_id,  # ⭐ NUEVO: pasar user_id
     )
 
     # En PvE: si la CPU debe pichear en la siguiente media entrada, lo hace ahora.

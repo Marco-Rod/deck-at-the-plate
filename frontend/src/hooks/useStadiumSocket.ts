@@ -28,7 +28,8 @@ interface SwingPayload {
 
 interface UseStadiumSocketReturn {
   gameState: GameStateWS | null;
-  lastResult: string | null;
+  lastResult: { text: string; event: string; ts: number } | null;
+  inningCompleted: { ts: number } | null;
   hasPitched: boolean;
   isConnected: boolean;
   sendPitch: (zone: number, pitchType: PitchType) => Promise<void>;
@@ -36,9 +37,12 @@ interface UseStadiumSocketReturn {
   sendTactic: (tacticId: string, playerRole: 'PITCHER' | 'BATTER') => Promise<void>;
 }
 
-function parseStateData(payload: { current_inning: number; is_top_inning: boolean; score_home: number; score_away: number; balls: number; strikes: number; outs: number; state_data: Record<string, unknown> }): GameStateWS {
+function parseStateData(payload: { current_inning: number; is_top_inning: boolean; score_home: number; score_away: number; balls: number; strikes: number; outs: number; state_data: Record<string, unknown>; pitcher_strikeouts?: Record<string, number>; batter_stats?: Record<string, any>; home_hits?: number; away_hits?: number; inning_runs?: Record<string, number> }): GameStateWS {
   const stateData = payload.state_data || {};
   const runners = (stateData.runners as Record<string, string | null>) || { '1b': null, '2b': null, '3b': null };
+
+  console.log('⭐ [PARSE_STATE_DATA] hits:', { home_hits: payload.home_hits, away_hits: payload.away_hits });
+  console.log('⭐ [PARSE_STATE_DATA] inning_runs:', payload.inning_runs);
 
   return {
     currentInning: payload.current_inning,
@@ -53,10 +57,18 @@ function parseStateData(payload: { current_inning: number; is_top_inning: boolea
       b2: runners['2b'] || null,
       b3: runners['3b'] || null,
     },
+    totalInnings: (stateData.total_innings as number) || 9,
     activePitcherId: stateData.active_pitcher as string | undefined,
     activeBatterId: stateData.active_batter as string | undefined,
     isGameOver: !!(stateData.is_game_over),
     winnerMessage: stateData.winner_message as string | undefined,
+    rivalTeamName: stateData.rival_team_name as string | undefined,
+    state_data: stateData,
+    pitcher_strikeouts: payload.pitcher_strikeouts || {},
+    batter_stats: payload.batter_stats || {},
+    homeHits: payload.home_hits || 0, // ⭐ del backend
+    awayHits: payload.away_hits || 0, // ⭐ del backend
+    inning_runs: payload.inning_runs || {}, // ⭐ del backend: {"1_true": 2, "1_false": 1}
   };
 }
 
@@ -65,7 +77,8 @@ export const useStadiumSocket = (
   userId: string
 ): UseStadiumSocketReturn => {
   const [gameState, setGameState] = useState<GameStateWS | null>(null);
-  const [lastResult, setLastResult] = useState<string | null>(null);
+  const [lastResult, setLastResult] = useState<{ text: string; event: string; ts: number } | null>(null);
+  const [inningCompleted, setInningCompleted] = useState<{ ts: number } | null>(null);
   const [hasPitched, setHasPitched] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
   const socketRef = useRef<WebSocket | null>(null);
@@ -77,15 +90,20 @@ export const useStadiumSocket = (
       .replace(/^http/, 'ws');
     const wsUrl = `${wsHost}/ws/games/${gameId}/${userId}`;
 
+    // Flag para ignorar eventos si el efecto ya fue limpiado (doble montaje de StrictMode)
+    let cancelled = false;
+
     const ws = new WebSocket(wsUrl);
     socketRef.current = ws;
 
     ws.onopen = () => {
+      if (cancelled) { ws.close(); return; }
       setIsConnected(true);
       console.log(`[WS] Conectado exitosamente a ${gameId}`);
     };
 
     ws.onmessage = (event) => {
+      if (cancelled) return;
   try {
     const data = JSON.parse(event.data);
 
@@ -105,15 +123,33 @@ export const useStadiumSocket = (
 
       case 'PLAY_RESOLVED': {
         const payload = data as PlayResolvedPayload;
-        setGameState(parseStateData(payload));
-        // Solo asignamos a lastResult el resultado real de la jugada (ej: "HIT 1B", "OUT", etc.)
-        setLastResult(payload.description);
-        setHasPitched(false);
+        console.log('🔵 [FRONTEND] PLAY_RESOLVED received:');
+        console.log('   event:', payload.event);
+        console.log('   score_home:', payload.score_home);
+        console.log('   score_away:', payload.score_away);
+        
+        // ⭐ NUEVO: Mostrar el modal PRIMERO con el evento, luego actualizar estado
+        setLastResult({ text: payload.description, event: payload.event, ts: Date.now() });
+        console.log('   ⏳ [UX] Modal mostrado. Retardando actualización de estado 300ms...');
+        
+        // Retardar la actualización del estado del juego 300ms para que el modal se muestre primero
+        setTimeout(() => {
+          setGameState(parseStateData(payload));
+          setHasPitched(false);
+          console.log('   ✅ [UX] Estado del juego actualizado');
+          
+          // Detectar si la entrada terminó
+          if (payload.inning_completed) {
+            setInningCompleted({ ts: Date.now() });
+          }
+        }, 300);
+        
         break;
       }
 
       case 'STEAL_RESOLVED': {
-        setLastResult((data.description as string) || null);
+        const desc = (data.description as string) || null;
+        if (desc) setLastResult({ text: desc, event: 'STEAL', ts: Date.now() });
         break;
       }
 
@@ -126,15 +162,20 @@ export const useStadiumSocket = (
 };
 
     ws.onclose = () => {
+      if (cancelled) return;
       setIsConnected(false);
       console.log(`[WS] Desconectado de la partida ${gameId}`);
     };
 
     ws.onerror = (err) => {
+      if (cancelled) return;
       console.error('[WS] Error de conexión:', err);
+      console.error('[WS] URL intentada:', wsUrl);
     };
 
     return () => {
+      // Marcar como cancelado para ignorar cualquier evento pendiente
+      cancelled = true;
       if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
         ws.close();
       }
@@ -175,5 +216,5 @@ export const useStadiumSocket = (
     [gameId]
   );
 
-  return { gameState, lastResult, hasPitched, isConnected, sendPitch, sendSwing, sendTactic };
+  return { gameState, lastResult, inningCompleted, hasPitched, isConnected, sendPitch, sendSwing, sendTactic };
 };

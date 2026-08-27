@@ -217,6 +217,23 @@ export const games = {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
+
+  /**
+   * Obtiene el box score (resumen de estadísticas) de una partida.
+   * @param {string} gameId
+   * @returns {Promise<{game_id, final_score, box_score}>}
+   */
+  getBoxScore: (gameId) =>
+    _request(`/api/v1/games/${gameId}/box-score`),
+
+  /**
+   * Obtiene las estadísticas de un jugador específico en una partida.
+   * @param {string} gameId
+   * @param {string} playerId
+   * @returns {Promise<{game_id, player_id, stats}>}
+   */
+  getPlayerGameStats: (gameId, playerId) =>
+    _request(`/api/v1/games/${gameId}/player/${playerId}/stats`),
 };
 
 // ---------------------------------------------------------------------------
@@ -286,6 +303,12 @@ export const user = {
    * @returns {Promise<{overall: number, batOvr: number, pitOvr: number}>}
    */
   getTeamStats: (userId) => _request(`/api/v1/user/${userId}/team-stats`),
+
+  /**
+   * Obtiene todos los equipos disponibles para seleccionar como franquicia base.
+   * @returns {Promise<Array>} - Array de equipos con id, name, city, color, badge, desc
+   */
+  getAvailableTeams: () => _request('/api/v1/teams/cpu'),
 };
 
 // ---------------------------------------------------------------------------

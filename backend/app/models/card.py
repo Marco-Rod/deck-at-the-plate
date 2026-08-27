@@ -87,6 +87,45 @@ class PlayerCardModel(Base):
             if pitch.get("pitch_type") == pitch_type_name:
                 return pitch
         return None
+    
+    def validate_repertoire(self) -> bool:
+        """
+        Valida que el repertorio no tenga más de 4 pitcheos únicos.
+        Retorna True si es válido, False si excede el límite.
+        """
+        if not self.repertoire:
+            return True
+        
+        # Limitar a máximo 4 pitcheos únicos
+        if len(self.repertoire) > 4:
+            return False
+        
+        # Verificar que no hay duplicados
+        pitch_types = [p.get("pitch_type") for p in self.repertoire]
+        return len(pitch_types) == len(set(pitch_types))
+
+    @staticmethod
+    def get_rarity_by_overall(overall: int) -> "CardRarity":
+        """
+        Asigna rareza automáticamente basada en el overall del jugador.
+        
+        Mapeo:
+        - 90-99: DIAMOND (Élite)
+        - 85-89: GOLD (Estelar)
+        - 80-84: SILVER (Muy Bueno)
+        - 75-79: BRONZE (Bueno)
+        - < 75: COMMON (Base)
+        """
+        if overall >= 90:
+            return CardRarity.DIAMOND
+        elif overall >= 85:
+            return CardRarity.GOLD
+        elif overall >= 80:
+            return CardRarity.SILVER
+        elif overall >= 75:
+            return CardRarity.BRONZE
+        else:
+            return CardRarity.COMMON
 
 
 class TacticCard(Base):

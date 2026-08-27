@@ -155,6 +155,10 @@ def seed_database():
         for card_data in INITIAL_CARDS:
             existing = db.query(PlayerCardModel).filter(PlayerCardModel.id == card_data["id"]).first()
             if not existing:
+                # Asignar rareza automáticamente basada en overall
+                if "rarity" not in card_data or card_data["rarity"] is None:
+                    card_data["rarity"] = PlayerCardModel.get_rarity_by_overall(card_data["overall"])
+                
                 card = PlayerCardModel(**card_data)
                 db.add(card)
                 cards_added += 1

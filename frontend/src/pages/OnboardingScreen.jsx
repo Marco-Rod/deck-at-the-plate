@@ -1,6 +1,7 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { user as userApi, shop as shopApi } from '../utils/api';
 import { PlayerCard } from '../components/cards/PlayerCard';
+import { FranchiseCarousel } from '../components/FranchiseCarousel';
 import { soundFx } from '../utils/audioManager';
 
 const PRESET_COLORS = [
@@ -42,6 +43,7 @@ export default function OnboardingScreen({ userId, onComplete }) {
   const [step, setStep] = useState('CREATE_TEAM');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [availableTeams, setAvailableTeams] = useState([]);
 
   // Estado del Formulario de Club
   const [teamForm, setTeamForm] = useState({
@@ -57,6 +59,25 @@ export default function OnboardingScreen({ userId, onComplete }) {
   const [selectedFranchise, setSelectedFranchise] = useState('LAD');
   const [claimedCards, setClaimedCards] = useState([]);
   const [selectedCard, setSelectedCard] = useState(null);
+
+  // Cargar equipos cuando llegamos a SELECT_FRANCHISE
+  useEffect(() => {
+    if (step === 'SELECT_FRANCHISE' && availableTeams.length === 0) {
+      const loadTeams = async () => {
+        try {
+          const teams = await userApi.getAvailableTeams();
+          setAvailableTeams(teams);
+          if (teams.length > 0) {
+            setSelectedFranchise(teams[0].id);
+          }
+        } catch (err) {
+          console.error('Error loading teams:', err);
+          setError('No se pudieron cargar los equipos disponibles.');
+        }
+      };
+      loadTeams();
+    }
+  }, [step, availableTeams.length]);
 
   // 1. Manejar Creación del Club
   const handleCreateTeam = async (e) => {
@@ -117,7 +138,7 @@ export default function OnboardingScreen({ userId, onComplete }) {
   }, [claimedCards]);
 
   return (
-    <div className="min-h-screen bg-[#0A0D0F] text-[#E6DFD3] flex flex-col items-center justify-center p-6 font-mono select-none">
+    <div className="min-h-screen text-[#E6DFD3] flex flex-col items-center justify-center p-6 font-mono select-none">
       
       {/* PASO 1: FORMULARIO DE FUNDACIÓN DE CLUB */}
       {step === 'CREATE_TEAM' && (
@@ -225,48 +246,33 @@ export default function OnboardingScreen({ userId, onComplete }) {
 
       {/* PASO 2: SELECCIÓN DE FRANQUICIA BASE Y SOBRE */}
       {step === 'SELECT_FRANCHISE' && (
-        <div className="max-w-xl w-full border-2 border-[#C5A059]/50 p-8 bg-[#121619] shadow-2xl text-center">
+        <div className="max-w-4xl w-full border-2 border-[#C5A059]/50 p-8 bg-[#121619] shadow-2xl text-center">
           <span className="text-xs text-[#C5A059] uppercase tracking-widest block mb-1">
             ★ Paso 2 de 2 ★
           </span>
           <h2 className="text-3xl font-extrabold text-white uppercase tracking-wider mb-2 font-sports">
             Selecciona tu Franquicia Base
           </h2>
-          <p className="text-xs text-gray-400 mb-6">
-            Tu club <span className="text-[#C5A059] font-bold">"{teamForm.name}"</span> recibirá su sobre inicial con jugadores de este equipo.
+          <p className="text-xs text-gray-400 mb-8">
+            Tu club <span className="text-[#C5A059] font-bold">"{teamForm.name}"</span> recibirá 5 jugadores de campo, 2 lanzadores y 6 jugadores aleatorios de otros equipos.
           </p>
 
-          <div className="grid grid-cols-2 gap-4 mb-6">
-            {FRANCHISES.map((team) => (
-              <button
-                key={team.id}
-                type="button"
-                onClick={() => setSelectedFranchise(team.id)}
-                className={`p-5 border-2 transition-all flex flex-col items-center gap-2 cursor-pointer rounded ${
-                  selectedFranchise === team.id
-                    ? 'border-[#C5A059] bg-[#1A3323] scale-105 shadow-[0_0_20px_rgba(197,160,89,0.3)]'
-                    : 'border-[#2C3E35] bg-[#0A0D0F] opacity-60 hover:opacity-100'
-                }`}
-              >
-                <div
-                  className="w-16 h-16 rounded-full flex items-center justify-center text-xl font-bold text-white border border-white/20 shadow-inner font-sports"
-                  style={{ backgroundColor: team.color }}
-                >
-                  {team.badge}
-                </div>
-                <span className="font-bold text-sm text-white uppercase font-sports">{team.name}</span>
-                <span className="text-[10px] text-gray-400">{team.description}</span>
-              </button>
-            ))}
-          </div>
+          {/* Carrusel Infinito */}
+          {availableTeams.length > 0 && (
+            <FranchiseCarousel
+              teams={availableTeams}
+              selectedTeamId={selectedFranchise}
+              onSelectTeam={(team) => setSelectedFranchise(team.id)}
+            />
+          )}
 
-          {error && <p className="text-red-400 text-xs mb-4">{error}</p>}
+          {error && <p className="text-red-400 text-xs mb-4 mt-6">{error}</p>}
 
           <button
             type="button"
             disabled={loading}
             onClick={handleClaimStarterPack}
-            className="w-full py-4 bg-[#1A3323] hover:bg-[#2D5A3F] border-2 border-[#C5A059] text-[#F7F5F0] font-sports text-2xl tracking-widest uppercase transition-all cursor-pointer disabled:opacity-50"
+            className="w-full py-4 mt-8 bg-[#1A3323] hover:bg-[#2D5A3F] border-2 border-[#C5A059] text-[#F7F5F0] font-sports text-2xl tracking-widest uppercase transition-all cursor-pointer disabled:opacity-50"
           >
             {loading ? 'Asignando Mazo...' : '⚡ Confirmar y Reclamar Sobre'}
           </button>
@@ -275,8 +281,8 @@ export default function OnboardingScreen({ userId, onComplete }) {
 
       {/* PASO 3: ANIMACIÓN INTERACTIVA DEL SOBRE */}
       {step === 'PACK_UNBOX' && (
-        <div className="text-center flex flex-col items-center justify-center gap-4">
-          <span className="text-xs text-[#C5A059] uppercase tracking-widest">
+        <div className="text-center flex flex-col items-center justify-center gap-4 min-h-screen justify-center">
+          <span className="text-xs text-[#C5A059] uppercase tracking-widest animate-pulse">
             ¡Bienvenido a la Liga!
           </span>
           <h2 className="text-3xl font-extrabold text-white uppercase tracking-wide font-sports">
@@ -285,56 +291,119 @@ export default function OnboardingScreen({ userId, onComplete }) {
 
           <button
             type="button"
-            onClick={() => setStep('SHOW_CARDS')}
-            className="group relative cursor-pointer my-6 transition-transform hover:scale-105 active:scale-95"
+            onClick={() => {
+              if (soundFx?.playPackOpen) soundFx.playPackOpen();
+              setStep('SHOW_CARDS');
+            }}
+            className="group relative cursor-pointer my-6 transition-transform hover:scale-110 active:scale-95"
           >
-            <div className="w-64 h-96 bg-gradient-to-br from-[#C5A059] via-[#8A6D3B] to-[#423318] border-4 border-[#F7F5F0] rounded-xl flex flex-col items-center justify-between p-6 shadow-[0_0_50px_rgba(197,160,89,0.5)] relative overflow-hidden">
-              <div className="absolute inset-0 bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity" />
-              <span className="text-[10px] font-bold uppercase text-[#121619] tracking-widest bg-white/90 px-2 py-0.5 rounded shadow">
-                Starter Pack
+            {/* Luz de fondo dinámica */}
+            <div className="absolute inset-0 blur-3xl opacity-0 group-hover:opacity-100 transition-opacity duration-500 bg-gradient-to-br from-[#C5A059] via-[#8A6D3B] to-transparent animate-pulse"></div>
+            
+            {/* Sobre principal */}
+            <div className="relative w-64 h-96 bg-gradient-to-br from-[#D4AF37] via-[#C5A059] to-[#8A6D3B] border-4 border-[#F7F5F0] rounded-2xl flex flex-col items-center justify-between p-6 shadow-[0_0_80px_rgba(197,160,89,0.8)] overflow-hidden group-hover:shadow-[0_0_120px_rgba(212,175,55,1)]">
+              
+              {/* Brillo interior animado */}
+              <div className="absolute inset-0 bg-white/5 opacity-0 group-hover:opacity-30 transition-opacity duration-300 rounded-2xl" />
+              
+              {/* Partículas de brillo */}
+              <div className="absolute top-2 left-4 w-12 h-12 bg-white/30 blur-2xl rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-500 animate-pulse"></div>
+              <div className="absolute bottom-4 right-6 w-16 h-16 bg-[#FFD700]/20 blur-3xl rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-700"></div>
+              
+              {/* Borde de brillo superior */}
+              <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-white/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+              
+              <span className="text-[10px] font-black uppercase text-[#1A1A00] tracking-widest bg-gradient-to-r from-white to-yellow-200 px-4 py-1 rounded-full shadow-lg relative z-10">
+                Premium Starter Pack
               </span>
-              <div className="text-6xl my-auto animate-bounce">⚾</div>
-              <div className="text-center">
-                <span className="text-2xl font-black text-white block font-sports tracking-wider">25 CARTAS</span>
-                <span className="text-[10px] text-[#F7F5F0] uppercase tracking-widest block mt-1">
-                  Haz clic para abrir
+              
+              {/* Beisbol animado */}
+              <div className="text-8xl my-auto relative z-10 group-hover:animate-spin" style={{ animationDuration: '2s' }}>
+                ⚾
+              </div>
+              
+              <div className="text-center relative z-10">
+                <span className="text-4xl font-black text-white block font-sports tracking-wider drop-shadow-lg">13 CARTAS</span>
+                <span className="text-[11px] text-[#F7F5F0] uppercase tracking-widest block mt-2 font-bold drop-shadow">
+                  ▶ Haz clic para abrir ◀
                 </span>
+                <span className="text-[10px] text-yellow-300/80 mt-2 block animate-bounce">CLICK AQUI PARA REVELAR TU DESTINO</span>
               </div>
             </div>
+            
+            {/* Brillo externo pulsante */}
+            <div className="absolute -inset-8 border-2 border-[#C5A059]/0 group-hover:border-[#C5A059]/50 rounded-3xl transition-all duration-500 animate-pulse"></div>
           </button>
+
+          <p className="text-xs text-[#C5A059] animate-pulse mt-4">✨ Presiona el sobre para abrir ✨</p>
         </div>
       )}
 
       {/* PASO 4: REVELACIÓN DEL MAZO ORDENADO */}
       {step === 'SHOW_CARDS' && (
-        <div className="w-full max-w-6xl flex flex-col items-center gap-6">
-          <div className="text-center">
-            <h2 className="text-2xl font-extrabold text-[#C5A059] uppercase tracking-wider font-sports">
+        <div className="w-full min-h-screen flex flex-col items-center justify-start pt-6 px-4 pb-6">
+          <div className="text-center mb-4 flex-shrink-0">
+            <h2 className="text-3xl font-extrabold text-[#C5A059] uppercase tracking-wider font-sports drop-shadow-lg">
               ¡Mazo Inicial Desbloqueado!
             </h2>
-            <p className="text-xs text-gray-400 mt-1 font-mono">
-              Haz clic en cualquier carta para ver sus atributos detallados.
+            <p className="text-xs text-gray-400 mt-2 font-mono">
+              🎯 Click para girar • Doble Click para ver detalles • "Revelar Todas" para revelar todo de una vez
             </p>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 w-full max-h-[60vh] overflow-y-auto p-4 border border-[#2C3E35] bg-[#121619]/90 rounded shadow-inner">
-            {sortedCards.map((card) => (
-              <div
-                key={card.id || card.card_id}
-                onClick={() => setSelectedCard(card)}
-                className="scale-90 origin-top cursor-pointer transition-transform hover:scale-95"
-              >
-                <PlayerCard card={card} player={card} cardData={card} />
-              </div>
-            ))}
+          {/* Botón Revelar Todas */}
+          <button
+            type="button"
+            onClick={() => {
+              // Girar solo las cartas que están boca abajo (data-card-flipped="true")
+              const cards = document.querySelectorAll('[data-is-card][data-card-flipped="true"]');
+              cards.forEach((cardElement, idx) => {
+                setTimeout(() => {
+                  // Hacer click directamente en el PlayerCard
+                  cardElement.click();
+                }, idx * 120); // 120ms de stagger entre cada carta
+              });
+            }}
+            className="group relative px-8 py-3 mb-4 flex-shrink-0 bg-gradient-to-r from-[#C5A059] to-[#FFD700] text-[#121619] font-bold tracking-widest uppercase hover:shadow-[0_0_30px_rgba(197,160,89,0.8)] transition-all duration-300 shadow-lg cursor-pointer font-sports text-lg border-2 border-[#F7F5F0] hover:scale-105 active:scale-95"
+          >
+            <span className="drop-shadow-md">⚡ Revelar Todas las Cartas ⚡</span>
+            <div className="absolute inset-0 bg-white/0 group-hover:bg-white/10 transition-colors rounded"></div>
+          </button>
+
+          {/* Cuadrícula de Cartas - Con scroll suave */}
+          <div className="w-full flex-1 flex items-center justify-center px-2 min-h-0">
+            <div className="grid gap-3 w-full h-full overflow-y-auto" style={{
+              gridTemplateColumns: 'repeat(auto-fill, minmax(165px, 1fr))',
+              alignContent: 'start',
+              paddingRight: '8px',
+            }}>
+              {sortedCards.map((card, idx) => (
+                <div
+                  key={card.id || card.card_id}
+                  data-card-flipper
+                  onDoubleClick={() => {
+                    // Double click abre el modal con detalles
+                    setSelectedCard(card);
+                  }}
+                  role="button"
+                  tabIndex={0}
+                  className="flex justify-center cursor-pointer select-none h-fit"
+                  style={{
+                    animationDelay: `${idx * 0.05}s`,
+                  }}
+                >
+                  <PlayerCard card={card} player={card} cardData={card} />
+                </div>
+              ))}
+            </div>
           </div>
 
           <button
             type="button"
             onClick={onComplete}
-            className="px-8 py-4 bg-[#C5A059] text-[#121619] font-bold tracking-widest uppercase hover:bg-[#d4b06a] transition-all shadow-lg cursor-pointer font-sports text-xl"
+            className="px-8 py-4 mt-6 mb-4 flex-shrink-0 bg-[#1A3323] hover:bg-[#2D5A3F] border-2 border-[#C5A059] text-[#F7F5F0] font-bold tracking-widest uppercase transition-all shadow-lg cursor-pointer font-sports text-xl hover:shadow-[0_0_20px_rgba(197,160,89,0.5)]"
           >
-            Ir al Menú Principal
+            ➔ Ir al Menú Principal
           </button>
         </div>
       )}
@@ -358,7 +427,7 @@ export default function OnboardingScreen({ userId, onComplete }) {
             </button>
 
             <span className="text-xs text-[#C5A059] uppercase tracking-widest font-mono">
-              ★ Detalle del Atleta ★
+              ★ Detalle Completo del Atleta ★
             </span>
 
             <div className="scale-110 my-2">

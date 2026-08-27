@@ -8,6 +8,8 @@ class CreateGameRequest(BaseModel):
     away_user_id: Optional[str] = "CPU_BOT"
     game_mode: str = Field("PVP", description="'PVP' o 'PVE'")
     difficulty: Optional[str] = Field("MEDIUM", description="'EASY', 'MEDIUM' o 'HARD'")
+    total_innings: Optional[int] = Field(9, description="Duración del partido: 3, 6 o 9 entradas")
+    player_position: str = Field("HOME", description="'HOME' o 'AWAY' - posición elegida por el jugador humano")
     home_pitcher_id: Optional[str] = None
     away_pitcher_id: Optional[str] = None
     home_lineup: Optional[List[str]] = Field(default_factory=list)

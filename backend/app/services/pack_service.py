@@ -26,60 +26,120 @@ class PackService:
         }
     }
 
-    import random
-from typing import List
-from sqlalchemy.orm import Session
-from fastapi import HTTPException, status
-
-from app.models import PlayerCardModel, CardRarity, UserWallet, UserCardInventory
-
-
-class PackService:
-    PACK_RATES = {
-        "BRONZE": {
-            "price": 500,
-            "cards_count": 3,
-            "rates": {CardRarity.COMMON: 0.60, CardRarity.BRONZE: 0.35, CardRarity.SILVER: 0.05}
-        },
-        "GOLD": {
-            "price": 1500,
-            "cards_count": 4,
-            "rates": {CardRarity.BRONZE: 0.20, CardRarity.SILVER: 0.50, CardRarity.GOLD: 0.25, CardRarity.DIAMOND: 0.05}
-        },
-        "DIAMOND": {
-            "price": 4000,
-            "cards_count": 5,
-            "rates": {CardRarity.SILVER: 0.10, CardRarity.GOLD: 0.60, CardRarity.DIAMOND: 0.30}
-        }
-    }
-
     @staticmethod
     def assign_starter_pack(db: Session, user_id: str, team_id: str) -> List[PlayerCardModel]:
         """
-        Asigna un mazo inicial garantizado de 25 cartas ÚNICAS (sin repetir jugadores).
-        Prioriza el equipo seleccionado y completa con el resto del catálogo.
+        Asigna un mazo inicial de 13 cartas optimizado:
+        
+        Composición:
+        - 5 jugadores inf/outf del equipo elegido (sin duplicar posiciones)
+        - 2 lanzadores del equipo elegido
+        - 6 jugadores aleatorios de otros equipos (sin duplicar posiciones)
+        
+        Total: 13 cartas (9 fielders + 4 pitchers)
+        
+        Evita duplicación de posiciones para cubrir todas las posiciones del campo.
         """
         team_id = team_id.upper()
         
-        # 1. Obtener cartas del equipo elegido
-        team_cards = db.query(PlayerCardModel).filter(PlayerCardModel.team_id == team_id).all()
-
-        # 2. Obtener cartas de otros equipos
-        other_cards = db.query(PlayerCardModel).filter(PlayerCardModel.team_id != team_id).all()
-
-        # Unimos sin duplicados: primero el equipo elegido, luego otros equipos
-        all_unique_cards = team_cards + other_cards
+        selected_cards = []
         
-        if len(all_unique_cards) < 25:
+        # 1. OBTENER JUGADORES DEL EQUIPO ELEGIDO
+        team_fielders = db.query(PlayerCardModel).filter(
+            PlayerCardModel.team_id == team_id,
+            PlayerCardModel.position.notin_(["SP", "RP", "CP"]),
+            ~PlayerCardModel.is_two_way
+        ).all()
+        
+        team_pitchers = db.query(PlayerCardModel).filter(
+            PlayerCardModel.team_id == team_id,
+            PlayerCardModel.position.in_(["SP", "RP", "CP"])
+        ).all()
+        
+        # 2. SELECCIONAR 5 FIELDERS DEL EQUIPO (SIN DUPLICAR POSICIONES)
+        if len(team_fielders) >= 5:
+            # Agrupar por posición
+            fielders_by_pos = {}
+            for card in team_fielders:
+                pos = card.position
+                if pos not in fielders_by_pos:
+                    fielders_by_pos[pos] = []
+                fielders_by_pos[pos].append(card)
+            
+            # Seleccionar uno de cada posición hasta llegar a 5
+            selected_from_team_fielders = []
+            for pos, cards in fielders_by_pos.items():
+                if len(selected_from_team_fielders) < 5:
+                    selected_from_team_fielders.append(random.choice(cards))
+            
+            # Si aún necesitamos más, agregar más de otras posiciones
+            remaining_fielders = [c for c in team_fielders if c not in selected_from_team_fielders]
+            while len(selected_from_team_fielders) < 5 and remaining_fielders:
+                selected_from_team_fielders.append(random.choice(remaining_fielders))
+                remaining_fielders.remove(selected_from_team_fielders[-1])
+            
+            selected_cards.extend(selected_from_team_fielders)
+        else:
+            selected_cards.extend(team_fielders)
+        
+        # 3. SELECCIONAR 2 LANZADORES DEL EQUIPO
+        if len(team_pitchers) >= 2:
+            selected_cards.extend(random.sample(team_pitchers, 2))
+        else:
+            selected_cards.extend(team_pitchers)
+        
+        # 4. OBTENER JUGADORES DE OTROS EQUIPOS (PARA COMPLETAR 6 MÁS)
+        cards_needed = 13 - len(selected_cards)  # Normalmente 6
+        
+        other_team_cards = db.query(PlayerCardModel).filter(
+            PlayerCardModel.team_id != team_id
+        ).all()
+        
+        # Agrupar por posición para evitar duplicación
+        other_cards_by_pos = {}
+        for card in other_team_cards:
+            pos = card.position
+            if pos not in other_cards_by_pos:
+                other_cards_by_pos[pos] = []
+            other_cards_by_pos[pos].append(card)
+        
+        # Seleccionar cartas de otros equipos evitando duplicar posiciones ya seleccionadas
+        selected_positions = {}
+        for card in selected_cards:
+            pos = card.position
+            selected_positions[pos] = selected_positions.get(pos, 0) + 1
+        
+        other_team_selected = []
+        for pos, cards in other_cards_by_pos.items():
+            # Si esta posición ya está saturada en el pack, saltarla
+            if selected_positions.get(pos, 0) >= 2:
+                continue
+            
+            # Agregar una carta de esta posición
+            if cards and len(other_team_selected) < cards_needed:
+                other_team_selected.append(random.choice(cards))
+                selected_positions[pos] = selected_positions.get(pos, 0) + 1
+        
+        # Si aún faltan cartas, agregar cualquiera (podría haber duplicación menor)
+        if len(other_team_selected) < cards_needed:
+            remaining = [c for c in other_team_cards if c not in other_team_selected]
+            while len(other_team_selected) < cards_needed and remaining:
+                card = random.choice(remaining)
+                other_team_selected.append(card)
+                remaining.remove(card)
+        
+        selected_cards.extend(other_team_selected)
+        
+        if len(selected_cards) < 13:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Catálogo insuficiente en DB. Se requieren al menos 25 cartas únicas y hay {len(all_unique_cards)}."
+                detail=f"Catálogo insuficiente en DB. Se requieren 13 cartas únicas y solo se obtuvieron {len(selected_cards)}."
             )
+        
+        # 5. Mezclar las cartas aleatoriamente para sorpresa
+        random.shuffle(selected_cards)
 
-        # Tomamos exactamente las primeras 25 cartas únicas
-        selected_cards = all_unique_cards[:25]
-
-        # 3. Guardar en el inventario del usuario evitando duplicados de DB
+        # 6. Guardar en el inventario del usuario evitando duplicados
         assigned_items = []
         for card in selected_cards:
             already_exists = db.query(UserCardInventory).filter(
@@ -93,12 +153,13 @@ class PackService:
 
             assigned_items.append(card)
 
+        # 7. Marcar onboarding completo y establecer equipo favorito
         user = db.query(User).filter(User.id == user_id).first()
         if user:
             user.favorite_team_id = team_id
             user.has_completed_onboarding = True
 
-        # 4. Inicializar cartera con 1000 Stamps
+        # 8. Inicializar cartera con 1000 Stamps
         wallet = db.query(UserWallet).filter(UserWallet.user_id == user_id).first()
         if not wallet:
             wallet = UserWallet(user_id=user_id, stamps=1000)

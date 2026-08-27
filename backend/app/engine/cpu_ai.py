@@ -1,10 +1,11 @@
 import random
 from typing import Dict, Any
 
+# Tipos de picheo que deben coincidir con los usados en el repertorio de las cartas (seed data)
+_PITCH_TYPES = ["4-SEAM", "SLIDER", "CHANGE", "CURVE", "SINKER", "CUTTER"]
+
 def get_cpu_pitch_action(difficulty: str = "MEDIUM") -> Dict[str, Any]:
     """Genera la selección de picheo de la CPU según la dificultad."""
-    pitch_types = ["FF", "SL", "CH", "CU"]
-    
     if difficulty == "HARD":
         zone = random.choice([1, 3, 7, 9])  # Esquinas de la zona
     elif difficulty == "EASY":
@@ -13,7 +14,7 @@ def get_cpu_pitch_action(difficulty: str = "MEDIUM") -> Dict[str, Any]:
         zone = random.randint(1, 9)
 
     return {
-        "pitch_type": random.choice(pitch_types),
+        "pitch_type": random.choice(_PITCH_TYPES),
         "zone": zone
     }
 
@@ -31,5 +32,5 @@ def get_cpu_swing_action(difficulty: str = "MEDIUM") -> Dict[str, Any]:
     return {
         "swing_type": random.choice(swing_types),
         "guessed_zone": random.randint(1, 9) if random.random() < guess_zone_prob else None,
-        "guessed_pitch": random.choice(["FF", "SL", "CH", "CU"]) if random.random() < guess_pitch_prob else None
+        "guessed_pitch": random.choice(_PITCH_TYPES) if random.random() < guess_pitch_prob else None
     }
