@@ -156,9 +156,13 @@ export const PlayerCard = ({ player, cardData, isSelected, onClick, role = "BATT
                 </>
               )}
             </div>
-            {/* Equipo */}
-            <div className="text-[8px] font-mono tracking-widest uppercase text-[#C5A059] border-t pt-1" style={{ borderColor: `${rarityConfig.border}40` }}>
-              {card.team_id || card.teamId || "UNKNOWN"}
+            
+            {/* Equipo - más visible */}
+            <div 
+              className="text-[9px] font-mono tracking-wider uppercase font-bold border-t pt-1 mt-1" 
+              style={{ borderColor: rarityConfig.border, color: rarityConfig.border }}
+            >
+              ⚾ {card.team_id || card.teamId || "UNKNOWN"}
             </div>
           </div>
 
