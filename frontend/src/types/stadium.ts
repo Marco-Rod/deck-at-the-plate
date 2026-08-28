@@ -70,6 +70,8 @@ export interface GameStateWS {
   homeHits?: number; // ⭐ NUEVO: Total hits HOME team
   awayHits?: number; // ⭐ NUEVO: Total hits AWAY team
   inning_runs?: Record<string, number>; // ⭐ NUEVO: {"1_true": 2, "1_false": 1, "6_false": 2} = inning_is_top: runs
+  active_pitcher?: PlayerData; // ⭐ NUEVO: Datos completos del pitcher (incluyendo rarity)
+  active_batter?: PlayerData;  // ⭐ NUEVO: Datos completos del bateador (incluyendo rarity)
 }
 
 export interface PlayResolvedPayload {

@@ -426,6 +426,16 @@ export const StadiumShowcaseScreen: React.FC<StadiumShowcaseScreenProps> = ({
   }, [userId]);
 
   useEffect(() => {
+    // ⭐ PRIORIDAD: Si tenemos datos del pitcher desde el WebSocket (con rarity), usarlos directamente
+    if (gameState?.active_pitcher) {
+      setPitcherCard(gameState.active_pitcher);
+      if (gameState.active_pitcher.repertoire && gameState.active_pitcher.repertoire.length > 0) {
+        setSelectedPitch(gameState.active_pitcher.repertoire[0].pitch_type);
+      }
+      return;
+    }
+
+    // ⭐ FALLBACK: Si no, hacer fetch de la API (usado en primer carga si WebSocket llega después)
     if (gameState?.activePitcherId) {
       cardsApi.getCard(gameState.activePitcherId)
         .then((c: any) => {
@@ -459,6 +469,7 @@ export const StadiumShowcaseScreen: React.FC<StadiumShowcaseScreenProps> = ({
               photo: c.photo,
               team: pitcherTeam || 'UNKNOWN',
               role: 'PITCHER',
+              rarity: c.rarity || 'COMMON', // ⭐ NUEVO: Incluir rareza
               repertoire: c.repertoire || [],
               stats: [
                 { label: 'VEL', val: bestVel },
@@ -473,7 +484,16 @@ export const StadiumShowcaseScreen: React.FC<StadiumShowcaseScreenProps> = ({
         })
         .catch(() => null);
     }
+  }, [gameState?.active_pitcher, gameState?.activePitcherId, userTeam, gameState?.rivalTeamName, userRole, gameState?.state_data]);
 
+  useEffect(() => {
+    // ⭐ PRIORIDAD: Si tenemos datos del bateador desde el WebSocket (con rarity), usarlos directamente
+    if (gameState?.active_batter) {
+      setBatterCard(gameState.active_batter);
+      return;
+    }
+
+    // ⭐ FALLBACK: Si no, hacer fetch de la API (usado en primer carga si WebSocket llega después)
     if (gameState?.activeBatterId) {
       cardsApi.getCard(gameState.activeBatterId)
         .then((c: any) => {
@@ -494,6 +514,7 @@ export const StadiumShowcaseScreen: React.FC<StadiumShowcaseScreenProps> = ({
               photo: c.photo,
               team: batterTeam || 'UNKNOWN',
               role: 'BATTER',
+              rarity: c.rarity || 'COMMON', // ⭐ NUEVO: Incluir rareza
               stats: [
                 { label: 'CON', val: c.contact || 50 },
                 { label: 'POW', val: c.power || 50 },
@@ -504,7 +525,7 @@ export const StadiumShowcaseScreen: React.FC<StadiumShowcaseScreenProps> = ({
         })
         .catch(() => null);
     }
-  }, [gameState?.activePitcherId, gameState?.activeBatterId, userTeam, gameState?.rivalTeamName, userRole, userLineupCards]);
+  }, [gameState?.active_batter, gameState?.activeBatterId, userTeam, gameState?.rivalTeamName, userLineupCards]);
 
   const tacticalHand: TacticalCard[] = [
     {

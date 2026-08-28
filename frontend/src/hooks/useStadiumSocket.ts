@@ -37,13 +37,15 @@ interface UseStadiumSocketReturn {
   sendTactic: (tacticId: string, playerRole: 'PITCHER' | 'BATTER') => Promise<void>;
 }
 
-function parseStateData(payload: { current_inning: number; is_top_inning: boolean; score_home: number; score_away: number; balls: number; strikes: number; outs: number; state_data: Record<string, unknown>; pitcher_strikeouts?: Record<string, number>; batter_stats?: Record<string, any>; home_hits?: number; away_hits?: number; inning_runs?: Record<string, number> }): GameStateWS {
+function parseStateData(payload: { current_inning: number; is_top_inning: boolean; score_home: number; score_away: number; balls: number; strikes: number; outs: number; state_data: Record<string, unknown>; pitcher_strikeouts?: Record<string, number>; batter_stats?: Record<string, any>; home_hits?: number; away_hits?: number; inning_runs?: Record<string, number>; active_pitcher?: any; active_batter?: any }): GameStateWS {
   const stateData = payload.state_data || {};
   const runners = (stateData.runners as Record<string, string | null>) || { '1b': null, '2b': null, '3b': null };
 
   console.log('⭐ [PARSE_STATE_DATA] pitcher_strikeouts:', payload.pitcher_strikeouts);
   console.log('⭐ [PARSE_STATE_DATA] batter_stats keys:', Object.keys(payload.batter_stats || {}));
   console.log('⭐ [PARSE_STATE_DATA] hits:', { home_hits: payload.home_hits, away_hits: payload.away_hits });
+  console.log('⭐ [PARSE_STATE_DATA] active_pitcher rarity:', payload.active_pitcher?.rarity);
+  console.log('⭐ [PARSE_STATE_DATA] active_batter rarity:', payload.active_batter?.rarity);
 
   return {
     currentInning: payload.current_inning,
@@ -70,6 +72,8 @@ function parseStateData(payload: { current_inning: number; is_top_inning: boolea
     homeHits: payload.home_hits || 0, // ⭐ del backend
     awayHits: payload.away_hits || 0, // ⭐ del backend
     inning_runs: payload.inning_runs || {}, // ⭐ del backend: {"1_true": 2, "1_false": 1}
+    active_pitcher: payload.active_pitcher, // ⭐ NUEVO: Datos completos del pitcher (incluyendo rarity)
+    active_batter: payload.active_batter, // ⭐ NUEVO: Datos completos del bateador (incluyendo rarity)
   };
 }
 
