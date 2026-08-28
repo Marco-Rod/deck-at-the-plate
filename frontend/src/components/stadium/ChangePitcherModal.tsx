@@ -68,9 +68,9 @@ export const ChangePitcherModal: React.FC<ChangePitcherModalProps> = ({
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 20 }}
             transition={{ duration: 0.2 }}
-            className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-full max-w-2xl mx-auto px-4"
+            className="fixed inset-0 flex items-center justify-center z-50 p-4 pointer-events-auto"
           >
-            <div className="bg-[#0F1419]/95 backdrop-blur-md rounded-lg border-2 border-[#C5A059]/50 p-6 shadow-2xl">
+            <div className="bg-[#0F1419]/95 backdrop-blur-md rounded-lg border-2 border-[#C5A059]/50 p-6 shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
               {/* Header */}
               <div className="flex justify-between items-center mb-6 pb-4 border-b border-[#C5A059]/30">
                 <h2 className="text-2xl font-bold text-[#E6DFD3] font-mono tracking-wide">

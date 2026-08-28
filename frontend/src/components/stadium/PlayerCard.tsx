@@ -138,9 +138,7 @@ export const PlayerCard: React.FC<PlayerCardProps> = ({
   const vibrateIntensity = (fatigueLevel / 100) * 3; // Max 3px vibration at 100% fatigue
   const vibrationDuration = Math.max(0.2, 1 - fatigueLevel / 100); // Faster vibration as fatigue increases
   
-  const vibrateAnimation = role === 'PITCHER' && fatigueLevel > 0 ? {
-    x: [0, vibrateIntensity, -vibrateIntensity, vibrateIntensity, 0],
-  } : {};
+  const shouldVibrate = role === 'PITCHER' && fatigueLevel > 0;
 
   // Get player stats matching role config
   const displayStats = player?.stats?.length > 0
@@ -163,15 +161,19 @@ export const PlayerCard: React.FC<PlayerCardProps> = ({
       }}
       animate={{
         ...animationConfig.animate,
-        ...vibrateAnimation,
+        ...(shouldVibrate && {
+          x: [0, vibrateIntensity, -vibrateIntensity, vibrateIntensity, 0],
+        }),
       }}
       transition={{
         ...animationConfig.transition,
-        vibrate: vibrateAnimation.x ? {
-          duration: vibrationDuration,
-          repeat: Infinity,
-          ease: 'easeInOut',
-        } : undefined,
+        ...(shouldVibrate && {
+          x: {
+            duration: vibrationDuration,
+            repeat: Infinity,
+            ease: 'easeInOut',
+          },
+        }),
       }}
       whileHover={animationConfig.whileHover}
       whileTap={animationConfig.whileTap}

@@ -794,16 +794,19 @@ def get_available_pitchers(game_id: str, db: Session = Depends(get_db), current_
     state = dict(game.state_data or {})
     current_pitcher_id = state.get("active_pitcher")
     
-    # Determinar si el usuario es HOME o AWAY
+    # ⭐ CORREGIDO: Determinar equipo basado en user_id y game roles
     is_home = current_user_id == game.home_user_id
-    current_team_id = state.get("home_team_id" if is_home else "away_team_id")
     
-    # Obtener el roster completo del equipo
-    team = db.query(Team).filter(Team.id == current_team_id).first() if current_team_id else None
+    # Obtener el team_id de la relación game.home_team o game.away_team
+    if is_home:
+        team = game.home_team
+    else:
+        team = game.away_team
+    
     if not team:
         raise HTTPException(status_code=404, detail="Equipo no encontrado.")
 
-    # Obtener todas las cartas del pitcher del equipo
+    # Obtener todas las cartas de pitcher del equipo
     available_pitchers = []
     pitcher_cards = db.query(PlayerCardModel).filter(
         PlayerCardModel.team_id == team.id,
@@ -824,7 +827,7 @@ def get_available_pitchers(game_id: str, db: Session = Depends(get_db), current_
             "role": "PITCHER",
         })
 
-    print(f"🔥 [AVAILABLE PITCHERS] {len(available_pitchers)} pitchers disponibles en bullpen (excluyendo {current_pitcher_id})")
+    print(f"🔥 [AVAILABLE PITCHERS] {len(available_pitchers)} pitchers disponibles en bullpen (team: {team.name}, excluyendo {current_pitcher_id})")
 
     return {
         "status": "ok",
