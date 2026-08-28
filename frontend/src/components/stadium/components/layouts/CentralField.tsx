@@ -161,7 +161,7 @@ export const CentralField: React.FC<CentralFieldProps & {
               disablePulse={true}
               size="sm"
               fatigueLevel={fatigueLevel}
-              onClickPitcher={handleClickPitcherCard}
+              onClickPitcher={role === 'PITCHER' ? handleClickPitcherCard : undefined}
             />
 
             {/* Indicador de lanzamientos mínimos — visible cuando no puede cambiarse */}
