@@ -572,13 +572,16 @@ async def trigger_cpu_response_if_needed(game: GameSession, state: dict, db: Ses
     En partidas PvE, evalúa si le toca actuar a la CPU y ejecuta su acción.
     """
     if state.get("mode") != "PVE" or state.get("is_game_over"):
+        print(f"🤖 [trigger_cpu] EARLY RETURN: mode={state.get('mode')}, is_game_over={state.get('is_game_over')}")
         return
 
     difficulty = state.get("difficulty", "MEDIUM")
     
     print(f"🤖 DEBUG trigger_cpu_response_if_needed:")
     print(f"   is_top_inning={game.is_top_inning}, home_user={game.home_user_id}, away_user={game.away_user_id}")
-    print(f"   cpu_turn_pitcher={_is_cpu_turn(game, state, 'PITCHER')}, cpu_turn_batter={_is_cpu_turn(game, state, 'BATTER')}")
+    cpu_pitcher_turn = _is_cpu_turn(game, state, 'PITCHER')
+    cpu_batter_turn = _is_cpu_turn(game, state, 'BATTER')
+    print(f"   cpu_turn_pitcher={cpu_pitcher_turn}, cpu_turn_batter={cpu_batter_turn}")
     print(f"   current_pitch={bool(state.get('current_pitch'))}")
 
     # Caso A: la CPU debe batear (hay un picheo humano pendiente)
@@ -656,7 +659,9 @@ async def trigger_cpu_response_if_needed(game: GameSession, state: dict, db: Ses
         state["current_pitch"] = cpu_pitch
         game.state_data = state
         db.commit()
+        db.refresh(game)  # ← ⭐ NUEVO: Recargar game después de commit para sincronizar
         print(f"   ✅ CPU picheo: {cpu_pitch['pitch_type']} a zona {cpu_pitch['zone']}")
+        print(f"   ✅ State committed. current_pitch = {game.state_data.get('current_pitch')}")
 
         await manager.broadcast_to_game(game_id, {
             "type": "PITCH_COMMITTED",
@@ -820,9 +825,16 @@ async def execute_swing(
         print(f"❌ TURN VERIFICATION FAILED: {e.detail}")
         raise
 
+    # ⭐ NUEVO: Refrescar la sesión desde la DB para asegurar estado fresco
+    db.refresh(game)
     state = dict(game.state_data or {})
+    
     if not state.get("current_pitch"):
         print(f"❌ ERROR: No hay picheo previo en state")
+        print(f"   State keys: {list(state.keys())}")
+        print(f"   is_top_inning: {game.is_top_inning}")
+        print(f"   active_pitcher_id: {state.get('active_pitcher')}")
+        print(f"   Game mode: {state.get('mode')}")
         raise HTTPException(status_code=400, detail="El lanzador aún no ha realizado su picheo para este turno.")
 
     print(f"   ✅ Swing válido, resolviendo jugada...")
