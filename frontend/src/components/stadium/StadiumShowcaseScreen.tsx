@@ -567,6 +567,38 @@ export const StadiumShowcaseScreen: React.FC<StadiumShowcaseScreenProps> = ({
 
   }, [pitcherChanged?.ts]);
 
+  // ── Fallback: si el gameState.active_pitcher cambió pero pitcherChanged aún no llegó ──
+  // Esto asegura que el UI se sincronice incluso si el WS se retrasa
+  useEffect(() => {
+    if (!gameState?.active_pitcher) return;
+    
+    // Solo actualizar si es diferente del actual (evita loops)
+    if (pitcherCard?.id !== gameState.active_pitcher.id) {
+      console.log('🔄 [FALLBACK] Actualizando pitcher por gameState change:', gameState.active_pitcher.name);
+      
+      setPitcherCard({
+        id: gameState.active_pitcher.id,
+        name: gameState.active_pitcher.name,
+        number: gameState.active_pitcher.number,
+        overall: gameState.active_pitcher.overall,
+        position: gameState.active_pitcher.position,
+        rarity: gameState.active_pitcher.rarity || 'COMMON',
+        team: gameState.active_pitcher.team || '',
+        role: 'PITCHER',
+        photo: gameState.active_pitcher.photo,
+        repertoire: gameState.active_pitcher.repertoire || [],
+        stats: gameState.active_pitcher.stats || [],
+        pitch_count: gameState.active_pitcher.pitch_count ?? 0,
+        fatigue_level: gameState.active_pitcher.fatigue_level ?? 0,
+      });
+      
+      const rep = gameState.active_pitcher.repertoire || [];
+      if (rep.length > 0 && rep[0]?.pitch_type) {
+        setSelectedPitch(rep[0].pitch_type);
+      }
+    }
+  }, [gameState?.active_pitcher?.id]);
+
   const tacticalHand: TacticalCard[] = [
     {
       id: 't1',
