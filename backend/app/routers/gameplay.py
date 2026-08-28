@@ -713,15 +713,19 @@ async def execute_swing(
 
 
 @router.post("/{game_id}/change-pitcher", summary="Realizar cambio de relevista (Bullpen)")
-def change_pitcher(game_id: str, payload: ChangePitcherRequest, db: Session = Depends(get_db)):
+async def change_pitcher(game_id: str, payload: ChangePitcherRequest, db: Session = Depends(get_db), current_user_id: str = Depends(get_current_user)):
     """
     Sustituye al lanzador activo por un relevista del bullpen.
     Valida que la carta exista y corresponda a un rol de pitcheo (SP, RP o TWP).
     Inicializa en cero el contador de lanzamientos del entrante.
+    Retorna el nuevo pitcher con sus datos y broadcast vía WebSocket.
     """
     game = db.query(GameSession).filter(GameSession.id == game_id).first()
     if not game:
         raise HTTPException(status_code=404, detail="Sesión de juego no encontrada.")
+
+    # ⭐ NUEVO: Verificar turno del pitcher
+    verify_player_turn(game, current_user_id, required_role="PITCHER")
 
     new_pitcher = db.query(PlayerCardModel).filter(PlayerCardModel.id == payload.new_pitcher_id).first()
     if not new_pitcher or new_pitcher.position not in ("SP", "RP", "TWP"):
@@ -731,19 +735,101 @@ def change_pitcher(game_id: str, payload: ChangePitcherRequest, db: Session = De
         )
 
     state = dict(game.state_data or {})
+    old_pitcher_id = state.get("active_pitcher")
     state["active_pitcher"] = payload.new_pitcher_id
 
     pitch_counts = state.get("pitch_counts", {})
-    pitch_counts[payload.new_pitcher_id] = 0
+    pitch_counts[payload.new_pitcher_id] = 0  # Reset pitch count para el nuevo pitcher
     state["pitch_counts"] = pitch_counts
 
     game.state_data = state
     db.commit()
+    db.refresh(game)
+
+    # ⭐ NUEVO: Construir datos del nuevo pitcher para el cliente
+    new_pitcher_data = {
+        "id": new_pitcher.id,
+        "name": new_pitcher.name,
+        "number": new_pitcher.number,
+        "overall": new_pitcher.overall,
+        "position": new_pitcher.position,
+        "rarity": new_pitcher.rarity.value if new_pitcher.rarity else "COMMON",
+        "team": new_pitcher.team.name if new_pitcher.team else "UNKNOWN",
+        "stats": format_player_stats(new_pitcher, "PITCHER"),
+        "role": "PITCHER",
+        "pitch_count": 0,
+        "fatigue_level": 0.0,
+    }
+
+    print(f"🔄 [PITCHER CHANGE] {old_pitcher_id} → {payload.new_pitcher_id} ({new_pitcher.name})")
+
+    # ⭐ NUEVO: Broadcast del cambio vía WebSocket
+    await manager.broadcast_to_game(game_id, {
+        "type": "PITCHER_CHANGED",
+        "message": f"🔄 Cambio de picher. Entra a la loma: {new_pitcher.name}",
+        "old_pitcher_id": old_pitcher_id,
+        "new_pitcher_id": payload.new_pitcher_id,
+        "new_pitcher": new_pitcher_data,
+        "state_data": game.state_data,
+    })
 
     return {
         "status": "ok",
-        "message": f"Cambio de picher completado. Entra a la loma: {new_pitcher.name}.",
-        "active_pitcher": payload.new_pitcher_id,
+        "message": f"Cambio de pitcher completado. Entra a la loma: {new_pitcher.name}.",
+        "active_pitcher_id": payload.new_pitcher_id,
+        "active_pitcher": new_pitcher_data,
+    }
+
+
+@router.get("/{game_id}/available-pitchers", summary="Obtener lanzadores disponibles del bullpen")
+def get_available_pitchers(game_id: str, db: Session = Depends(get_db), current_user_id: str = Depends(get_current_user)):
+    """
+    Retorna la lista de lanzadores disponibles en el bullpen del equipo actual.
+    Excluye el pitcher activo.
+    """
+    game = db.query(GameSession).filter(GameSession.id == game_id).first()
+    if not game:
+        raise HTTPException(status_code=404, detail="Sesión de juego no encontrada.")
+
+    state = dict(game.state_data or {})
+    current_pitcher_id = state.get("active_pitcher")
+    
+    # Determinar si el usuario es HOME o AWAY
+    is_home = current_user_id == game.home_user_id
+    current_team_id = state.get("home_team_id" if is_home else "away_team_id")
+    
+    # Obtener el roster completo del equipo
+    team = db.query(Team).filter(Team.id == current_team_id).first() if current_team_id else None
+    if not team:
+        raise HTTPException(status_code=404, detail="Equipo no encontrado.")
+
+    # Obtener todas las cartas del pitcher del equipo
+    available_pitchers = []
+    pitcher_cards = db.query(PlayerCardModel).filter(
+        PlayerCardModel.team_id == team.id,
+        PlayerCardModel.position.in_(["SP", "RP", "TWP"]),
+        PlayerCardModel.id != current_pitcher_id,  # Excluir pitcher activo
+    ).all()
+
+    for card in pitcher_cards:
+        available_pitchers.append({
+            "id": card.id,
+            "name": card.name,
+            "number": card.number,
+            "overall": card.overall,
+            "position": card.position,
+            "rarity": card.rarity.value if card.rarity else "COMMON",
+            "team": card.team.name if card.team else "UNKNOWN",
+            "stats": format_player_stats(card, "PITCHER"),
+            "role": "PITCHER",
+        })
+
+    print(f"🔥 [AVAILABLE PITCHERS] {len(available_pitchers)} pitchers disponibles en bullpen (excluyendo {current_pitcher_id})")
+
+    return {
+        "status": "ok",
+        "count": len(available_pitchers),
+        "available_pitchers": available_pitchers,
     }
 
 

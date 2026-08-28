@@ -17,7 +17,7 @@ import { InningTransitionModal } from './InningTransitionModal';
 import { GameIntroModal } from './GameIntroModal';
 import { GameplayDeckAndReveal } from './GameplayDeckAndReveal';
 import { useStadiumSocket } from '../../hooks/useStadiumSocket';
-import { cards as cardsApi, user as userApi } from '../../utils/api';
+import { games as gamesApi, cards as cardsApi } from '../../utils/api';
 
 import type {
   PitchType,
@@ -757,6 +757,12 @@ export const StadiumShowcaseScreen: React.FC<StadiumShowcaseScreenProps> = ({
             totalInnings={gameState?.totalInnings ?? 9}
             isTopInning={gameState?.isTopInning ?? true}
             runners={gameState?.runners ?? { b1: null, b2: null, b3: null }}
+            gameId={gameId ?? undefined}
+            fatigueLevel={gameState?.active_pitcher?.fatigue_level ?? 0}
+            onPitcherChanged={(newPitcher) => {
+              console.log('✅ Pitcher actualizado:', newPitcher);
+              // El WebSocket actualizará el gameState automáticamente
+            }}
           />
         </div>
 

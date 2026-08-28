@@ -29,13 +29,18 @@
  * />
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { GameInfo, PitchZoneGrid } from '../index';
 import { PlayerCard } from '../../PlayerCard';
 import { ChangePitcherModal } from '../../ChangePitcherModal';
 import type { CentralFieldProps } from '../../types/stadium.types';
+import { games as gamesApi } from '../../../../utils/api';
 
-export const CentralField: React.FC<CentralFieldProps> = ({
+export const CentralField: React.FC<CentralFieldProps & {
+  gameId?: string;
+  fatigueLevel?: number;
+  onPitcherChanged?: (newPitcher: any) => void;
+}> = ({
   role,
   pitcherCard,
   batterCard,
@@ -54,12 +59,53 @@ export const CentralField: React.FC<CentralFieldProps> = ({
   totalInnings = 9,
   isTopInning = true,
   runners = { b1: null, b2: null, b3: null },
+  gameId,
+  fatigueLevel = 0,
+  onPitcherChanged,
 }) => {
   const [showChangePitcherModal, setShowChangePitcherModal] = useState(false);
-  
-  // ⭐ NUEVO: Lista de lanzadores disponibles (se obtendría del estado del juego)
-  // Por ahora es un placeholder - se actualizará con datos reales del backend
-  const availablePitchers: any[] = [];
+  const [availablePitchers, setAvailablePitchers] = useState<any[]>([]);
+  const [isLoadingPitchers, setIsLoadingPitchers] = useState(false);
+
+  // ⭐ NUEVO: Cargar pitchers disponibles cuando se abre el modal
+  useEffect(() => {
+    if (showChangePitcherModal && gameId) {
+      loadAvailablePitchers();
+    }
+  }, [showChangePitcherModal, gameId]);
+
+  const loadAvailablePitchers = async () => {
+    try {
+      setIsLoadingPitchers(true);
+      const response = await gamesApi.getAvailablePitchers(gameId!);
+      console.log('📋 Pitchers disponibles:', response.data);
+      setAvailablePitchers(response.data?.available_pitchers || []);
+    } catch (error) {
+      console.error('Error cargando pitchers:', error);
+      setAvailablePitchers([]);
+    } finally {
+      setIsLoadingPitchers(false);
+    }
+  };
+
+  const handleChangePitcher = async (newPitcherId: string) => {
+    if (!gameId) return;
+
+    try {
+      const response = await gamesApi.changePitcher(gameId, { new_pitcher_id: newPitcherId });
+      console.log('✅ Pitcher cambiado:', response.data);
+      
+      // Notificar al componente padre
+      if (onPitcherChanged && response.data?.active_pitcher) {
+        onPitcherChanged(response.data.active_pitcher);
+      }
+      
+      setShowChangePitcherModal(false);
+    } catch (error) {
+      console.error('Error cambiando pitcher:', error);
+      throw error;
+    }
+  };
   return (
     <div className="relative z-10 w-full flex flex-col items-center gap-1 sm:gap-2 md:gap-3 lg:gap-6 px-0.5 sm:px-1 md:px-2">
       {/* GAME INFO - Responsive width */}
@@ -87,7 +133,7 @@ export const CentralField: React.FC<CentralFieldProps> = ({
             role="PITCHER"
             disablePulse={true}
             size="sm"
-            fatigueLevel={0} // ⭐ TODO: Pasar desde gameState
+            fatigueLevel={fatigueLevel} // ⭐ MEJORADO: Pasar fatiga real
             onClickPitcher={() => setShowChangePitcherModal(true)}
           />
         </div>
@@ -129,10 +175,8 @@ export const CentralField: React.FC<CentralFieldProps> = ({
         onClose={() => setShowChangePitcherModal(false)}
         currentPitcher={pitcherCard}
         availablePitchers={availablePitchers}
-        onConfirm={async (newPitcherId) => {
-          // ⭐ TODO: Implementar llamada al backend para cambiar pitcher
-          console.log('Cambiar pitcher a:', newPitcherId);
-        }}
+        onConfirm={handleChangePitcher}
+        isLoading={isLoadingPitchers}
       />
     </div>
   );

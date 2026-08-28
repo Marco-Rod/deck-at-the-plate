@@ -218,6 +218,14 @@ export const games = {
     }),
 
   /**
+   * Obtiene los lanzadores disponibles en el bullpen.
+   * @param {string} gameId
+   * @returns {Promise<{available_pitchers: Array}>}
+   */
+  getAvailablePitchers: (gameId) =>
+    _request(`/api/v1/games/${gameId}/available-pitchers`),
+
+  /**
    * Intenta un robo de base.
    * @param {string} gameId
    * @param {{ target_base: '2b' | '3b' }} payload
