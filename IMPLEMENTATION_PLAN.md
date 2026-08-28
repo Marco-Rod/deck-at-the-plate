@@ -334,26 +334,30 @@ interface TacticalHandProps {
 
 ## Fases de Implementación
 
-### Fase 1: Estructura Base (1-2 horas)
+### ✅ Fase 1A: Estructura Base del WebSocket (HECHO)
 1. ✅ Crear `useEventSequencer.ts`
 2. ✅ Definir `EVENT_SEQUENCES` básicas
-3. Modificar `useStadiumSocket` para aceptar callbacks
-4. Inicializar hook en `StadiumShowcaseScreen`
+3. ✅ Modificar `useStadiumSocket` para aceptar callbacks
 
-### Fase 2: Integraciones (2-3 horas)
-5. Registrar callbacks `onStep` para cada step
-6. Conectar `handlePlayResolved` a `enqueueEvent`
-7. Remover/simplificar effectos redundantes
-8. Deshabilitar controles durante evento activo
+**Commit:** c4dea28 - Decouple WebSocket from direct state updates
 
-### Fase 3: Completar Secuencias (1 hora)
-9. Definir todos los `EVENT_SEQUENCES` faltantes
-10. Verificar timings con diseño
+### 📋 Fase 1B: Integración en StadiumShowcaseScreen (PRÓXIMO)
 
-### Fase 4: Testing & Refinamiento (1-2 horas)
-11. Testing manual de cada tipo de evento
-12. Ajustar timings según UX
-13. Handling de edge cases (múltiples eventos rápido)
+**Tareas:**
+1. Importar `useEventSequencer` y `EVENT_SEQUENCES`
+2. Inicializar el hook en el componente
+3. Crear handlers para las callbacks del WebSocket:
+   - `handlePlayResolved(payload)` → enquee el evento
+   - `handlePitcherChanged(payload)` → enquee el evento
+   - `handleGameStateInit(payload)` → update state directo
+4. Pasar callbacks a `useStadiumSocket`
+5. Registrar step callbacks con `onStep()` para cada tipo de actualización
+6. Deshabilitar controles mientras `isProcessing` es true
+
+**Archivos a modificar:**
+- `StadiumShowcaseScreen.tsx` (major)
+- Posiblemente `CentralField.tsx` (agregar disabled prop)
+- Posiblemente `TacticalHand.tsx` (agregar disabled prop)
 
 ---
 
