@@ -137,6 +137,7 @@ export const PlayerCard: React.FC<PlayerCardProps> = ({
 
   return (
     <motion.div
+      key={player?.id} // ⭐ NUEVO: Force re-mount when player changes to reset animations
       className={`${cardSizeClass} aspect-[3/4] relative z-10 bg-[#0A0D0F]/90 p-2 sm:p-3 md:p-4 backdrop-blur-sm rounded-xs cursor-pointer select-none flex flex-col`}
       style={{
         borderWidth: '2px',
