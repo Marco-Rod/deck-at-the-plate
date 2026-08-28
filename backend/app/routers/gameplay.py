@@ -582,11 +582,11 @@ async def trigger_cpu_response_if_needed(game: GameSession, state: dict, db: Ses
     cpu_pitcher_turn = _is_cpu_turn(game, state, 'PITCHER')
     cpu_batter_turn = _is_cpu_turn(game, state, 'BATTER')
     print(f"   cpu_turn_pitcher={cpu_pitcher_turn}, cpu_turn_batter={cpu_batter_turn}")
-    print(f"   current_pitch={bool(state.get('current_pitch'))}")
-
+    print(f"   current_pitch={state.get('current_pitch')}")
+    
     # Caso A: la CPU debe batear (hay un picheo humano pendiente)
-    if _is_cpu_turn(game, state, "BATTER") and state.get("current_pitch"):
-        print(f"   ✅ CPU debería batear (Caso A)")
+    if cpu_batter_turn and state.get("current_pitch"):
+        print(f"   ✅ CASO A: CPU debería batear")
         cpu_swing = get_cpu_swing_action(difficulty)
 
         _, _, _ = await _resolve_swing(
@@ -605,8 +605,8 @@ async def trigger_cpu_response_if_needed(game: GameSession, state: dict, db: Ses
             return
 
     # Caso B: la CPU debe pichear (no hay picheo pendiente y es el turno de la CPU)
-    if _is_cpu_turn(game, state, "PITCHER") and not state.get("current_pitch"):
-        print(f"   ✅ CPU debería pichear (Caso B)")
+    if cpu_pitcher_turn and not state.get("current_pitch"):
+        print(f"   ✅ CASO B: CPU debería pichear")
         
         # ── NUEVO: Evaluar si la CPU debe cambiar pitcher ──────────────────
         active_pitcher_id = state.get("active_pitcher")
@@ -661,13 +661,16 @@ async def trigger_cpu_response_if_needed(game: GameSession, state: dict, db: Ses
         db.commit()
         db.refresh(game)  # ← ⭐ NUEVO: Recargar game después de commit para sincronizar
         print(f"   ✅ CPU picheo: {cpu_pitch['pitch_type']} a zona {cpu_pitch['zone']}")
-        print(f"   ✅ State committed. current_pitch = {game.state_data.get('current_pitch')}")
+        print(f"   ✅ State committed. current_pitch EN DB = {game.state_data.get('current_pitch')}")
+        print(f"   ✅ Broadcasteando PITCH_COMMITTED al cliente...")
 
         await manager.broadcast_to_game(game_id, {
             "type": "PITCH_COMMITTED",
             "message": "La CPU ha seleccionado su picheo. Es tu turno de batear.",
             "has_pitched": True,
         })
+    else:
+        print(f"   ❌ CASO B no se ejecutó completamente")
 
 
 # ---------------------------------------------------------------------------
@@ -829,7 +832,13 @@ async def execute_swing(
     db.refresh(game)
     state = dict(game.state_data or {})
     
-    if not state.get("current_pitch"):
+    current_pitch = state.get("current_pitch")
+    print(f"   current_pitch value: {current_pitch}")
+    print(f"   current_pitch type: {type(current_pitch)}")
+    print(f"   current_pitch bool: {bool(current_pitch)}")
+    print(f"   Full state_data: {game.state_data}")
+    
+    if not current_pitch:
         print(f"❌ ERROR: No hay picheo previo en state")
         print(f"   State keys: {list(state.keys())}")
         print(f"   is_top_inning: {game.is_top_inning}")
