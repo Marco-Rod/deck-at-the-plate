@@ -16,6 +16,7 @@
 
 import React, { useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
+import { createPortal } from 'react-dom';
 import type { PitchZoneGridProps } from '../../types/stadium.types';
 import { PitchSelector } from './PitchSelector';
 import { StrikeZoneGrid } from './StrikeZoneGrid';
@@ -45,7 +46,7 @@ export const PitchZoneGrid: React.FC<PitchZoneGridProps> = ({
 
   /**
    * Determine if pitcher is in intentional walk mode
-   * IBB is always selectable, but it disables zone selection
+   * IBB can be selected independently without requiring zone selection
    */
   const isIBBMode = selectedPitch === 'IBB';
 
@@ -69,144 +70,128 @@ export const PitchZoneGrid: React.FC<PitchZoneGridProps> = ({
    * Close pitch modal when clicking outside
    */
   const handleModalBackdropClick = (e: React.MouseEvent) => {
-    if (e.target === e.currentTarget) {
-      setShowPitchModal(false);
-    }
+    // Simplemente cierra el modal - click en el backdrop exterior
+    setShowPitchModal(false);
   };
 
   return (
     <div
-      className={`z-10 flex flex-col items-center gap-3 my-auto transition-opacity relative ${
+      className={`flex flex-col items-center gap-3 my-auto transition-opacity relative ${
         disabled ? 'opacity-40 pointer-events-none' : ''
       }`}
     >
-      {/* PITCH SELECTOR - Always visible but DISABLED until zone selected */}
-      {role === 'PITCHER' && (
-        <div
-          className={`transition-all duration-300 ${
-            showPitchModal ? 'opacity-0 pointer-events-none h-0' : 'opacity-100'
-          }`}
-        >
-          <PitchSelector
-            availablePitches={availablePitches}
-            selectedPitch={selectedPitch}
-            onSelectPitch={onSelectPitch}
-            disabled={!showPitchModal && !isIBBMode}  // Disabled until zone selected or IBB active
-          />
-        </div>
-      )}
-
-      {/* STRIKE ZONE GRID - Disabled only if IBB mode (no zone for intentional walk) */}
+      {/* STRIKE ZONE GRID - Only disabled by game state, not by IBB */}
       <div className="relative">
         <StrikeZoneGrid
           selectedZone={selectedZone}
           onSelectZone={role === 'PITCHER' ? handleZoneSelect : onSelectZone}
-          disabled={disabled || isIBBMode}
+          disabled={disabled}
         />
+      </div>
 
-        {/* PITCH SELECTOR MODAL - Appears over strike zone after selection */}
-        {role === 'PITCHER' && showPitchModal && !disabled && (
-          <>
-            {/* Backdrop */}
-            <div
-              className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm"
-              onClick={handleModalBackdropClick}
-            />
+      {/* PITCH SELECTOR MODAL - Rendered via Portal (outside component tree) */}
+      {role === 'PITCHER' && showPitchModal && !disabled &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-[9999] flex items-center justify-center p-4 sm:p-6 lg:p-8"
+            onClick={handleModalBackdropClick}
+          >
+            {/* Backdrop blur effect - covers everything but doesn't capture clicks */}
+            <div className="fixed inset-0 z-0 bg-black/40 backdrop-blur-sm pointer-events-none" />
 
-            {/* Modal */}
+            {/* Modal - Higher z-index to appear above backdrop */}
             <motion.div
-              className="absolute inset-0 z-50 flex items-center justify-center p-4"
+              className="relative z-[10000] bg-gradient-to-b from-[#0A0D0F] to-[#121619] border-2 border-[#C5A059] rounded-lg shadow-2xl p-6 sm:p-8 lg:p-10 w-full max-w-2xl max-h-[80vh] overflow-y-auto"
               initial={{ opacity: 0, scale: 0.8 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.8 }}
               transition={{ duration: 0.3, ease: 'easeOut' }}
+              onClick={(e) => e.stopPropagation()}
             >
-              <div className="bg-gradient-to-b from-[#0A0D0F] to-[#121619] border-2 border-[#C5A059] rounded-lg shadow-2xl p-6 max-w-md w-full">
-                {/* Modal Header */}
-                <div className="mb-4 pb-3 border-b border-[#C5A059]/50">
-                  <h3 className="text-center font-mono text-sm font-bold text-[#C5A059] uppercase tracking-wider">
-                    ⚾ Select Pitch Type
-                  </h3>
-                  <p className="text-center font-mono text-[10px] text-[#E6DFD3]/70 mt-1">
-                    Zone: {selectedZone}
-                  </p>
-                </div>
+              {/* Modal Header */}
+              <div className="mb-6 pb-4 border-b border-[#C5A059]/50">
+                <h3 className="text-center font-mono text-lg sm:text-xl font-bold text-[#C5A059] uppercase tracking-wider">
+                  ⚾ Select Pitch Type
+                </h3>
+                <p className="text-center font-mono text-xs sm:text-sm text-[#E6DFD3]/70 mt-2">
+                  Zone: {selectedZone}
+                </p>
+              </div>
 
-                {/* Pitch Options */}
-                <div className="flex flex-wrap justify-center gap-2.5 mb-4">
-                  {/* Regular Pitches */}
-                  {availablePitches.map((pitch: string) => {
-                    const isPitchSelected = selectedPitch === pitch;
+              {/* Pitch Options - Single horizontal line with plenty of space */}
+              <div className="mb-6 flex flex-wrap justify-center gap-3 sm:gap-4">
+                {/* Regular Pitches */}
+                {availablePitches.map((pitch: string) => {
+                  const isPitchSelected = selectedPitch === pitch;
 
-                    return (
-                      <motion.button
-                        key={pitch}
-                        type="button"
-                        onClick={() => handlePitchSelect(pitch)}
-                        className={`relative px-4 py-3 font-mono text-xs uppercase font-bold cursor-pointer rounded-lg overflow-hidden transition-all transform ${
-                          isPitchSelected
-                            ? 'bg-[#1A3323] text-[#C5A059] border-2 border-[#C5A059] scale-105'
-                            : 'bg-[#121619] text-[#E6DFD3] border-2 border-[#2C3E35] hover:border-[#C5A059]/60 hover:scale-105'
-                        }`}
-                        whileHover={{ scale: 1.08 }}
-                        whileTap={{ scale: 0.96 }}
-                        animate={
-                          isPitchSelected
-                            ? {
-                                boxShadow: [
-                                  '0 0 12px rgba(197, 160, 89, 0.5)',
-                                  '0 0 24px rgba(197, 160, 89, 0.9)',
-                                  '0 0 12px rgba(197, 160, 89, 0.5)',
-                                ],
-                              }
-                            : { boxShadow: '0 0 0px rgba(0,0,0,0)' }
+                  return (
+                    <motion.button
+                      key={pitch}
+                      type="button"
+                      onClick={() => handlePitchSelect(pitch)}
+                      className={`relative px-5 sm:px-6 py-3 sm:py-4 font-mono text-sm sm:text-base uppercase font-bold cursor-pointer rounded-lg overflow-hidden transition-all transform ${
+                        isPitchSelected
+                          ? 'bg-[#1A3323] text-[#C5A059] border-2 border-[#C5A059] scale-105'
+                          : 'bg-[#121619] text-[#E6DFD3] border-2 border-[#2C3E35] hover:border-[#C5A059]/60 hover:scale-105'
+                      }`}
+                      whileHover={{ scale: 1.08 }}
+                      whileTap={{ scale: 0.96 }}
+                      animate={
+                        isPitchSelected
+                          ? {
+                              boxShadow: [
+                                '0 0 12px rgba(197, 160, 89, 0.5)',
+                                '0 0 24px rgba(197, 160, 89, 0.9)',
+                                '0 0 12px rgba(197, 160, 89, 0.5)',
+                              ],
+                            }
+                          : { boxShadow: '0 0 0px rgba(0,0,0,0)' }
+                      }
+                      transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
+                    >
+                      <span className="relative z-10">{pitch}</span>
+                    </motion.button>
+                  );
+                })}
+
+                {/* IBB (Intentional Walk) Button */}
+                <motion.button
+                  type="button"
+                  onClick={() => handlePitchSelect('IBB')}
+                  className={`relative px-5 sm:px-6 py-3 sm:py-4 font-mono text-sm sm:text-base uppercase font-bold cursor-pointer rounded-lg overflow-hidden transition-all transform ${
+                    selectedPitch === 'IBB'
+                      ? 'bg-[#C5A059] text-[#121619] border-2 border-[#F7F5F0] scale-105'
+                      : 'bg-[#121619] text-[#C5A059] border-2 border-[#C5A059]/50 hover:border-[#C5A059] hover:scale-105'
+                  }`}
+                  whileHover={{ scale: 1.08 }}
+                  whileTap={{ scale: 0.96 }}
+                  animate={
+                    selectedPitch === 'IBB'
+                      ? {
+                          boxShadow: [
+                            '0 0 12px rgba(197, 160, 89, 0.6)',
+                            '0 0 24px rgba(247, 245, 240, 0.9)',
+                            '0 0 12px rgba(197, 160, 89, 0.6)',
+                          ],
                         }
-                        transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
-                      >
-                        <span className="relative z-10">{pitch}</span>
-                      </motion.button>
-                    );
-                  })}
+                      : { boxShadow: '0 0 0px rgba(0,0,0,0)' }
+                  }
+                  transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
+                >
+                  <span className="relative z-10">🏃 IBB</span>
+                </motion.button>
+              </div>
 
-                  {/* IBB (Intentional Walk) Button */}
-                  <motion.button
-                    type="button"
-                    onClick={() => handlePitchSelect('IBB')}
-                    className={`relative px-4 py-3 font-mono text-xs uppercase font-bold cursor-pointer rounded-lg overflow-hidden transition-all transform ${
-                      selectedPitch === 'IBB'
-                        ? 'bg-[#C5A059] text-[#121619] border-2 border-[#F7F5F0] scale-105'
-                        : 'bg-[#121619] text-[#C5A059] border-2 border-[#C5A059]/50 hover:border-[#C5A059] hover:scale-105'
-                    }`}
-                    whileHover={{ scale: 1.08 }}
-                    whileTap={{ scale: 0.96 }}
-                    animate={
-                      selectedPitch === 'IBB'
-                        ? {
-                            boxShadow: [
-                              '0 0 12px rgba(197, 160, 89, 0.6)',
-                              '0 0 24px rgba(247, 245, 240, 0.9)',
-                              '0 0 12px rgba(197, 160, 89, 0.6)',
-                            ],
-                          }
-                        : { boxShadow: '0 0 0px rgba(0,0,0,0)' }
-                    }
-                    transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
-                  >
-                    <span className="relative z-10">🏃 IBB</span>
-                  </motion.button>
-                </div>
-
-                {/* Modal Footer */}
-                <div className="pt-3 border-t border-[#C5A059]/50 text-center">
-                  <p className="font-mono text-[9px] text-[#E6DFD3]/60">
-                    Click outside to change zone
-                  </p>
-                </div>
+              {/* Modal Footer */}
+              <div className="pt-4 border-t border-[#C5A059]/50 text-center">
+                <p className="font-mono text-xs sm:text-sm text-[#E6DFD3]/60">
+                  Click outside to change zone
+                </p>
               </div>
             </motion.div>
-          </>
+          </div>,
+          document.body
         )}
-      </div>
 
       {/* IBB Mode Indicator */}
       {isIBBMode && (
