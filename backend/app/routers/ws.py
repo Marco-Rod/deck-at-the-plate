@@ -54,7 +54,37 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, user_id: str):
             print(f"[WS] Verificando si CPU debe actuar al conectar...")
             from app.routers.gameplay import trigger_cpu_response_if_needed
             state = dict(game.state_data or {})
+            print(f"[WS] State before trigger: current_pitch={state.get('current_pitch')}, is_top={game.is_top_inning}, mode={state.get('mode')}")
             await trigger_cpu_response_if_needed(game, state, db, game_id)
+            # Recargar game desde DB para sincronizar
+            db.refresh(game)
+            print(f"[WS] State after trigger: current_pitch={game.state_data.get('current_pitch') if game.state_data else None}")
+            
+            # ⭐ Si la CPU lanzó en el inicio, enviar el estado actualizado al cliente
+            if game.state_data and game.state_data.get('current_pitch'):
+                print(f"[WS] CPU lanzó en el inicio, enviando INIT_GAME_STATE actualizado...")
+                sanitized_state = sanitize_state_for_player(
+                    state_data=game.state_data,
+                    requesting_user_id=user_id,
+                    home_user_id=game.home_user_id,
+                    away_user_id=game.away_user_id,
+                    is_top_inning=game.is_top_inning
+                )
+                await websocket.send_json({
+                    "type": "INIT_GAME_STATE",
+                    "game_id": game_id,
+                    "outs": game.outs,
+                    "balls": game.balls,
+                    "strikes": game.strikes,
+                    "score_home": game.score_home,
+                    "score_away": game.score_away,
+                    "current_inning": game.current_inning,
+                    "is_top_inning": game.is_top_inning,
+                    "state_data": {
+                        **sanitized_state,
+                        "user_role": "HOME" if user_id == game.home_user_id else "AWAY",
+                    }
+                })
         else:
             await websocket.send_json({
                 "type": "ERROR",
