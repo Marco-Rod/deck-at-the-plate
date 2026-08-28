@@ -162,13 +162,23 @@ export const useStadiumSocket = (
 
       case 'PITCHER_CHANGED': {
         console.log('🔄 [WS] PITCHER_CHANGED recibido:', data);
+        console.log('🔄 [WS] new_pitcher datos:', {
+          id: data.new_pitcher?.id,
+          name: data.new_pitcher?.name,
+          overall: data.new_pitcher?.overall,
+          team: data.new_pitcher?.team,
+          pitch_count: data.new_pitcher?.pitch_count,
+          fatigue_level: data.new_pitcher?.fatigue_level,
+        });
         // new_pitcher viene con todos los datos: id, name, number, overall,
         // position, rarity, stats, role, pitch_count: 0, fatigue_level: 0
         if (data.new_pitcher) {
+          console.log('🔄 [WS] Setting pitcherChanged signal with ts:', Date.now());
           setPitcherChanged({ newPitcher: data.new_pitcher, ts: Date.now() });
         }
         // También actualizar el gameState si viene state_data actualizado
         if (data.state_data) {
+          console.log('🔄 [WS] Actualizando gameState con state_data');
           setGameState(prev => {
             if (!prev) return prev;
             return {

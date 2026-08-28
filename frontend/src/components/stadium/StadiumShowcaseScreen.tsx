@@ -541,6 +541,16 @@ export const StadiumShowcaseScreen: React.FC<StadiumShowcaseScreenProps> = ({
 
     const { newPitcher } = pitcherChanged;
     console.log('🔄 [PITCHER_CHANGED] Actualizando carta del pitcher:', newPitcher?.name);
+    console.log('🔄 [PITCHER_CHANGED] Datos recibidos:', {
+      id: newPitcher?.id,
+      name: newPitcher?.name,
+      overall: newPitcher?.overall,
+      team: newPitcher?.team,
+      pitch_count: newPitcher?.pitch_count,
+      fatigue_level: newPitcher?.fatigue_level,
+      repertoire_length: newPitcher?.repertoire?.length,
+      stats_length: newPitcher?.stats?.length,
+    });
 
     // 1. Actualizar la carta del pitcher con datos frescos del backend
     //    El backend ya envía: id, name, number, overall, position, rarity,
@@ -565,10 +575,12 @@ export const StadiumShowcaseScreen: React.FC<StadiumShowcaseScreenProps> = ({
     const repertoire = newPitcher.repertoire || newPitcher.stats?.repertoire || [];
     if (repertoire.length > 0 && repertoire[0]?.pitch_type) {
       setSelectedPitch(repertoire[0].pitch_type);
+      console.log('🔄 [PITCHER_CHANGED] Resetear selectedPitch a:', repertoire[0].pitch_type);
     }
 
     // 3. Resetear animación de strikeouts para el nuevo pitcher
     setStrikeoutAnimationTrigger(false);
+    console.log('🔄 [PITCHER_CHANGED] ✅ Actualización completada');
 
   }, [pitcherChanged?.ts]);
 
