@@ -74,7 +74,7 @@ export const StadiumShowcaseScreen: React.FC<StadiumShowcaseScreenProps> = ({
   
   const lastProcessedInningCompletedRef = useRef<number | null>(null);
 
-  const { gameState, lastResult, inningCompleted, hasPitched, isConnected, sendPitch, sendSwing, sendTactic } =
+  const { gameState, lastResult, inningCompleted, hasPitched, isConnected, pitcherChanged, sendPitch, sendSwing, sendTactic } =
     useStadiumSocket(gameId ?? '', userId);
 
   // ⭐ NUEVO: Calcular strikeouts del pitcher activo desde WebSocket
@@ -528,6 +528,45 @@ export const StadiumShowcaseScreen: React.FC<StadiumShowcaseScreenProps> = ({
     }
   }, [gameState?.active_batter, gameState?.activeBatterId, userTeam, gameState?.rivalTeamName, userLineupCards]);
 
+  // ── Reaccionar al cambio de pitcher vía WebSocket PITCHER_CHANGED ──────────
+  // Cuando el backend confirma el cambio, actualizamos la carta, reseteamos
+  // el pitch_count, la fatiga, y el selectedPitch al primer lanzamiento del nuevo pitcher.
+  useEffect(() => {
+    if (!pitcherChanged) return;
+
+    const { newPitcher } = pitcherChanged;
+    console.log('🔄 [PITCHER_CHANGED] Actualizando carta del pitcher:', newPitcher?.name);
+
+    // 1. Actualizar la carta del pitcher con datos frescos del backend
+    //    El backend ya envía: id, name, number, overall, position, rarity,
+    //    stats, role, pitch_count: 0, fatigue_level: 0
+    setPitcherCard({
+      id: newPitcher.id,
+      name: newPitcher.name,
+      number: newPitcher.number,
+      overall: newPitcher.overall,
+      position: newPitcher.position,
+      rarity: newPitcher.rarity || 'COMMON',
+      team: newPitcher.team || '',
+      role: 'PITCHER',
+      photo: newPitcher.photo,
+      repertoire: newPitcher.stats?.repertoire || newPitcher.repertoire || [],
+      stats: newPitcher.stats || [],
+      pitch_count: 0,
+      fatigue_level: 0,
+    });
+
+    // 2. Resetear el tipo de pitch seleccionado al primero del repertorio nuevo
+    const repertoire = newPitcher.repertoire || newPitcher.stats?.repertoire || [];
+    if (repertoire.length > 0 && repertoire[0]?.pitch_type) {
+      setSelectedPitch(repertoire[0].pitch_type);
+    }
+
+    // 3. Resetear animación de strikeouts para el nuevo pitcher
+    setStrikeoutAnimationTrigger(false);
+
+  }, [pitcherChanged?.ts]);
+
   const tacticalHand: TacticalCard[] = [
     {
       id: 't1',
@@ -761,8 +800,29 @@ export const StadiumShowcaseScreen: React.FC<StadiumShowcaseScreenProps> = ({
             userId={userId}
             fatigueLevel={gameState?.active_pitcher?.fatigue_level ?? 0}
             onPitcherChanged={(newPitcher) => {
-              console.log('✅ Pitcher actualizado:', newPitcher);
-              // El WebSocket actualizará el gameState automáticamente
+              console.log('🔄 [onPitcherChanged] Fallback local recibido:', newPitcher?.name);
+              // El WS PITCHER_CHANGED es la fuente principal.
+              // Este callback actualiza localmente en caso de que el WS llegue tarde.
+              if (!newPitcher) return;
+              setPitcherCard({
+                id: newPitcher.id,
+                name: newPitcher.name,
+                number: newPitcher.number,
+                overall: newPitcher.overall,
+                position: newPitcher.position,
+                rarity: newPitcher.rarity || 'COMMON',
+                team: newPitcher.team || '',
+                role: 'PITCHER',
+                photo: newPitcher.photo,
+                repertoire: newPitcher.repertoire || [],
+                stats: newPitcher.stats || [],
+                pitch_count: 0,
+                fatigue_level: 0,
+              });
+              const rep = newPitcher.repertoire || [];
+              if (rep.length > 0 && rep[0]?.pitch_type) {
+                setSelectedPitch(rep[0].pitch_type);
+              }
             }}
           />
         </div>

@@ -32,6 +32,7 @@ interface UseStadiumSocketReturn {
   inningCompleted: { ts: number } | null;
   hasPitched: boolean;
   isConnected: boolean;
+  pitcherChanged: { newPitcher: any; ts: number } | null;
   sendPitch: (zone: number, pitchType: PitchType) => Promise<void>;
   sendSwing: (swingType: SwingPayload['swing_type'], guessedZone: number | null, guessedPitch: PitchType | null) => Promise<void>;
   sendTactic: (tacticId: string, playerRole: 'PITCHER' | 'BATTER') => Promise<void>;
@@ -86,6 +87,7 @@ export const useStadiumSocket = (
   const [inningCompleted, setInningCompleted] = useState<{ ts: number } | null>(null);
   const [hasPitched, setHasPitched] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
+  const [pitcherChanged, setPitcherChanged] = useState<{ newPitcher: any; ts: number } | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
@@ -158,6 +160,36 @@ export const useStadiumSocket = (
         break;
       }
 
+      case 'PITCHER_CHANGED': {
+        console.log('🔄 [WS] PITCHER_CHANGED recibido:', data);
+        // new_pitcher viene con todos los datos: id, name, number, overall,
+        // position, rarity, stats, role, pitch_count: 0, fatigue_level: 0
+        if (data.new_pitcher) {
+          setPitcherChanged({ newPitcher: data.new_pitcher, ts: Date.now() });
+        }
+        // También actualizar el gameState si viene state_data actualizado
+        if (data.state_data) {
+          setGameState(prev => {
+            if (!prev) return prev;
+            return {
+              ...prev,
+              activePitcherId: data.new_pitcher_id,
+              active_pitcher: {
+                ...data.new_pitcher,
+                pitch_count: 0,
+                fatigue_level: 0,
+              },
+              state_data: {
+                ...prev.state_data,
+                ...data.state_data,
+                active_pitcher: data.new_pitcher_id,
+              },
+            };
+          });
+        }
+        break;
+      }
+
       default:
         console.warn('[WS] Evento no manejado:', data.type);
     }
@@ -221,5 +253,5 @@ export const useStadiumSocket = (
     [gameId]
   );
 
-  return { gameState, lastResult, inningCompleted, hasPitched, isConnected, sendPitch, sendSwing, sendTactic };
+  return { gameState, lastResult, inningCompleted, hasPitched, isConnected, pitcherChanged, sendPitch, sendSwing, sendTactic };
 };

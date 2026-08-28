@@ -756,7 +756,7 @@ async def change_pitcher(game_id: str, payload: ChangePitcherRequest, db: Sessio
     db.commit()
     db.refresh(game)
 
-    # ⭐ NUEVO: Construir datos del nuevo pitcher para el cliente
+    # ⭐ Construir datos del nuevo pitcher para el cliente
     new_pitcher_data = {
         "id": new_pitcher.id,
         "name": new_pitcher.name,
@@ -766,6 +766,7 @@ async def change_pitcher(game_id: str, payload: ChangePitcherRequest, db: Sessio
         "rarity": new_pitcher.rarity.value if new_pitcher.rarity else "COMMON",
         "team": new_pitcher.team.name if new_pitcher.team else "UNKNOWN",
         "stats": format_player_stats(new_pitcher, "PITCHER"),
+        "repertoire": new_pitcher.repertoire or [],   # ← necesario para el pitch selector
         "role": "PITCHER",
         "pitch_count": 0,
         "fatigue_level": 0.0,
