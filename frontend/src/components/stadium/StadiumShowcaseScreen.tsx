@@ -17,7 +17,7 @@ import { InningTransitionModal } from './InningTransitionModal';
 import { GameIntroModal } from './GameIntroModal';
 import { GameplayDeckAndReveal } from './GameplayDeckAndReveal';
 import { useStadiumSocket } from '../../hooks/useStadiumSocket';
-import { games as gamesApi, cards as cardsApi } from '../../utils/api';
+import { games as gamesApi, cards as cardsApi, user as userApi } from '../../utils/api';
 
 import type {
   PitchType,
