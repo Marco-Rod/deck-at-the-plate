@@ -16,6 +16,7 @@ import { GameOverModal } from './GameOverModal';
 import { InningTransitionModal } from './InningTransitionModal';
 import { GameIntroModal } from './GameIntroModal';
 import { GameplayDeckAndReveal } from './GameplayDeckAndReveal';
+import { QuitGameModal } from './QuitGameModal';
 import { useStadiumSocket } from '../../hooks/useStadiumSocket';
 import { games as gamesApi, cards as cardsApi, user as userApi } from '../../utils/api';
 
@@ -71,6 +72,10 @@ export const StadiumShowcaseScreen: React.FC<StadiumShowcaseScreenProps> = ({
   // ⭐ NUEVO: Estados para estadísticas en tiempo real
   const [gameStats, setGameStats] = useState<Record<string, any>>({});
   const [strikeoutAnimationTrigger, setStrikeoutAnimationTrigger] = useState(false);
+  
+  // ⭐ NUEVO: Estados para el modal de finalizar partido
+  const [showQuitModal, setShowQuitModal] = useState(false);
+  const [isQuittingGame, setIsQuittingGame] = useState(false);
   
   const lastProcessedInningCompletedRef = useRef<number | null>(null);
 
@@ -661,6 +666,20 @@ export const StadiumShowcaseScreen: React.FC<StadiumShowcaseScreenProps> = ({
     }
   };
 
+  const handleQuitGame = async () => {
+    setIsQuittingGame(true);
+    try {
+      // El WebSocket se cerrará automáticamente cuando onBack() desmonte el componente
+      // Pequeño delay para asegurar que todo se sincronice
+      await new Promise(resolve => setTimeout(resolve, 300));
+      // Regresar al lobby - esto desmonta StadiumShowcaseScreen y cierra el WebSocket
+      onBack();
+    } catch (error) {
+      console.error('Error al finalizar el partido:', error);
+      setIsQuittingGame(false);
+    }
+  };
+
   // Cuando llega un resultado del backend, esperar 1 seg antes de liberar los controles.
   // Se usa un objeto {text, ts} en lugar de string plano para garantizar que el useEffect
   // siempre dispare, incluso cuando dos jugadas consecutivas producen el mismo texto
@@ -750,10 +769,11 @@ export const StadiumShowcaseScreen: React.FC<StadiumShowcaseScreenProps> = ({
         <div className="flex items-center gap-3">
           <button
             type="button"
-            onClick={onBack}
-            className="bg-[#0A0D0F] border border-[#C5A059] px-4 py-2 font-mono text-xs text-[#C5A059] font-bold cursor-pointer hover:bg-[#1A3323]"
+            onClick={() => setShowQuitModal(true)}
+            className="bg-[#0A0D0F] border border-red-600 px-4 py-2 font-mono text-xs text-red-500 font-bold cursor-pointer hover:bg-red-600/10 transition-colors"
+            title="Finalizar el partido actual"
           >
-            ⚙️ LOBBY
+            🚪 FINALIZAR
           </button>
         </div>
       </header>
@@ -932,6 +952,14 @@ export const StadiumShowcaseScreen: React.FC<StadiumShowcaseScreenProps> = ({
         onSubmitPlay={handleSubmitPlay}
       />
       )}
+
+      {/* Modal de Finalizar Partido */}
+      <QuitGameModal
+        isOpen={showQuitModal}
+        onConfirm={handleQuitGame}
+        onCancel={() => setShowQuitModal(false)}
+        isLoading={isQuittingGame}
+      />
     </div>
   );
 };
