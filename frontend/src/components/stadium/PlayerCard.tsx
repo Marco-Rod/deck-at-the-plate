@@ -11,6 +11,8 @@ interface PlayerCardProps {
   disablePulse?: boolean;
   responsive?: boolean;
   size?: 'sm' | 'md' | 'lg';
+  fatigueLevel?: number; // ⭐ NUEVO: Nivel de fatiga del pitcher (0-100)
+  onClickPitcher?: () => void; // ⭐ NUEVO: Callback para abrir modal de cambio
 }
 
 interface TierConfig {
@@ -45,6 +47,8 @@ export const PlayerCard: React.FC<PlayerCardProps> = ({
   disablePulse = false,
   responsive = true,
   size = 'md',
+  fatigueLevel = 0,
+  onClickPitcher,
 }) => {
   const tierConfig = getTierConfig(player?.rarity);
   const roleStats = getRoleStatsConfig(role);
@@ -130,6 +134,14 @@ export const PlayerCard: React.FC<PlayerCardProps> = ({
       whileTap: { scale: 0.96 },
     };
 
+  // ⭐ NUEVO: Efecto de vibración basado en fatiga del pitcher
+  const vibrateIntensity = (fatigueLevel / 100) * 3; // Max 3px vibration at 100% fatigue
+  const vibrationDuration = Math.max(0.2, 1 - fatigueLevel / 100); // Faster vibration as fatigue increases
+  
+  const vibrateAnimation = role === 'PITCHER' && fatigueLevel > 0 ? {
+    x: [0, vibrateIntensity, -vibrateIntensity, vibrateIntensity, 0],
+  } : {};
+
   // Get player stats matching role config
   const displayStats = player?.stats?.length > 0
     ? player.stats.slice(0, 3)
@@ -138,7 +150,9 @@ export const PlayerCard: React.FC<PlayerCardProps> = ({
   return (
     <motion.div
       key={player?.id} // ⭐ NUEVO: Force re-mount when player changes to reset animations
-      className={`${cardSizeClass} aspect-[3/4] relative z-10 bg-[#0A0D0F]/90 p-2 sm:p-3 md:p-4 backdrop-blur-sm rounded-xs cursor-pointer select-none flex flex-col`}
+      className={`${cardSizeClass} aspect-[3/4] relative z-10 bg-[#0A0D0F]/90 p-2 sm:p-3 md:p-4 backdrop-blur-sm rounded-xs cursor-pointer select-none flex flex-col ${
+        role === 'PITCHER' && onClickPitcher ? 'hover:shadow-lg' : ''
+      }`}
       style={{
         borderWidth: '2px',
         borderColor: tierConfig.accentColor,
@@ -147,10 +161,25 @@ export const PlayerCard: React.FC<PlayerCardProps> = ({
           ? `0 0 20px ${tierConfig.shadowColor}, inset 0 0 10px rgba(255, 255, 255, 0.05)`
           : undefined,
       }}
-      animate={animationConfig.animate}
-      transition={animationConfig.transition}
+      animate={{
+        ...animationConfig.animate,
+        ...vibrateAnimation,
+      }}
+      transition={{
+        ...animationConfig.transition,
+        vibrate: vibrateAnimation.x ? {
+          duration: vibrationDuration,
+          repeat: Infinity,
+          ease: 'easeInOut',
+        } : undefined,
+      }}
       whileHover={animationConfig.whileHover}
       whileTap={animationConfig.whileTap}
+      onClick={() => {
+        if (role === 'PITCHER' && onClickPitcher) {
+          onClickPitcher();
+        }
+      }}
     >
       {/* HEADER: Tier + OVR - Responsive sizing */}
       <div className="flex justify-between items-center border-b pb-1 sm:pb-1.5 md:pb-2 mb-2 md:mb-3 gap-1 w-full" style={{ borderColor: tierConfig.accentColor }}>

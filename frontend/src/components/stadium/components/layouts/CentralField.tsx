@@ -29,9 +29,10 @@
  * />
  */
 
-import React from 'react';
+import React, { useState } from 'react';
 import { GameInfo, PitchZoneGrid } from '../index';
 import { PlayerCard } from '../../PlayerCard';
+import { ChangePitcherModal } from '../../ChangePitcherModal';
 import type { CentralFieldProps } from '../../types/stadium.types';
 
 export const CentralField: React.FC<CentralFieldProps> = ({
@@ -54,6 +55,11 @@ export const CentralField: React.FC<CentralFieldProps> = ({
   isTopInning = true,
   runners = { b1: null, b2: null, b3: null },
 }) => {
+  const [showChangePitcherModal, setShowChangePitcherModal] = useState(false);
+  
+  // ⭐ NUEVO: Lista de lanzadores disponibles (se obtendría del estado del juego)
+  // Por ahora es un placeholder - se actualizará con datos reales del backend
+  const availablePitchers: any[] = [];
   return (
     <div className="relative z-10 w-full flex flex-col items-center gap-1 sm:gap-2 md:gap-3 lg:gap-6 px-0.5 sm:px-1 md:px-2">
       {/* GAME INFO - Responsive width */}
@@ -81,6 +87,8 @@ export const CentralField: React.FC<CentralFieldProps> = ({
             role="PITCHER"
             disablePulse={true}
             size="sm"
+            fatigueLevel={0} // ⭐ TODO: Pasar desde gameState
+            onClickPitcher={() => setShowChangePitcherModal(true)}
           />
         </div>
 
@@ -114,6 +122,18 @@ export const CentralField: React.FC<CentralFieldProps> = ({
           ¡El lanzador ya pichó! Selecciona tu swing.
         </div>
       )}
+
+      {/* ⭐ NUEVO: Modal para cambiar lanzador */}
+      <ChangePitcherModal
+        isOpen={showChangePitcherModal}
+        onClose={() => setShowChangePitcherModal(false)}
+        currentPitcher={pitcherCard}
+        availablePitchers={availablePitchers}
+        onConfirm={async (newPitcherId) => {
+          // ⭐ TODO: Implementar llamada al backend para cambiar pitcher
+          console.log('Cambiar pitcher a:', newPitcherId);
+        }}
+      />
     </div>
   );
 };
