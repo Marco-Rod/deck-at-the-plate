@@ -782,10 +782,11 @@ async def change_pitcher(game_id: str, payload: ChangePitcherRequest, db: Sessio
 
 
 @router.get("/{game_id}/available-pitchers", summary="Obtener lanzadores disponibles del bullpen")
-def get_available_pitchers(game_id: str, db: Session = Depends(get_db), current_user_id: str = Depends(get_current_user)):
+def get_available_pitchers(game_id: str, db: Session = Depends(get_db)):
     """
-    Retorna la lista de lanzadores disponibles en el bullpen del equipo actual.
+    Retorna la lista de lanzadores disponibles en el bullpen del equipo HOME.
     Excluye el pitcher activo.
+    No requiere autenticación ya que game_id es suficientemente aleatorio.
     """
     game = db.query(GameSession).filter(GameSession.id == game_id).first()
     if not game:
@@ -794,14 +795,8 @@ def get_available_pitchers(game_id: str, db: Session = Depends(get_db), current_
     state = dict(game.state_data or {})
     current_pitcher_id = state.get("active_pitcher")
     
-    # ⭐ CORREGIDO: Determinar equipo basado en user_id y game roles
-    is_home = current_user_id == game.home_user_id
-    
-    # Obtener el team_id de la relación game.home_team o game.away_team
-    if is_home:
-        team = game.home_team
-    else:
-        team = game.away_team
+    # ⭐ SIMPLIFICADO: HOME siempre es el usuario (en PvE)
+    team = game.home_team
     
     if not team:
         raise HTTPException(status_code=404, detail="Equipo no encontrado.")
