@@ -160,12 +160,14 @@ def _build_play_resolved_payload(game: GameSession, event: str, description: str
                 if current_pitch_count > pitch_threshold:
                     extra_pitches = current_pitch_count - pitch_threshold
                     # ⭐ AGRESIVO: -10% por cada lanzamiento extra
-                    penalty_factor = max(0.5, 1.0 - (0.10 * extra_pitches))
-                    fatigue_level = min(100, (1.0 - penalty_factor) * 100)
+                    # SIN cap en penalty_factor - permite fatiga 100%
+                    penalty_factor = 1.0 - (0.10 * extra_pitches)
+                    # Convertir a porcentaje de fatiga (capped a 100%)
+                    fatigue_level = min(100, max(0, (1.0 - penalty_factor) * 100))
                 else:
                     fatigue_level = 0.0
                 
-                # ⭐ DEBUG: Logging de fatiga AGRESIVA
+                # ⭐ DEBUG: Logging de fatiga AGRESIVA (sin cap)
                 print(f"🔍 [PITCHER STAMINA DEBUG - AGGRESSIVE]")
                 print(f"   Pitcher ID: {active_pitcher_id}")
                 print(f"   Current Pitch Count: {current_pitch_count}")
@@ -174,10 +176,11 @@ def _build_play_resolved_payload(game: GameSession, event: str, description: str
                 
                 if current_pitch_count > pitch_threshold:
                     extra_pitches = current_pitch_count - pitch_threshold
-                    penalty_factor = max(0.5, 1.0 - (0.10 * extra_pitches))
+                    penalty_factor = 1.0 - (0.10 * extra_pitches)
                     print(f"   ⚡ FATIGUE ACTIVATED!")
                     print(f"      Extra Pitches: {extra_pitches}")
-                    print(f"      Penalty Factor: {penalty_factor:.2f} ({(1.0-penalty_factor)*100:.1f}% degradation)")
+                    print(f"      Penalty Factor (uncapped): {penalty_factor:.2f}")
+                    print(f"      Degradation: {max(0, (1.0-penalty_factor)*100):.1f}%")
                 else:
                     print(f"   ✅ No fatigue yet (under threshold)")
                 

@@ -41,22 +41,23 @@ def apply_pitcher_fatigue(
     DISEÑO ESTRATÉGICO - Los lanzadores se cansan RÁPIDO:
     
     3 INNINGS:
-      - 6 pitches (threshold):  0% fatiga
-      - 9 pitches (3 extra):    ~67% fatiga
-      - 12 pitches (6 extra):   ~100% fatiga (max penalty)
+      - 6 pitches (threshold):   0% fatiga
+      - 9 pitches (3 extra):    30% fatiga
+      - 12 pitches (6 extra):   60% fatiga 🟠 TIRED
+      - 16 pitches (10 extra):  100% fatiga (completely exhausted)
     
     6 INNINGS:
       - 15 pitches (threshold): 0% fatiga
-      - 18 pitches (3 extra):   ~40% fatiga
-      - 25 pitches (10 extra):  ~80% fatiga
+      - 18 pitches (3 extra):   30% fatiga
+      - 25 pitches (10 extra):  100% fatiga
     
     9 INNINGS:
       - 25 pitches (threshold): 0% fatiga
-      - 30 pitches (5 extra):   ~40% fatiga
-      - 50 pitches (25 extra):  ~100% fatiga
+      - 30 pitches (5 extra):   50% fatiga
+      - 35 pitches (10 extra):  100% fatiga
     
     Fórmula: penalty_factor = 1.0 - (0.10 * extra_pitches)
-             (10% degradación por cada lanzamiento extra)
+             Sin cap en penalty_factor, pero estadísticas tienen mínimo de 1
     
     Args:
         pitcher_attrs: Diccionario con velocidad, control, movimiento
@@ -81,17 +82,19 @@ def apply_pitcher_fatigue(
     if pitch_count > pitch_threshold:
         extra_pitches = pitch_count - pitch_threshold
         
-        # ⭐ AGRESIVO: -10% por cada lanzamiento extra (fue -3% antes)
-        penalty_factor = max(0.5, 1.0 - (0.10 * extra_pitches))
+        # ⭐ AGRESIVO: -10% por cada lanzamiento extra
+        # Sin cap en penalty_factor, permite llegar a fatiga 100%
+        penalty_factor = 1.0 - (0.10 * extra_pitches)
         
         print(f"   Extra Pitches: {extra_pitches}")
-        print(f"   Penalty Factor: {penalty_factor:.2f}")
-        print(f"   Degradation: {(1.0 - penalty_factor) * 100:.1f}%")
+        print(f"   Penalty Factor (uncapped): {penalty_factor:.2f}")
+        print(f"   Degradation: {max(0, (1.0 - penalty_factor) * 100):.1f}%")
         print(f"   Original Stats: VEL={pitcher_attrs.get('velocidad')}, CTR={pitcher_attrs.get('control')}, MOV={pitcher_attrs.get('movimiento')}")
 
-        modified_attrs["velocidad"] = int(modified_attrs.get("velocidad", 50) * penalty_factor)
-        modified_attrs["control"] = int(modified_attrs.get("control", 50) * penalty_factor)
-        modified_attrs["movimiento"] = int(modified_attrs.get("movimiento", 50) * penalty_factor)
+        # Aplicar penalización pero asegurar mínimo de 1 en cada stat
+        modified_attrs["velocidad"] = max(1, int(modified_attrs.get("velocidad", 50) * penalty_factor))
+        modified_attrs["control"] = max(1, int(modified_attrs.get("control", 50) * penalty_factor))
+        modified_attrs["movimiento"] = max(1, int(modified_attrs.get("movimiento", 50) * penalty_factor))
         
         print(f"   Modified Stats: VEL={modified_attrs['velocidad']}, CTR={modified_attrs['control']}, MOV={modified_attrs['movimiento']}")
     else:
