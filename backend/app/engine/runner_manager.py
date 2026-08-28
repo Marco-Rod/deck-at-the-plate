@@ -77,11 +77,16 @@ def advance_runners(
         # Detectar doble play: corredor en 1B + roletazo al cuadro (OUT_GROUND)
         if event == "OUT_GROUND" and r1 is not None:
             # Hay corredor en primera → intentar doble play
-            # Probabilidad base: ~75% en MLB para ground balls con runner en 1B
-            dp_chance = 0.75
-            # Ajustar por si también hay corredor en 2B (más difícil el doble play)
-            if r2 is not None:
-                dp_chance = 0.65  # 65% con corredor en ambas
+            # ⭐ ESPECIAL: Si hay bases llenas, el doble play es automático (100%)
+            if r1 is not None and r2 is not None and r3 is not None:
+                dp_chance = 1.0  # Bases llenas = doble play garantizado
+                print(f"⚾ [BASES LLENAS] Doble play automático (100% chance)")
+            else:
+                # Probabilidad base: ~75% en MLB para ground balls con runner en 1B
+                dp_chance = 0.75
+                # Ajustar por si también hay corredor en 2B (más difícil el doble play)
+                if r2 is not None:
+                    dp_chance = 0.65  # 65% con corredor en ambas
             
             if random.random() < dp_chance:
                 # ✅ DOBLE PLAY: corredor en 1B out en 2B, bateador out en 1B

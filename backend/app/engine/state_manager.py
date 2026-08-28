@@ -123,13 +123,9 @@ def process_at_bat_transition(
         if event_adjusted == "DOUBLE_PLAY":
             game.outs += 1  # Segundo out del doble play
             final_event = "DOUBLE_PLAY"
-        print(f"✅ [RUNNERS UPDATED] runners_after={updated_runners}, runs_scored={runs_scored}, event={event_adjusted}")
-
-        # Si fue doble play, preparamos para sumar out adicional ANTES de validar carreras
-        if event_adjusted == "DOUBLE_PLAY":
-            game.outs += 1  # Segundo out del doble play
-            final_event = "DOUBLE_PLAY"
             print(f"⚾ [DOUBLE PLAY] ¡Doble play! Outs ahora: {game.outs}")
+        
+        print(f"✅ [RUNNERS UPDATED] runners_after={updated_runners}, runs_scored={runs_scored}, event={event_adjusted}")
 
         # --- VALIDACIÓN CRÍTICA: Inning-Ending Double Play Rule ---
         # En béisbol, una carrera SOLO cuenta si cruza home ANTES del 3er out
