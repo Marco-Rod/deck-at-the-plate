@@ -514,13 +514,21 @@ async def _execute_cpu_pitcher_change(
     # Obtener el team_id del pitcher del CPU de referencia
     ref_pitcher_id = state.get(cpu_pitcher_field)
     if not ref_pitcher_id:
+        print(f"🤖 [CPU PITCHER CHANGE] ❌ No reference pitcher found (field={cpu_pitcher_field})")
         return False
     
     ref_pitcher = db.query(PlayerCardModel).filter(PlayerCardModel.id == ref_pitcher_id).first()
     if not ref_pitcher:
+        print(f"🤖 [CPU PITCHER CHANGE] ❌ Reference pitcher not found in DB: {ref_pitcher_id}")
         return False
     
     cpu_team_id = ref_pitcher.team_id
+    
+    print(f"🤖 [CPU PITCHER CHANGE] Iniciando cambio de lanzador:")
+    print(f"   - CPU Position: {'HOME' if cpu_is_home else 'AWAY'}")
+    print(f"   - CPU Team ID: {cpu_team_id} | Team: {ref_pitcher.team.name if ref_pitcher.team else 'UNKNOWN'}")
+    print(f"   - Current Pitcher: {ref_pitcher.name} (ID: {active_pitcher_id})")
+    print(f"   - Already Used Pitchers: {used_pitcher_ids}")
     
     # Buscar pitchers disponibles en el equipo de la CPU (no usados, no el activo)
     available = db.query(PlayerCardModel).filter(
@@ -530,13 +538,19 @@ async def _execute_cpu_pitcher_change(
         PlayerCardModel.id != active_pitcher_id,
     ).all()
     
+    print(f"   - Available Pitchers: {len(available)}")
+    for pitcher in available:
+        print(f"      ✓ {pitcher.name} (ID: {pitcher.id}) | Team: {pitcher.team.name if pitcher.team else 'UNKNOWN'} | OVR: {pitcher.overall} | Pos: {pitcher.position}")
+    
     if not available:
-        print(f"🤖 [CPU PITCHER CHANGE] No hay relevistas disponibles para el CPU")
+        print(f"🤖 [CPU PITCHER CHANGE] ❌ No hay relevistas disponibles para el CPU")
         return False
     
     # Seleccionar al relevista con mayor OVR (mejor preparado)
     new_pitcher = max(available, key=lambda p: p.overall)
-    print(f"🤖 [CPU PITCHER CHANGE] Cambiando a {new_pitcher.name} (OVR {new_pitcher.overall})")
+    print(f"🤖 [CPU PITCHER CHANGE] ✅ Seleccionado nuevo pitcher: {new_pitcher.name} (OVR {new_pitcher.overall})")
+    print(f"   - Team: {new_pitcher.team.name if new_pitcher.team else 'UNKNOWN'} (ID: {new_pitcher.team_id})")
+    print(f"   - Position: {new_pitcher.position} | Rarity: {new_pitcher.rarity}")
     
     # Ejecutar el cambio en state
     old_pitcher_id = state.get("active_pitcher")
@@ -552,6 +566,8 @@ async def _execute_cpu_pitcher_change(
     game.state_data = state
     db.commit()
     db.refresh(game)
+    
+    print(f"🤖 [CPU PITCHER CHANGE] ✅ Cambio completado y guardado en BD")
     
     # Construir datos del nuevo pitcher para broadcast
     new_pitcher_data = {

@@ -119,8 +119,12 @@ def create_game_session(payload: CreateGameRequest, db: Session = Depends(get_db
 
     print(f"🔍 DEBUG create_game_session:")
     print(f"   rival_team_id: {rival_team_id}")
+    print(f"   rival_team_name: {rival_team_name}")
     print(f"   cpu_cards: {len(cpu_cards)}")
-    print(f"   pitchers available: {len(pitchers)} → {[p.name for p in pitchers[:3]]}")
+    print(f"   pitchers available: {len(pitchers)}")
+    print(f"   🎯 PITCHER LIST FOR CPU:")
+    for p in pitchers:
+        print(f"      - {p.name} ({p.id}) | Team: {p.team.name if p.team else 'UNKNOWN'} | OVR: {p.overall} | Pos: {p.position}")
     print(f"   batters available: {len(batters)} → {[b.name for b in batters[:3]]}")
     print(f"   home_pitcher_id (before): {home_pitcher_id}")
     print(f"   away_pitcher_id (before): {away_pitcher_id}")
