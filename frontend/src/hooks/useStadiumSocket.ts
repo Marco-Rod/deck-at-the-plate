@@ -1,8 +1,14 @@
 /**
  * useStadiumSocket — Hook de comunicación WebSocket con el backend
  * =================================================================
- * Gestiona la conexión en tiempo real con el servidor de juego y expone
- * el estado del partido y las funciones para enviar acciones vía REST.
+ * Gestiona la conexión en tiempo real con el servidor de juego.
+ * 
+ * Cambio en Fase 1 (Event Sequencer):
+ * - Ya NO actualiza state directamente en eventos
+ * - En su lugar, llama callbacks para que el padre (StadiumShowcaseScreen)
+ *   enquee los eventos en el useEventSequencer
+ * - Mantiene INIT_GAME_STATE como excepción (sin sequencer)
+ * - PITCH_COMMITTED es inmediato (no necesita sequencer)
  */
 
 import { useEffect, useState, useCallback, useRef } from 'react';
@@ -26,13 +32,21 @@ interface SwingPayload {
   guessed_pitch: PitchType | null;
 }
 
+/**
+ * Callbacks opcionales para eventos del WebSocket
+ * Permiten que el parent component (StadiumShowcaseScreen) controle cómo
+ * procesar cada evento usando el useEventSequencer
+ */
+interface WebSocketCallbacks {
+  onPlayResolved?: (payload: PlayResolvedPayload) => void;
+  onPitcherChanged?: (payload: any) => void;
+  onGameStateInit?: (payload: InitGameStatePayload) => void;
+}
+
 interface UseStadiumSocketReturn {
   gameState: GameStateWS | null;
-  lastResult: { text: string; event: string; ts: number } | null;
-  inningCompleted: { ts: number } | null;
   hasPitched: boolean;
   isConnected: boolean;
-  pitcherChanged: { newPitcher: any; ts: number } | null;
   sendPitch: (zone: number, pitchType: PitchType) => Promise<void>;
   sendSwing: (swingType: SwingPayload['swing_type'], guessedZone: number | null, guessedPitch: PitchType | null) => Promise<void>;
   sendTactic: (tacticId: string, playerRole: 'PITCHER' | 'BATTER') => Promise<void>;
@@ -80,14 +94,12 @@ function parseStateData(payload: { current_inning: number; is_top_inning: boolea
 
 export const useStadiumSocket = (
   gameId: string,
-  userId: string
+  userId: string,
+  callbacks?: WebSocketCallbacks
 ): UseStadiumSocketReturn => {
   const [gameState, setGameState] = useState<GameStateWS | null>(null);
-  const [lastResult, setLastResult] = useState<{ text: string; event: string; ts: number } | null>(null);
-  const [inningCompleted, setInningCompleted] = useState<{ ts: number } | null>(null);
   const [hasPitched, setHasPitched] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
-  const [pitcherChanged, setPitcherChanged] = useState<{ newPitcher: any; ts: number } | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
@@ -111,106 +123,61 @@ export const useStadiumSocket = (
 
     ws.onmessage = (event) => {
       if (cancelled) return;
-  try {
-    const data = JSON.parse(event.data);
+      try {
+        const data = JSON.parse(event.data);
 
-    switch (data.type) {
-      case 'INIT_GAME_STATE': {
-        const payload = data as InitGameStatePayload;
-        setGameState(parseStateData(payload));
-        break;
-      }
-
-      case 'PITCH_COMMITTED': {
-        const payload = data as PitchCommittedPayload;
-        // Solo actualizamos que ya se realizó el picheo (para habilitar el botón del bateador)
-        setHasPitched(payload.has_pitched);
-        break;
-      }
-
-      case 'PLAY_RESOLVED': {
-        const payload = data as PlayResolvedPayload;
-        console.log('🔵 [FRONTEND] PLAY_RESOLVED received:');
-        console.log('   event:', payload.event);
-        console.log('   score_home:', payload.score_home);
-        console.log('   score_away:', payload.score_away);
-        
-        // ⭐ NUEVO: Mostrar el modal PRIMERO con el evento, luego actualizar estado
-        setLastResult({ text: payload.description, event: payload.event, ts: Date.now() });
-        console.log('   ⏳ [UX] Modal mostrado. Retardando actualización de estado 300ms...');
-        
-        // Retardar la actualización del estado del juego 300ms para que el modal se muestre primero
-        setTimeout(() => {
-          setGameState(parseStateData(payload));
-          setHasPitched(false);
-          console.log('   ✅ [UX] Estado del juego actualizado');
-          
-          // Detectar si la entrada terminó
-          if (payload.inning_completed) {
-            setInningCompleted({ ts: Date.now() });
+        switch (data.type) {
+          case 'INIT_GAME_STATE': {
+            const payload = data as InitGameStatePayload;
+            setGameState(parseStateData(payload));
+            callbacks?.onGameStateInit?.(payload);
+            break;
           }
-        }, 300);
-        
-        break;
-      }
 
-      case 'STEAL_RESOLVED': {
-        const desc = (data.description as string) || null;
-        if (desc) setLastResult({ text: desc, event: 'STEAL', ts: Date.now() });
-        break;
-      }
+          case 'PITCH_COMMITTED': {
+            const payload = data as PitchCommittedPayload;
+            // PITCH_COMMITTED es inmediato, no pasa por sequencer
+            setHasPitched(payload.has_pitched);
+            break;
+          }
 
-      case 'PITCHER_CHANGED': {
-        console.log('🔄 [WS] PITCHER_CHANGED recibido:', data);
-        console.log('🔄 [WS] Conexión activa, isConnected:', isConnected);
-        console.log('🔄 [WS] new_pitcher datos:', {
-          id: data.new_pitcher?.id,
-          name: data.new_pitcher?.name,
-          overall: data.new_pitcher?.overall,
-          team: data.new_pitcher?.team,
-          pitch_count: data.new_pitcher?.pitch_count,
-          fatigue_level: data.new_pitcher?.fatigue_level,
-        });
-        // new_pitcher viene con todos los datos: id, name, number, overall,
-        // position, rarity, stats, role, pitch_count: 0, fatigue_level: 0
-        if (data.new_pitcher) {
-          console.log('🔄 [WS] Setting pitcherChanged signal with ts:', Date.now());
-          setPitcherChanged({ newPitcher: data.new_pitcher, ts: Date.now() });
-          console.log('🔄 [WS] pitcherChanged signal set. New pitcher ID:', data.new_pitcher.id);
+          case 'PLAY_RESOLVED': {
+            const payload = data as PlayResolvedPayload;
+            console.log('🔵 [FRONTEND] PLAY_RESOLVED received:');
+            console.log('   event:', payload.event);
+            console.log('   score_home:', payload.score_home);
+            console.log('   score_away:', payload.score_away);
+            
+            // ⭐ Fase 1 Change: No actualizar state aquí
+            // Simplemente notificar al parent para que enquee el evento
+            callbacks?.onPlayResolved?.(payload);
+            
+            break;
+          }
+
+          case 'STEAL_RESOLVED': {
+            // STEAL_RESOLVED se trata como un tipo de PLAY_RESOLVED
+            const payload = data;
+            console.log('🔄 [WS] STEAL_RESOLVED received:', payload);
+            callbacks?.onPlayResolved?.(payload);
+            break;
+          }
+
+          case 'PITCHER_CHANGED': {
+            console.log('🔄 [WS] PITCHER_CHANGED recibido:', data);
+            // ⭐ Fase 1 Change: No actualizar state aquí
+            // Notificar al parent para que enquee el evento
+            callbacks?.onPitcherChanged?.(data);
+            break;
+          }
+
+          default:
+            console.warn('[WS] Evento no manejado:', data.type);
         }
-        // También actualizar el gameState si viene state_data actualizado
-        if (data.state_data) {
-          console.log('🔄 [WS] Actualizando gameState con state_data');
-          setGameState(prev => {
-            if (!prev) return prev;
-            const updated = {
-              ...prev,
-              activePitcherId: data.new_pitcher_id,
-              active_pitcher: {
-                ...data.new_pitcher,
-                pitch_count: 0,
-                fatigue_level: 0,
-              },
-              state_data: {
-                ...prev.state_data,
-                ...data.state_data,
-                active_pitcher: data.new_pitcher_id,
-              },
-            };
-            console.log('🔄 [WS] gameState actualizado. Nueva active_pitcher ID:', updated.active_pitcher?.id);
-            return updated;
-          });
-        }
-        break;
+      } catch (err) {
+        console.error('[WS] Error parseando mensaje:', err);
       }
-
-      default:
-        console.warn('[WS] Evento no manejado:', data.type);
-    }
-  } catch (err) {
-    console.error('[WS] Error parseando mensaje:', err);
-  }
-};
+    };
 
     ws.onclose = () => {
       if (cancelled) return;
@@ -231,7 +198,7 @@ export const useStadiumSocket = (
         ws.close();
       }
     };
-  }, [gameId, userId]);
+  }, [gameId, userId, callbacks]);
 
   const sendPitch = useCallback(
     async (zone: number, pitchType: PitchType): Promise<void> => {
@@ -267,5 +234,5 @@ export const useStadiumSocket = (
     [gameId]
   );
 
-  return { gameState, lastResult, inningCompleted, hasPitched, isConnected, pitcherChanged, sendPitch, sendSwing, sendTactic };
+  return { gameState, hasPitched, isConnected, sendPitch, sendSwing, sendTactic };
 };
