@@ -335,29 +335,41 @@ interface TacticalHandProps {
 ## Fases de Implementación
 
 ### ✅ Fase 1A: Estructura Base del WebSocket (HECHO)
-1. ✅ Crear `useEventSequencer.ts`
-2. ✅ Definir `EVENT_SEQUENCES` básicas
-3. ✅ Modificar `useStadiumSocket` para aceptar callbacks
+- ✅ Crear `useEventSequencer.ts`
+- ✅ Definir `EVENT_SEQUENCES` básicas
+- ✅ Modificar `useStadiumSocket` para aceptar callbacks
 
-**Commit:** c4dea28 - Decouple WebSocket from direct state updates
+**Commit:** c4dea28
 
-### 📋 Fase 1B: Integración en StadiumShowcaseScreen (PRÓXIMO)
+### 🔄 Fase 1B: Integración en StadiumShowcaseScreen (EN PROGRESO)
 
-**Tareas:**
-1. Importar `useEventSequencer` y `EVENT_SEQUENCES`
-2. Inicializar el hook en el componente
-3. Crear handlers para las callbacks del WebSocket:
-   - `handlePlayResolved(payload)` → enquee el evento
-   - `handlePitcherChanged(payload)` → enquee el evento
-   - `handleGameStateInit(payload)` → update state directo
-4. Pasar callbacks a `useStadiumSocket`
-5. Registrar step callbacks con `onStep()` para cada tipo de actualización
-6. Deshabilitar controles mientras `isProcessing` es true
+**Completado:**
+- ✅ Importar `useEventSequencer` y `EVENT_SEQUENCES`
+- ✅ Inicializar el hook en el componente
+- ✅ Crear handlers para las callbacks del WebSocket
+  - ✅ `handlePlayResolved(payload)` → enquee el evento
+  - ✅ `handlePitcherChanged(payload)` → enquee el evento
+- ✅ Pasar callbacks a `useStadiumSocket`
+- ✅ Registrar primer step callback: `show-modal`
+- ✅ Agregar estados locales: `lastResult`, `inningCompleted`, `pitcherChanged`
 
-**Archivos a modificar:**
-- `StadiumShowcaseScreen.tsx` (major)
-- Posiblemente `CentralField.tsx` (agregar disabled prop)
-- Posiblemente `TacticalHand.tsx` (agregar disabled prop)
+**Commits:**
+- 4b8bc66: Hook initialization and WebSocket integration
+- 6cd8881: Register 'show-modal' step callback
+
+**Pendiente:**
+- [ ] Registrar step callbacks adicionales (update-score, update-stats, etc.)
+- [ ] Deshabilitar controles durante evento (`disabled={isProcessing}`)
+- [ ] Limpiar effectos redundantes que ya no se necesitan
+- [ ] Testear flujo completo de un evento
+
+### 📋 Fase 2: Completar Secuencias (PRÓXIMO)
+- Definir todos los `EVENT_SEQUENCES` con timings reales
+- Verificar y ajustar delays según UX
+
+### 📋 Fase 3: Testing & Refinamiento (PRÓXIMO)
+- Testing manual de cada tipo de evento
+- Ajustar timings según feedback
 
 ---
 
