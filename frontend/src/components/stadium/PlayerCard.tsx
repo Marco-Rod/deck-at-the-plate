@@ -46,7 +46,7 @@ export const PlayerCard: React.FC<PlayerCardProps> = ({
   responsive = true,
   size = 'md',
 }) => {
-  const tierConfig = getTierConfig(player?.overall);
+  const tierConfig = getTierConfig(player?.rarity);
   const roleStats = getRoleStatsConfig(role);
 
   // Responsive sizing
@@ -215,47 +215,47 @@ export default PlayerCard;
 /**
  * Get tier configuration based on player overall rating
  */
-function getTierConfig(overall?: number): TierConfig {
-  const ovr = overall ?? 50;
-  
-  if (ovr >= 90) {
-    return {
-      tierLabel: 'ELITE',
-      accentColor: '#FFD700',
-      glowColor: '#FFD700',
-      shadowColor: 'rgba(255, 215, 0, 0.5)',
-    };
-  }
-  if (ovr >= 80) {
-    return {
-      tierLabel: 'ALL-STAR',
-      accentColor: '#C5A059',
-      glowColor: '#C5A059',
-      shadowColor: 'rgba(197, 160, 89, 0.5)',
-    };
-  }
-  if (ovr >= 70) {
-    return {
-      tierLabel: 'STARTER',
-      accentColor: '#4A90D9',
-      glowColor: '#4A90D9',
-      shadowColor: 'rgba(74, 144, 217, 0.5)',
-    };
-  }
-  if (ovr >= 60) {
-    return {
-      tierLabel: 'REGULAR',
-      accentColor: '#6B7280',
-      glowColor: '#6B7280',
-      shadowColor: 'rgba(107, 114, 128, 0.5)',
-    };
-  }
-  return {
-    tierLabel: 'ROOKIE',
-    accentColor: '#9CA3AF',
-    glowColor: '#9CA3AF',
-    shadowColor: 'rgba(156, 163, 175, 0.5)',
-  };
+// Mapeo de colores por rareza (homologado con OnboardingScreen)
+const RARITY_COLOR_CONFIG = {
+  DIAMOND: {
+    tierLabel: 'DIAMOND',
+    accentColor: '#9966FF',
+    glowColor: '#9966FF',
+    shadowColor: 'rgba(153, 102, 255, 0.8)',
+  },
+  GOLD: {
+    tierLabel: 'GOLD',
+    accentColor: '#FFD700',
+    glowColor: '#FFD700',
+    shadowColor: 'rgba(255, 215, 0, 0.7)',
+  },
+  SILVER: {
+    tierLabel: 'SILVER',
+    accentColor: '#C0C0C0',
+    glowColor: '#C0C0C0',
+    shadowColor: 'rgba(192, 192, 192, 0.6)',
+  },
+  BRONZE: {
+    tierLabel: 'BRONZE',
+    accentColor: '#CD7F32',
+    glowColor: '#CD7F32',
+    shadowColor: 'rgba(205, 127, 50, 0.6)',
+  },
+  COMMON: {
+    tierLabel: 'COMMON',
+    accentColor: '#808080',
+    glowColor: '#808080',
+    shadowColor: 'rgba(128, 128, 128, 0.5)',
+  },
+};
+
+/**
+ * Get tier config based on rarity level
+ * Homologated with OnboardingScreen colors
+ */
+function getTierConfig(rarity?: string): TierConfig {
+  const rarityKey = (rarity ?? 'COMMON').toUpperCase();
+  return RARITY_COLOR_CONFIG[rarityKey as keyof typeof RARITY_COLOR_CONFIG] || RARITY_COLOR_CONFIG.COMMON;
 }
 
 /**
