@@ -714,13 +714,16 @@ async def execute_swing(
 
 
 @router.post("/{game_id}/change-pitcher", summary="Realizar cambio de relevista (Bullpen)")
-async def change_pitcher(game_id: str, payload: ChangePitcherRequest, db: Session = Depends(get_db)):
+async def change_pitcher(
+    game_id: str,
+    payload: ChangePitcherRequest,
+    user_id: str = Query(..., description="ID del usuario que hace el cambio (para determinar HOME/AWAY)"),
+    db: Session = Depends(get_db)
+):
     """
     Sustituye al lanzador activo por un relevista del bullpen.
-    Valida que la carta exista y corresponda a un rol de pitcheo (SP, RP o TWP).
-    Inicializa en cero el contador de lanzamientos del entrante.
-    Retorna el nuevo pitcher con sus datos y broadcast vía WebSocket.
-    No requiere autenticación ya que game_id es suficientemente aleatorio.
+    Actualiza home_pitcher_id / away_pitcher_id en state_data para que
+    la transición de inning restaure el pitcher correcto.
     """
     print(f"🔍 [CHANGE_PITCHER] Request recibido")
     print(f"🔍 game_id: {game_id}")
@@ -760,6 +763,17 @@ async def change_pitcher(game_id: str, payload: ChangePitcherRequest, db: Sessio
 
     old_pitcher_id = state.get("active_pitcher")
     state["active_pitcher"] = payload.new_pitcher_id
+
+    # ── Actualizar home_pitcher_id / away_pitcher_id según quién es el usuario ──
+    # state_manager usa estos campos para restaurar el pitcher al cambiar de media entrada.
+    # Si no se actualizan aquí, el inning siguiente restaura el pitcher original.
+    is_home_user = (user_id == game.home_user_id) if user_id else True
+    if is_home_user:
+        state["home_pitcher_id"] = payload.new_pitcher_id
+    else:
+        state["away_pitcher_id"] = payload.new_pitcher_id
+
+    print(f"🔄 [CHANGE_PITCHER] Actualizando {'home' if is_home_user else 'away'}_pitcher_id → {payload.new_pitcher_id}")
 
     pitch_counts = state.get("pitch_counts", {})
     pitch_counts[payload.new_pitcher_id] = 0  # Reset pitch count para el nuevo pitcher

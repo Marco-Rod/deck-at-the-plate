@@ -211,8 +211,8 @@ export const games = {
    * @param {string} gameId
    * @param {{ new_pitcher_id: string }} payload
    */
-  changePitcher: (gameId, payload) =>
-    _request(`/api/v1/games/${gameId}/change-pitcher`, {
+  changePitcher: (gameId, payload, userId) =>
+    _request(`/api/v1/games/${gameId}/change-pitcher?user_id=${userId}`, {
       method: 'POST',
       body: JSON.stringify(payload),
     }),

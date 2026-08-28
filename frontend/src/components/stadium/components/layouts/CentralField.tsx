@@ -118,7 +118,7 @@ export const CentralField: React.FC<CentralFieldProps & {
     if (!gameId) return;
 
     try {
-      const response = await gamesApi.changePitcher(gameId, { new_pitcher_id: newPitcherId });
+      const response = await gamesApi.changePitcher(gameId, { new_pitcher_id: newPitcherId }, userId);
       console.log('✅ Pitcher cambiado:', response);
       
       // Notificar al componente padre
