@@ -139,6 +139,14 @@ export const PitcherStaminaBar: React.FC<PitcherStaminaBarProps> = ({
   totalInnings = 9,
   basePitcherStats = {},
 }) => {
+  // ⭐ DEBUG: Log de datos recibidos
+  console.log('🔍 [PitcherStaminaBar DEBUG]', {
+    pitchCount,
+    fatigueLevel,
+    totalInnings,
+    pitchThreshold: getPitchThreshold(totalInnings),
+    basePitcherStats,
+  });
   // Calcular stats con penalización de fatiga
   const currentStats = useMemo(
     () => calculateFatigueStats(basePitcherStats, pitchCount),

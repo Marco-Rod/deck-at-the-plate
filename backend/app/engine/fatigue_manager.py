@@ -53,6 +53,13 @@ def apply_pitcher_fatigue(
     
     # Obtener umbral dinámico basado en innings
     pitch_threshold = get_pitch_threshold(total_innings)
+    
+    # ⭐ DEBUG: Log de aplicación de fatiga
+    print(f"⚙️ [APPLY PITCHER FATIGUE]")
+    print(f"   Pitch Count: {pitch_count}")
+    print(f"   Total Innings: {total_innings}")
+    print(f"   Pitch Threshold: {pitch_threshold}")
+    print(f"   Exceeds Threshold: {pitch_count > pitch_threshold}")
 
     if pitch_count > pitch_threshold:
         extra_pitches = pitch_count - pitch_threshold
@@ -60,8 +67,16 @@ def apply_pitcher_fatigue(
         penalty_factor = 1.0 - (0.03 * (extra_pitches // FATIGUE_PENALTY_STEP + 1))
         penalty_factor = max(0.5, penalty_factor)  # Límite máximo de degradación: -50%
 
+        print(f"   Extra Pitches: {extra_pitches}")
+        print(f"   Penalty Factor: {penalty_factor:.2f}")
+        print(f"   Original Stats: VEL={pitcher_attrs.get('velocidad')}, CTR={pitcher_attrs.get('control')}, MOV={pitcher_attrs.get('movimiento')}")
+
         modified_attrs["velocidad"] = int(modified_attrs.get("velocidad", 50) * penalty_factor)
         modified_attrs["control"] = int(modified_attrs.get("control", 50) * penalty_factor)
         modified_attrs["movimiento"] = int(modified_attrs.get("movimiento", 50) * penalty_factor)
+        
+        print(f"   Modified Stats: VEL={modified_attrs['velocidad']}, CTR={modified_attrs['control']}, MOV={modified_attrs['movimiento']}")
+    else:
+        print(f"   No fatigue applied (pitch_count <= threshold)")
 
     return modified_attrs

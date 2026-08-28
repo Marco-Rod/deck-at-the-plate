@@ -764,6 +764,17 @@ export const StadiumShowcaseScreen: React.FC<StadiumShowcaseScreenProps> = ({
         <div className="relative z-10 w-full md:w-[450px] md:flex-shrink-0 order-2 md:order-3 overflow-y-auto max-h-[40vh] md:max-h-full">
           <div className="bg-[#0A0D0F]/90 border border-[#C5A059]/30 rounded p-1 sm:p-2 md:p-3 text-xs md:text-sm flex flex-col gap-2 sm:gap-3">
             {/* PITCHER STAMINA BAR - Nueva sección arriba de strikeouts */}
+            {(() => {
+              const staminarDebugData = {
+                pitchCount: gameState?.active_pitcher?.pitch_count,
+                fatigueLevel: gameState?.active_pitcher?.fatigue_level,
+                totalInnings: gameState?.totalInnings,
+                activePitcherId: gameState?.activePitcherId,
+                activePitcherName: gameState?.active_pitcher?.name,
+              };
+              console.log('📊 [StadiumShowcaseScreen - STAMINA DATA]', staminarDebugData);
+              return null;
+            })()}
             <PitcherStaminaBar
               pitchCount={gameState?.active_pitcher?.pitch_count || 0}
               fatigueLevel={gameState?.active_pitcher?.fatigue_level || 0}

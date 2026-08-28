@@ -156,13 +156,37 @@ def _build_play_resolved_payload(game: GameSession, event: str, description: str
                 total_innings = state_with_role.get("total_innings", 9)
                 pitch_threshold = get_pitch_threshold(total_innings)
                 
-                # Calcular fatigue level (0-100%)
+                # Calcular fatigue level (0-100%) - usar la misma lógica que apply_pitcher_fatigue
                 FATIGUE_PENALTY_STEP = 15
                 if current_pitch_count > pitch_threshold:
                     extra_pitches = current_pitch_count - pitch_threshold
-                    fatigue_level = min(100, (extra_pitches / (FATIGUE_PENALTY_STEP * 5)) * 100)
+                    # Penalty factor: 1.0 - (0.03 * (extra_pitches // FATIGUE_PENALTY_STEP + 1))
+                    # Convertir a porcentaje de fatiga: (1 - penalty_factor) * 100
+                    penalty_factor = 1.0 - (0.03 * (extra_pitches // FATIGUE_PENALTY_STEP + 1))
+                    penalty_factor = max(0.5, penalty_factor)  # Límite: -50% máximo
+                    fatigue_level = min(100, (1.0 - penalty_factor) * 100)  # ⭐ CORREGIDO: conversión a %
                 else:
                     fatigue_level = 0.0
+                
+                # ⭐ DEBUG: Logging de fatiga
+                print(f"🔍 [PITCHER STAMINA DEBUG]")
+                print(f"   Pitcher ID: {active_pitcher_id}")
+                print(f"   Current Pitch Count: {current_pitch_count}")
+                print(f"   Total Innings: {total_innings}")
+                print(f"   Dynamic Pitch Threshold: {pitch_threshold}")
+                
+                if current_pitch_count > pitch_threshold:
+                    extra_pitches = current_pitch_count - pitch_threshold
+                    penalty_factor = 1.0 - (0.03 * (extra_pitches // FATIGUE_PENALTY_STEP + 1))
+                    penalty_factor = max(0.5, penalty_factor)
+                    print(f"   ✅ FATIGUE ACTIVATED!")
+                    print(f"      Extra Pitches: {extra_pitches}")
+                    print(f"      Penalty Factor: {penalty_factor:.2f} ({(1.0-penalty_factor)*100:.1f}% degradation)")
+                else:
+                    print(f"   ✅ No fatigue yet")
+                
+                print(f"   Final Fatigue Level (%): {fatigue_level:.2f}")
+                print(f"   Status: {'🟢 FRESH' if fatigue_level < 40 else '🟡 MODERATE' if fatigue_level < 70 else '🟠 TIRED' if fatigue_level < 85 else '🔴 CRITICAL'}")
                 
                 active_pitcher_data = {
                     "id": pitcher_card.id,
