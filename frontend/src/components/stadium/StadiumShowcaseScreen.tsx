@@ -225,8 +225,22 @@ export const StadiumShowcaseScreen: React.FC<StadiumShowcaseScreenProps> = ({
     return "Pitcher";
   };
 
-  // lastResult ya viene como {text, ts} desde el hook — cada jugada es un objeto nuevo,
-  // así que este useEffect siempre dispara aunque el texto sea idéntico al anterior.
+  // ⭐ Fase 1B: Register step callback for 'show-modal'
+  // This callback runs at delay: 0 when the event starts processing
+  useEffect(() => {
+    onStep('show-modal', (payload) => {
+      console.log(`✅ [STEP] show-modal - Setting PlayResultOverlay`);
+      setLastResult({
+        text: payload.description || payload.message || 'Evento',
+        event: payload.event || 'UNKNOWN',
+        ts: Date.now(),
+      });
+      // Bloquear controles mientras se muestra el evento
+      setIsAwaitingResult(true);
+    });
+  }, [onStep]);
+
+  // ⭐ Fase 1B: Desbloquear controles después del modal (1 segundo)
   useEffect(() => {
     if (lastResult) {
       const timer = setTimeout(() => {
