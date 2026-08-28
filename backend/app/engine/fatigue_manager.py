@@ -8,7 +8,10 @@ FATIGUE_THRESHOLDS = {
     9: 60,   # 9 innings: 60 pitches (default)
 }
 
-FATIGUE_PENALTY_STEP = 15  # Cada 15 lanzamientos extra aplica penalización
+# ⭐ MEJORADO: Escala de fatiga más agresiva
+# Cada 3 lanzamientos extra = -3% (en lugar de cada 15)
+# Esto hace que la fatiga sea proporcional a cada juego
+FATIGUE_PENALTY_STEP = 3  # Cada 3 lanzamientos extra aplica -3% penalización
 
 def get_pitch_threshold(total_innings: int = 9) -> int:
     """
@@ -37,9 +40,14 @@ def apply_pitcher_fatigue(
     Aplica penalizaciones a Velocidad, Control y Movimiento si el pitcher
     ha superado su umbral de lanzamientos en la partida.
     
-    El umbral se ajusta dinámicamente según el número de innings:
-    - Menos innings = fatiga más rápida (proporcionalmente)
-    - Más innings = fatiga más lenta
+    La fatiga es PROPORCIONAL al duración del juego:
+    - 3 innings: threshold 18 → cada pitch extra = -3% penalty
+    - 6 innings: threshold 40 → cada pitch extra = -1.5% penalty
+    - 9 innings: threshold 60 → cada pitch extra = -1% penalty
+    
+    Fórmula unificada:
+      penalty_factor = 1.0 - (fatigue_rate * extra_pitches)
+      penalty_rate = 0.03 / (threshold / 20)  # Normaliza a 20 pitches base
     
     Args:
         pitcher_attrs: Diccionario con velocidad, control, movimiento
@@ -63,11 +71,18 @@ def apply_pitcher_fatigue(
 
     if pitch_count > pitch_threshold:
         extra_pitches = pitch_count - pitch_threshold
-        # Penalización: -3% en atributos por cada tramo de 15 picheos extra
-        penalty_factor = 1.0 - (0.03 * (extra_pitches // FATIGUE_PENALTY_STEP + 1))
-        penalty_factor = max(0.5, penalty_factor)  # Límite máximo de degradación: -50%
+        
+        # ⭐ MEJORADO: Fatiga proporcional al juego
+        # Base: 3% degradación por cada lanzamiento extra en juegos de 3 innings
+        # Para otros juegos: escalar proporcionalmente
+        # Ej: 3 innings (18 threshold) → -3% por pitch
+        #     9 innings (60 threshold) → -1% por pitch (3x más gradual)
+        fatigue_rate = 0.03 / (pitch_threshold / 20.0)  # Normaliza a base de 20 pitches
+        penalty_factor = 1.0 - (fatigue_rate * extra_pitches)
+        penalty_factor = max(0.5, penalty_factor)  # Límite: -50% máximo
 
         print(f"   Extra Pitches: {extra_pitches}")
+        print(f"   Fatigue Rate (per pitch): {fatigue_rate:.4f}")
         print(f"   Penalty Factor: {penalty_factor:.2f}")
         print(f"   Original Stats: VEL={pitcher_attrs.get('velocidad')}, CTR={pitcher_attrs.get('control')}, MOV={pitcher_attrs.get('movimiento')}")
 

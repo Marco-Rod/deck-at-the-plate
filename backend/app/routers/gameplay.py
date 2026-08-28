@@ -157,14 +157,13 @@ def _build_play_resolved_payload(game: GameSession, event: str, description: str
                 pitch_threshold = get_pitch_threshold(total_innings)
                 
                 # Calcular fatigue level (0-100%) - usar la misma lógica que apply_pitcher_fatigue
-                FATIGUE_PENALTY_STEP = 15
                 if current_pitch_count > pitch_threshold:
                     extra_pitches = current_pitch_count - pitch_threshold
-                    # Penalty factor: 1.0 - (0.03 * (extra_pitches // FATIGUE_PENALTY_STEP + 1))
-                    # Convertir a porcentaje de fatiga: (1 - penalty_factor) * 100
-                    penalty_factor = 1.0 - (0.03 * (extra_pitches // FATIGUE_PENALTY_STEP + 1))
+                    # ⭐ MEJORADO: Fatiga proporcional al juego
+                    fatigue_rate = 0.03 / (pitch_threshold / 20.0)  # Normaliza a base de 20 pitches
+                    penalty_factor = 1.0 - (fatigue_rate * extra_pitches)
                     penalty_factor = max(0.5, penalty_factor)  # Límite: -50% máximo
-                    fatigue_level = min(100, (1.0 - penalty_factor) * 100)  # ⭐ CORREGIDO: conversión a %
+                    fatigue_level = min(100, (1.0 - penalty_factor) * 100)
                 else:
                     fatigue_level = 0.0
                 
@@ -177,13 +176,15 @@ def _build_play_resolved_payload(game: GameSession, event: str, description: str
                 
                 if current_pitch_count > pitch_threshold:
                     extra_pitches = current_pitch_count - pitch_threshold
-                    penalty_factor = 1.0 - (0.03 * (extra_pitches // FATIGUE_PENALTY_STEP + 1))
+                    fatigue_rate = 0.03 / (pitch_threshold / 20.0)
+                    penalty_factor = 1.0 - (fatigue_rate * extra_pitches)
                     penalty_factor = max(0.5, penalty_factor)
                     print(f"   ✅ FATIGUE ACTIVATED!")
                     print(f"      Extra Pitches: {extra_pitches}")
+                    print(f"      Fatigue Rate (per pitch): {fatigue_rate:.4f}")
                     print(f"      Penalty Factor: {penalty_factor:.2f} ({(1.0-penalty_factor)*100:.1f}% degradation)")
                 else:
-                    print(f"   ✅ No fatigue yet")
+                    print(f"   ✅ No fatigue yet (under threshold)")
                 
                 print(f"   Final Fatigue Level (%): {fatigue_level:.2f}")
                 print(f"   Status: {'🟢 FRESH' if fatigue_level < 40 else '🟡 MODERATE' if fatigue_level < 70 else '🟠 TIRED' if fatigue_level < 85 else '🔴 CRITICAL'}")
