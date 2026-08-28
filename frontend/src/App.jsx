@@ -17,11 +17,12 @@ import { MyTeamScreen } from './pages/MyTeamScreen';
 import { RosterSelectionScreen } from './pages/RosterSelectionScreen';
 import { StadiumShowcaseScreen } from './components/stadium/StadiumShowcaseScreen';
 import { auth as authApi } from './utils/api';
-import { useGameRecovery, getGameSession, clearGameSession, saveGameSession } from './hooks/useGameRecovery';
+import { getGameSession, clearGameSession, saveGameSession } from './hooks/useGameRecovery';
 
 export default function App() {
   const [user, setUser] = useState(null);
   const [currentView, setCurrentView] = useState('LOBBY');
+  const [hasCheckedRecovery, setHasCheckedRecovery] = useState(false);
   
   // Estado para capturar el userId tras el registro y enviarlo a OnboardingScreen
   const [pendingOnboardingUserId, setPendingOnboardingUserId] = useState(null);
@@ -36,22 +37,22 @@ export default function App() {
     const currentUser = authApi.getCurrentUser();
     if (currentUser) {
       setUser(currentUser);
+      
+      // ⭐ MEJORADO: Recuperar sesión de gameplay DESPUÉS de restaurar usuario
+      const session = getGameSession();
+      if (session && session.userId === currentUser.userId) {
+        console.log('🎮 [App] Recuperando partida:', session.gameId);
+        setActiveGameId(session.gameId);
+        setCurrentView('STADIUM');
+      } else if (session) {
+        // Usuario no coincide, limpiar sesión
+        clearGameSession();
+      }
+      setHasCheckedRecovery(true);
+    } else {
+      setHasCheckedRecovery(true);
     }
   }, []);
-
-  // ⭐ NUEVO: Recuperar sesión de gameplay si fue interrumpida
-  useGameRecovery((gameId, userId) => {
-    // Si hay una partida activa en localStorage, intentar reconectarse
-    const currentUser = authApi.getCurrentUser();
-    if (currentUser && currentUser.userId === userId) {
-      console.log('🎮 [App] Recuperando partida:', gameId);
-      setActiveGameId(gameId);
-      setCurrentView('STADIUM');
-    } else {
-      // El usuario logueado no coincide, limpiar sesión
-      clearGameSession();
-    }
-  });
 
   const handleLoginSuccess = (userData) => {
     setUser(userData);
