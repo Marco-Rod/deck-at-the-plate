@@ -236,14 +236,25 @@ def process_at_bat_transition(
         final_event = "GAME_OVER"
 
     # --- Generar descripción según el evento ---
-    if final_event == "DOUBLE_PLAY":
+    if final_event == "GAME_OVER":
+        # GAME_OVER: usar el mensaje de ganador almacenado en estado
+        description = state.get("winner_message", "¡Fin del juego!")
+    elif final_event == "DOUBLE_PLAY":
         description = "¡Doble play! El corredor en primera fue eliminado y el bateador también."
     elif final_event == "STRIKEOUT":
         description = "Strikeout! El bateador no pudo conectar."
+    elif final_event == "STRIKE_LOOKING":
+        description = "Lanzamiento en la zona. ¡Strike cantado!"
+    elif final_event == "STRIKE_SWINGING":
+        description = "Swing abanicado. ¡Strike!"
     elif final_event == "OUT_GROUND":
         description = "Roletazo al cuadro para out."
     elif final_event == "OUT_FLY":
         description = "Elevado de rutina atrapado en el jardín."
+    elif final_event == "FOUL":
+        description = "Batazo de foul."
+    elif final_event == "BALL":
+        description = "Bola."
     elif final_event == "HIT_1B":
         description = "Hit sencillo."
     elif final_event == "HIT_2B":
