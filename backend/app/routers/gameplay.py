@@ -44,6 +44,7 @@ from app.engine.websocket_manager import manager
 from app.engine.turn_guard import verify_player_turn
 from app.engine.cpu_ai import get_cpu_pitch_action, get_cpu_swing_action
 from app.engine.attribute_mapper import map_card_to_pitcher_attrs, map_card_to_batter_attrs
+from app.engine.player_stats_formatter import format_player_stats
 
 router = APIRouter(prefix="/api/v1/games", tags=["Motor de Jugabilidad 1v1"])
 
@@ -113,26 +114,65 @@ def _build_play_resolved_payload(game: GameSession, event: str, description: str
                     else:
                         print(f"⭐ [HITS] UNMAPPED batter {batter_id} ({batter_id_str}): {hits} hits (not in either lineup)")
             
-            # ⭐ NUEVO: Calcular carreras por inning desde GameEventLog
+            # ⭐ NUEVO: Obtener carreras por inning de score_history
+            # score_history se crea y actualiza en state_manager.py cuando se anotan carreras
             if db:
-                events = db.query(GameEventLog).filter(GameEventLog.game_id == game.id).all()
+                score_history = state_with_role.get("score_history", {})
+                print(f"⭐ [SCORE HISTORY] Carreras por inning: {score_history}")
                 
-                # Agrupar por inning y is_top_inning
-                for event_log in events:
-                    inning_key = f"{event_log.inning}_{event_log.is_top_inning}"
-                    if inning_key not in inning_runs:
-                        inning_runs[inning_key] = 0
-                    inning_runs[inning_key] += event_log.runs_scored
+                # Asegurar que todas las entradas están presentes (incluidas las sin carreras)
+                inning_runs = {}
+                for i in range(1, 10):  # Entradas 1-9
+                    inning_runs[f"{i}_true"] = score_history.get(f"{i}_true", 0)
+                    inning_runs[f"{i}_false"] = score_history.get(f"{i}_false", 0)
                 
-                print(f"⭐ [INNING RUNS] Desglose por entrada: {inning_runs}")
+                print(f"⭐ [INNING RUNS] Desglose por entrada (from score_history): {inning_runs}")
                 
         except Exception as e:
             print(f"⚠️ [STATS] Error obteniendo box score: {e}")
             import traceback
             traceback.print_exc()
     
+    
+    # ⭐ NUEVO: Obtener datos del pitcher y bateador activos para mostrar en la tarjeta
+    active_pitcher_data = None
+    active_batter_data = None
+    
+    if db:
+        active_pitcher_id = state_with_role.get("active_pitcher")
+        active_batter_id = state_with_role.get("active_batter")
+        
+        # Obtener datos del pitcher
+        if active_pitcher_id:
+            pitcher_card = db.query(PlayerCardModel).filter(PlayerCardModel.id == active_pitcher_id).first()
+            if pitcher_card:
+                active_pitcher_data = {
+                    "id": pitcher_card.id,
+                    "name": pitcher_card.name,
+                    "number": pitcher_card.number,
+                    "overall": pitcher_card.overall,
+                    "position": pitcher_card.position,
+                    "team": pitcher_card.team.name if pitcher_card.team else "UNKNOWN",
+                    "stats": format_player_stats(pitcher_card, "PITCHER"),
+                }
+        
+        # Obtener datos del bateador
+        if active_batter_id:
+            batter_card = db.query(PlayerCardModel).filter(PlayerCardModel.id == active_batter_id).first()
+            if batter_card:
+                active_batter_data = {
+                    "id": batter_card.id,
+                    "name": batter_card.name,
+                    "number": batter_card.number,
+                    "overall": batter_card.overall,
+                    "position": batter_card.position,
+                    "team": batter_card.team.name if batter_card.team else "UNKNOWN",
+                    "stats": format_player_stats(batter_card, "BATTER"),
+                }
+    
     # ⭐ DEBUG
     print(f"📊 [PLAY_RESOLVED PAYLOAD] event={event}, pitchers={len(pitcher_strikeouts)}, batters={len(batter_stats)}, home_hits={home_hits_total}, away_hits={away_hits_total}")
+    print(f"📊 [FINAL SCORES] HOME={game.score_home}, AWAY={game.score_away}")
     
     return {
         "type": "PLAY_RESOLVED",
@@ -152,6 +192,8 @@ def _build_play_resolved_payload(game: GameSession, event: str, description: str
         "home_hits": home_hits_total,  # ⭐ NUEVO
         "away_hits": away_hits_total,  # ⭐ NUEVO
         "inning_runs": inning_runs,    # ⭐ NUEVO: {inning_is_top: runs}
+        "active_pitcher": active_pitcher_data,  # ⭐ NUEVO: Datos del pitcher para la tarjeta
+        "active_batter": active_batter_data,    # ⭐ NUEVO: Datos del bateador para la tarjeta
     }
 
 
@@ -288,7 +330,11 @@ async def _resolve_swing(
         )
 
     # --- 6. Transición de estado ---
-    at_bat_ended, inning_ended, event = process_at_bat_transition(game, raw_event, state)
+    at_bat_ended, inning_ended, event, event_description = process_at_bat_transition(game, raw_event, state)
+
+    # Si la descripción del evento se actualizó (ej. DOUBLE_PLAY), usarla
+    if event == "DOUBLE_PLAY":
+        description = event_description
 
     if event == "STRIKEOUT":
         description = "¡Tercer strike! Bateador ponchado."
@@ -301,25 +347,12 @@ async def _resolve_swing(
     if at_bat_ended:
         from app.engine.stats_recorder import record_game_event
         
-        runs_scored = 0
-        rbi = 0
+        # ⭐ CORREGIDO: Usar el runs_scored ya calculado en state_manager
+        # en lugar de recalcularlo (que daría valores incorrectos)
+        runs_scored = state.get("last_runs_scored", 0)
+        rbi = runs_scored
         
-        # Calcular carreras y RBIs anotadas
-        if event not in ("STRIKEOUT", "OUT_FLY", "OUT_GROUND"):
-            current_runners = state.get("runners", {"1b": None, "2b": None, "3b": None})
-            # Carreras anotadas = corredores que avanzan
-            if event == "HOME_RUN":
-                runs_scored = 1 + sum(1 for r in current_runners.values() if r)  # Bateador + corredores
-                rbi = runs_scored
-            elif event == "HIT_3B":
-                runs_scored = sum(1 for r in ["2b", "3b"] if current_runners.get(r))
-                rbi = runs_scored
-            elif event == "HIT_2B":
-                runs_scored = sum(1 for r in ["3b"] if current_runners.get(r))
-                rbi = runs_scored
-            elif event == "HIT_1B":
-                runs_scored = 1 if current_runners.get("3b") else 0
-                rbi = runs_scored
+        print(f"📊 [RECORD EVENT] event={event}, runs_scored={runs_scored} (from state_manager)")
         
         try:
             record_game_event(

@@ -31,7 +31,7 @@ def process_at_bat_transition(
     game: GameSession,
     event: str,
     state: Dict[str, Any]
-) -> Tuple[bool, bool, str]:
+) -> Tuple[bool, bool, str, str]:
     """
     Procesa el resultado de un swing/pitcheo y actualiza el estado completo del juego.
 
@@ -44,10 +44,12 @@ def process_at_bat_transition(
         at_bat_ended (bool):  True si el turno del bateador terminó (out, hit, walk, strikeout).
         inning_ended (bool):  True si se alcanzaron 3 outs y cambió la media entrada.
         final_event (str):    Evento ajustado. Ej. 3 STRIKE_SWINGING → "STRIKEOUT".
+        description (str):    Descripción del evento (puede ser modificada para double play).
     """
     at_bat_ended = False
     inning_ended = False
     final_event = event
+    description = ""  # Se actualiza con la descripción del evento
 
     # Limpiar la flag de cambio de media entrada del turno anterior
     state["just_switched_half"] = False
@@ -89,23 +91,49 @@ def process_at_bat_transition(
 
     # --- FASE 3: Avance de corredores y anotación de carreras ---
     # Solo aplica cuando el at-bat termina con un evento que mueve corredores
-    # (excluye strikeout y outs directos que no producen avance)
-    if at_bat_ended and final_event not in ("STRIKEOUT", "OUT_FLY", "OUT_GROUND"):
+    # Excluye: STRIKEOUT (no mueve corredores)
+    # Incluye: OUT_GROUND (puede ser double play), OUT_FLY, HIT_*, WALK, HOME_RUN
+    if at_bat_ended and final_event not in ("STRIKEOUT",):
         current_runners = state.get("runners", {"1b": None, "2b": None, "3b": None})
         active_batter = state.get("active_batter", "BATTER")
 
         print(f"🏃 [RUNNER ADVANCE] event={final_event}, batter={active_batter}, runners_before={current_runners}")
         
-        updated_runners, runs_scored = advance_runners(current_runners, final_event, active_batter)
+        # IMPORTANTE: advance_runners ahora retorna 3 valores (runners, runs, event_adjusted)
+        # El event_adjusted puede ser "DOUBLE_PLAY" si se logró un doble play
+        updated_runners, runs_scored, event_adjusted = advance_runners(current_runners, final_event, active_batter)
         state["runners"] = updated_runners
 
-        print(f"✅ [RUNNERS UPDATED] runners_after={updated_runners}, runs_scored={runs_scored}")
+        # Si fue doble play, sumar out adicional
+        if event_adjusted == "DOUBLE_PLAY":
+            game.outs += 1  # Segundo out del doble play
+            final_event = "DOUBLE_PLAY"
+            print(f"⚾ [DOUBLE PLAY] ¡Doble play! Outs ahora: {game.outs}")
+
+        print(f"✅ [RUNNERS UPDATED] runners_after={updated_runners}, runs_scored={runs_scored}, event={event_adjusted}")
 
         if runs_scored > 0:
             if game.is_top_inning:
                 game.score_away += runs_scored  # Visita anota en la Alta
+                print(f"⭐ [SCORE UPDATE] TOP INNING: score_away += {runs_scored} → now {game.score_away}")
             else:
                 game.score_home += runs_scored  # Local anota en la Baja
+                print(f"⭐ [SCORE UPDATE] BOT INNING: score_home += {runs_scored} → now {game.score_home}")
+        
+        # ⭐ NUEVO: Guardar runs_scored en el estado para que gameplay.py lo use
+        # en lugar de recalcularlo (evita inconsistencias)
+        state["last_runs_scored"] = runs_scored
+        
+        # ⭐ NUEVO: Rastrear carreras por inning en score_history
+        if "score_history" not in state:
+            state["score_history"] = {}
+        
+        inning_key = f"{game.current_inning}_{str(game.is_top_inning).lower()}"
+        if inning_key not in state["score_history"]:
+            state["score_history"][inning_key] = 0
+        
+        state["score_history"][inning_key] += runs_scored
+        print(f"📊 [SCORE HISTORY] {inning_key}: +{runs_scored} → total {state['score_history'][inning_key]}")
 
     # --- FASE 4: Limpieza del at-bat y rotación del lineup ---
     if at_bat_ended:
@@ -192,4 +220,26 @@ def process_at_bat_transition(
         state["winner_message"] = message
         final_event = "GAME_OVER"
 
-    return at_bat_ended, inning_ended, final_event
+    # --- Generar descripción según el evento ---
+    if final_event == "DOUBLE_PLAY":
+        description = "¡Doble play! El corredor en primera fue eliminado y elbateador también."
+    elif final_event == "STRIKEOUT":
+        description = "Strikeout! El bateador no pudo conectar."
+    elif final_event == "OUT_GROUND":
+        description = "Roletazo al cuadro para out."
+    elif final_event == "OUT_FLY":
+        description = "Elevado de rutina atrapado en el jardín."
+    elif final_event == "HIT_1B":
+        description = "Hit sencillo."
+    elif final_event == "HIT_2B":
+        description = "Doble base."
+    elif final_event == "HIT_3B":
+        description = "Triple."
+    elif final_event == "HOME_RUN":
+        description = "¡HOME RUN!"
+    elif final_event == "WALK":
+        description = "Base por bolas."
+    else:
+        description = final_event  # Para otros eventos, usar el nombre del evento
+
+    return at_bat_ended, inning_ended, final_event, description

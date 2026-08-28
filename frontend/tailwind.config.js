@@ -6,6 +6,15 @@ export default {
   ],
   theme: {
     extend: {
+      screens: {
+        'xs': '375px',    // iPhone SE, small phones
+        'sm': '640px',    // Standard phones (iPhone 12/13)
+        'md': '768px',    // Tablets
+        'lg': '1024px',   // Large tablets, small laptops
+        'xl': '1280px',   // Laptops
+        '2xl': '1536px',  // Desktops
+        '4k': '2560px',   // 4K monitors (32" stadium displays)
+      },
       colors: {
         koshien: {
           dark: "#121619",       // Negro pizarra vintage

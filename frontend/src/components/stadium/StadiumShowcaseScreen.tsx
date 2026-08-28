@@ -1,19 +1,24 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Scoreboard } from './Scoreboard';
-import { GameInfo } from './GameInfo';
-import { PitchZoneGrid } from './PitchZoneGrid';
+// Barrel imports from refactored stadium module
+import {
+  GameHeader,
+  Scoreboard,
+  GameInfo,
+  PitchZoneGrid,
+  GameStatsPanel,
+  TacticalHand,
+  CentralField,
+} from './index';
 import { PlayerCard } from './PlayerCard';
-import { TacticalHand } from './TacticalHand';
 import { PlayResultOverlay } from './PlayResultOverlay';
 import { GameOverModal } from './GameOverModal';
 import { InningTransitionModal } from './InningTransitionModal';
-import { GameIntroModal } from './GameIntroModal'; // ⭐ NUEVO
-import { GameStatsPanel } from './GameStatsPanel'; // ⭐ NUEVO
+import { GameIntroModal } from './GameIntroModal';
 import { GameplayDeckAndReveal } from './GameplayDeckAndReveal';
 import { useStadiumSocket } from '../../hooks/useStadiumSocket';
 import { cards as cardsApi, user as userApi } from '../../utils/api';
 
-import {
+import type {
   PitchType,
   PlayerData,
   PlayerRole,
@@ -73,55 +78,87 @@ export const StadiumShowcaseScreen: React.FC<StadiumShowcaseScreenProps> = ({
 
   // ⭐ NUEVO: Calcular strikeouts del pitcher activo desde WebSocket
   const getPitcherStrikeouts = () => {
-    // Si no hay strikeouts, retornar 0
-    if (!gameStats.pitchers || Object.keys(gameStats.pitchers).length === 0) {
-      console.log('❌ [SO COUNTER] No pitcher data:', gameStats);
-      return 0;
-    }
-    
-    // Si el pitcher activo no está en los datos, retornar 0
     const activePitcherId = gameState?.activePitcherId;
+    
+    // No tenemos pitcher activo
     if (!activePitcherId) {
-      console.log('❌ [SO COUNTER] No activePitcherId');
       return 0;
     }
     
     // Obtener strikeouts del pitcher activo
-    const so = gameStats.pitchers[activePitcherId] ?? 0;
+    const pitchers = gameStats.pitchers || {};
+    const so = pitchers[activePitcherId] ?? 0;
+    
     console.log('✅ [SO COUNTER]', {
       activePitcherId,
       strikeouts: so,
-      allPitchers: Object.keys(gameStats.pitchers),
+      availablePitchers: Object.keys(pitchers),
     });
+    
     return so;
   };
 
-  // lastResult ya viene como {text, ts} desde el hook — cada jugada es un objeto nuevo,
-  // así que este useEffect siempre dispara aunque el texto sea idéntico al anterior.
-  useEffect(() => {
-    if (lastResult) {
-      const timer = setTimeout(() => {
-        setIsAwaitingResult(false);
-      }, 1000);
-      
-      return () => clearTimeout(timer);
+  // ⭐ NUEVO: Determinar pitcher ganador y sus SO basado en el winner
+  const getWinningPitcherInfo = () => {
+    if (!gameState?.isGameOver) return { name: undefined, strikeouts: 0 };
+    
+    // Determinar quién ganó (user o CPU)
+    const userTeamScore = userRole === 'HOME' ? gameState.homeScore : gameState.awayScore;
+    const cpuTeamScore = userRole === 'HOME' ? gameState.awayScore : gameState.homeScore;
+    
+    const userWon = userTeamScore > cpuTeamScore;
+    
+    // ⭐ CORRECCIÓN: El pitcher ganador es el del EQUIPO QUE GANÓ, no solo el activePitcherId
+    let winningPitcherId: string | undefined;
+    
+    if (userWon) {
+      // Usuario ganó → su pitcher es el ganador
+      winningPitcherId = userRole === 'HOME' 
+        ? gameState.state_data?.home_pitcher_id 
+        : gameState.state_data?.away_pitcher_id;
+    } else {
+      // CPU ganó → su pitcher es el ganador
+      winningPitcherId = userRole === 'HOME' 
+        ? gameState.state_data?.away_pitcher_id 
+        : gameState.state_data?.home_pitcher_id;
     }
-  }, [lastResult, gameId]);
-
-  // ⭐ NUEVO: Actualizar gameStats desde WebSocket payload
-  useEffect(() => {
-    if (gameState?.pitcher_strikeouts || gameState?.batter_stats) {
-      console.log('📊 [UPDATED STATS FROM WEBSOCKET]:', {
-        pitchers: gameState.pitcher_strikeouts,
-        batters: Object.keys(gameState.batter_stats || {}).length,
-        batter_stats_sample: gameState.batter_stats ? Object.entries(gameState.batter_stats).slice(0, 2) : [],
-      });
-      setGameStats({
-        pitchers: gameState.pitcher_strikeouts || {},
-        batters: gameState.batter_stats || {},
-      });
+    
+    if (!winningPitcherId) {
+      return { name: undefined, strikeouts: 0 };
     }
-  }, [gameState?.pitcher_strikeouts, gameState?.batter_stats]);
+    
+    // Obtener SO del pitcher ganador
+    const pitchers = gameStats.pitchers || {};
+    const winningPitcherSO = pitchers[winningPitcherId] ?? 0;
+    
+    // Determinar nombre del pitcher ganador
+    let winningPitcherName = "Pitcher";
+    
+    if (userWon) {
+      // Usuario ganó: su pitcher
+      if (pitcherCard?.id === winningPitcherId) {
+        winningPitcherName = pitcherCard.name || "Pitcher";
+      }
+    } else {
+      // CPU ganó: pitcher del CPU
+      if (cpuPitcherCard?.id === winningPitcherId) {
+        winningPitcherName = cpuPitcherCard.name || "Pitcher";
+      }
+    }
+    
+    console.log('🏆 [WINNING PITCHER]', {
+      name: winningPitcherName,
+      strikeouts: winningPitcherSO,
+      userWon,
+      winningPitcherId,
+      userRole,
+    });
+    
+    return {
+      name: winningPitcherName,
+      strikeouts: winningPitcherSO,
+    };
+  };
 
   // ⭐ NUEVO: Obtener nombre del pitcher activo dinámicamente
   const getActivePitcherName = () => {
@@ -140,6 +177,56 @@ export const StadiumShowcaseScreen: React.FC<StadiumShowcaseScreenProps> = ({
     return "Pitcher";
   };
 
+  // lastResult ya viene como {text, ts} desde el hook — cada jugada es un objeto nuevo,
+  // así que este useEffect siempre dispara aunque el texto sea idéntico al anterior.
+  useEffect(() => {
+    if (lastResult) {
+      const timer = setTimeout(() => {
+        setIsAwaitingResult(false);
+      }, 1000);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [lastResult, gameId]);
+
+  // ⭐ NUEVO: Actualizar gameStats desde WebSocket payload
+  useEffect(() => {
+    if (gameState) {
+      const pitchers = gameState.pitcher_strikeouts || {};
+      const batters = gameState.batter_stats || {};
+      
+      // ⭐ MEJORADO: Logging más detallado de batter_stats
+      console.log('📊 [UPDATED STATS FROM WEBSOCKET]:', {
+        pitchers: Object.keys(pitchers).length > 0 ? pitchers : 'empty',
+        batters: Object.keys(batters).length,
+        batter_stats_full: batters, // Mostrar datos completos
+        batter_sample: Object.entries(batters).slice(0, 1).map(([id, stats]) => ({
+          batter_id: id,
+          ab: (stats as any).at_bats,
+          h: (stats as any).hits,
+          hr: (stats as any).home_runs,
+          bb: (stats as any).walks,
+          rbi: (stats as any).rbi,
+          r: (stats as any).runs,
+          so: (stats as any).strikeouts,
+        })),
+      });
+      
+      setGameStats({
+        pitchers,
+        batters,
+      });
+      
+      // Trigger animation si hay strikeouts
+      const activePitcherId = gameState.activePitcherId;
+      if (activePitcherId && pitchers[activePitcherId] > 0) {
+        setStrikeoutAnimationTrigger(true);
+        const timer = setTimeout(() => setStrikeoutAnimationTrigger(false), 500);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [gameState?.pitcher_strikeouts, gameState?.activePitcherId, gameState?.batter_stats]);
+
   // Detecta cuando la entrada termina (backend envía inning_completed=true)
   // y muestra el modal de transición con timing correcto.
   useEffect(() => {
@@ -151,6 +238,12 @@ export const StadiumShowcaseScreen: React.FC<StadiumShowcaseScreenProps> = ({
     }
 
     lastProcessedInningCompletedRef.current = inningCompleted.ts;
+
+    // ⭐ NUEVO: Si el juego ya terminó, NO mostrar el modal de transición de entrada
+    if (gameState?.isGameOver) {
+      console.log('🎮 [INNING_TRANSITION] Omitiendo modal: el juego ha terminado');
+      return;
+    }
 
     // EVENT_DURATIONS: cuánto tarda el overlay en mostrarse (delayMs + duration)
     const EVENT_DURATIONS: Record<string, number> = {
@@ -256,13 +349,13 @@ export const StadiumShowcaseScreen: React.FC<StadiumShowcaseScreenProps> = ({
 
   // ⭐ NUEVO: Determinar etiqueta del panel izquierdo (siempre lineup del bateador)
   const getBattingLineupLabel = () => {
-    if (!gameState) return '📊 LINEUP';
+    if (!gameState) return 'LINEUP';
     
     const isBattingUser = 
       (userRole === 'HOME' && !gameState.isTopInning) ||
       (userRole === 'AWAY' && gameState.isTopInning);
     
-    return isBattingUser ? '📊 YOUR LINEUP' : '📊 CPU LINEUP';
+    return isBattingUser ? 'YOUR LINEUP' : 'CPU LINEUP';
   };
 
   useEffect(() => {
@@ -337,6 +430,26 @@ export const StadiumShowcaseScreen: React.FC<StadiumShowcaseScreenProps> = ({
       cardsApi.getCard(gameState.activePitcherId)
         .then((c: any) => {
           if (c) {
+            // Determinar el equipo del pitcher
+            const isPitcherUser = gameState.activePitcherId === gameState.state_data?.home_pitcher_id && userRole === 'HOME'
+                               || gameState.activePitcherId === gameState.state_data?.away_pitcher_id && userRole === 'AWAY';
+            const pitcherTeam = isPitcherUser ? userTeam?.name : gameState?.rivalTeamName;
+
+            // Calcular stats del pitcher: VEL, CTA, MCA (mejores valores del repertorio)
+            let bestVel = c.velocity || 75;
+            let bestControl = c.control || 70;
+            let bestMovement = c.movement || 70;
+            
+            if (c.repertoire && c.repertoire.length > 0) {
+              const velocities = c.repertoire.map((p: any) => p.velocity || 0);
+              const controls = c.repertoire.map((p: any) => p.control || 0);
+              const movements = c.repertoire.map((p: any) => p.movement || 0);
+              
+              bestVel = Math.max(...velocities);
+              bestControl = Math.max(...controls);
+              bestMovement = Math.max(...movements);
+            }
+
             setPitcherCard({
               id: c.id,
               name: c.name,
@@ -344,12 +457,13 @@ export const StadiumShowcaseScreen: React.FC<StadiumShowcaseScreenProps> = ({
               overall: c.overall || 99,
               position: c.position || 'SP',
               photo: c.photo,
+              team: pitcherTeam || 'UNKNOWN',
+              role: 'PITCHER',
               repertoire: c.repertoire || [],
               stats: [
-                { label: 'VEL', val: c.velocity || 98 },
-                { label: 'CTL', val: c.control || 88 },
-                { label: 'MOV', val: c.movement || 92 },
-                { label: 'STA', val: c.stamina || 80 },
+                { label: 'VEL', val: bestVel },
+                { label: 'CTA', val: bestControl },
+                { label: 'MCA', val: bestMovement },
               ]
             });
             if (c.repertoire && c.repertoire.length > 0) {
@@ -364,6 +478,13 @@ export const StadiumShowcaseScreen: React.FC<StadiumShowcaseScreenProps> = ({
       cardsApi.getCard(gameState.activeBatterId)
         .then((c: any) => {
           if (c) {
+            // Determinar el equipo del bateador
+            const isBatterUser = gameState.activeBatterId && userLineupCards.some(lc => lc.id === gameState.activeBatterId);
+            const batterTeam = isBatterUser ? userTeam?.name : gameState?.rivalTeamName;
+
+            // Calcular vision derivada como en el backend: contact * 0.70 + overall * 0.30
+            const vision = Math.floor((c.contact || 50) * 0.70 + (c.overall || 75) * 0.30);
+
             setBatterCard({
               id: c.id,
               name: c.name,
@@ -371,18 +492,19 @@ export const StadiumShowcaseScreen: React.FC<StadiumShowcaseScreenProps> = ({
               overall: c.overall || 99,
               position: c.position || 'DH',
               photo: c.photo,
+              team: batterTeam || 'UNKNOWN',
+              role: 'BATTER',
               stats: [
-                { label: 'PWR', val: c.power || 98 },
-                { label: 'CON', val: c.contact || 92 },
-                { label: 'VIS', val: c.vision || 80 },
-                { label: 'SPD', val: c.speed || 80 },
+                { label: 'CON', val: c.contact || 50 },
+                { label: 'POW', val: c.power || 50 },
+                { label: 'VIS', val: vision },
               ]
             });
           }
         })
         .catch(() => null);
     }
-  }, [gameState?.activePitcherId, gameState?.activeBatterId]);
+  }, [gameState?.activePitcherId, gameState?.activeBatterId, userTeam, gameState?.rivalTeamName, userRole, userLineupCards]);
 
   const tacticalHand: TacticalCard[] = [
     {
@@ -492,6 +614,7 @@ export const StadiumShowcaseScreen: React.FC<StadiumShowcaseScreenProps> = ({
       {showGameOverModal && gameState?.isGameOver && (() => {
         const homeTeamDisplay = userRole === 'HOME' ? userTeam?.short_name : `${gameState?.rivalTeamName || 'YANKEES'} (CPU)`;
         const awayTeamDisplay = userRole === 'HOME' ? `${gameState?.rivalTeamName || 'YANKEES'} (CPU)` : userTeam?.short_name;
+        const { name: winningPitcherName, strikeouts: winningPitcherSO } = getWinningPitcherInfo();
         return (
           <GameOverModal
             winnerMessage={gameState.winnerMessage}
@@ -500,6 +623,8 @@ export const StadiumShowcaseScreen: React.FC<StadiumShowcaseScreenProps> = ({
             homeTeamName={homeTeamDisplay}
             awayTeamName={awayTeamDisplay}
             userRole={userRole}
+            winningPitcherName={winningPitcherName}
+            winningPitcherSO={winningPitcherSO}
             onReturnToLobby={onBack}
           />
         );
@@ -545,6 +670,13 @@ export const StadiumShowcaseScreen: React.FC<StadiumShowcaseScreenProps> = ({
       {!showGameIntro && gameState && (() => {
         const homeTeamDisplay = userRole === 'HOME' ? userTeam?.short_name : `${gameState?.rivalTeamName || 'YANKEES'} (CPU)`;
         const awayTeamDisplay = userRole === 'HOME' ? `${gameState?.rivalTeamName || 'YANKEES'} (CPU)` : userTeam?.short_name;
+        
+        // ⭐ DEBUG: Log antes de pasar al Scoreboard
+        console.log('🎲 [STADIUM SHOWCASE] Pasando datos al Scoreboard:');
+        console.log('  - gameState.inning_runs:', JSON.stringify(gameState?.inning_runs));
+        console.log('  - gameState.homeScore:', gameState?.homeScore);
+        console.log('  - gameState.awayScore:', gameState?.awayScore);
+        
         return (
           <Scoreboard 
             gameState={gameState} 
@@ -563,15 +695,15 @@ export const StadiumShowcaseScreen: React.FC<StadiumShowcaseScreenProps> = ({
       {/* Campo Principal */}
       {!showGameIntro && (
       <main 
-        className="w-[95%] mx-auto border-2 border-[#C5A059]/50 p-1 relative flex justify-between items-center min-h-[500px] shadow-2xl overflow-hidden rounded-sm gap-1 mt-1"
+        className="w-full sm:w-[95%] mx-auto border border-[#C5A059]/30 sm:border-2 sm:border-[#C5A059]/50 p-0.5 sm:p-1 md:p-2 relative flex flex-col md:flex-row justify-start md:justify-between items-start md:items-center min-h-auto md:min-h-[500px] shadow-2xl overflow-x-hidden md:overflow-hidden rounded-sm gap-1 md:gap-2 mt-0.5 sm:mt-1"
       >
         {/* Capa oscura translúcida */}
         <div className="absolute inset-0 bg-[#0A0D0F]/60 pointer-events-none" />
 
-        {/* PANEL IZQUIERDO - Siempre el LINEUP del bateador */}
-        <div className="relative z-10 w-80 flex-shrink-0">
-          <div className="bg-[#0A0D0F]/90 border border-[#C5A059]/30 rounded p-2">
-            <div className="text-xs text-[#C5A059] font-bold mb-1 px-1">
+        {/* PANEL IZQUIERDO - Siempre el LINEUP del bateador (Responsive) */}
+        <div className="relative z-10 w-full md:w-[450px] md:flex-shrink-0 order-1 md:order-1 overflow-y-auto max-h-[40vh] md:max-h-full">
+          <div className="bg-[#0A0D0F]/90 border border-[#C5A059]/30 rounded p-1 sm:p-2 md:p-3 text-xs md:text-sm">
+            <div className="text-[9px] sm:text-xs text-[#C5A059] font-bold mb-0.5 sm:mb-1 px-1 truncate">
               {getBattingLineupLabel()}
             </div>
             <GameStatsPanel
@@ -582,48 +714,35 @@ export const StadiumShowcaseScreen: React.FC<StadiumShowcaseScreenProps> = ({
           </div>
         </div>
 
-        {/* CONTENEDOR CENTRAL - Campo de juego */}
-        <div className="relative z-10 flex-1 flex flex-col items-center gap-1">
-          {/* GameInfo - B/S/O, Inning, Bases */}
-          <GameInfo 
-            balls={gameState?.balls || 0}
-            strikes={gameState?.strikes || 0}
-            outs={gameState?.outs || 0}
-            currentInning={gameState?.currentInning || 1}
-            totalInnings={gameState?.totalInnings || 9}
-            isTopInning={gameState?.isTopInning ?? true}
+        {/* CONTENEDOR CENTRAL - Campo de juego (Responsive) */}
+        <div className="w-full md:flex-1 order-3 md:order-2 px-0.5 sm:px-1 md:px-2">
+          <CentralField
             role={role}
-            runners={gameState?.runners || { b1: null, b2: null, b3: null }}
+            pitcherCard={pitcherCard}
+            batterCard={batterCard}
+            selectedZone={selectedZone}
+            selectedPitch={selectedPitch}
+            repertoire={pitcherCard?.repertoire}
+            hasPitched={hasPitched}
+            isAwaitingResult={isAwaitingResult}
+            inningTransition={inningTransition}
+            onSelectZone={setSelectedZone}
+            onSelectPitch={setSelectedPitch}
+            balls={gameState?.balls ?? 0}
+            strikes={gameState?.strikes ?? 0}
+            outs={gameState?.outs ?? 0}
+            currentInning={gameState?.currentInning ?? 1}
+            totalInnings={gameState?.totalInnings ?? 9}
+            isTopInning={gameState?.isTopInning ?? true}
+            runners={gameState?.runners ?? { b1: null, b2: null, b3: null }}
           />
-
-          <div className="w-full flex justify-center items-center gap-4">
-            <PlayerCard player={pitcherCard} role="PITCHER" />
-            
-            <PitchZoneGrid
-              role={role}
-              selectedZone={selectedZone}
-              selectedPitch={selectedPitch}
-              onSelectZone={setSelectedZone}
-              onSelectPitch={setSelectedPitch}
-              repertoire={pitcherCard?.repertoire}
-              disabled={isAwaitingResult || inningTransition?.visible || (role === 'PITCHER' && !pitcherCard)}
-            />
-            
-            <PlayerCard player={batterCard} role="BATTER" />
-          </div>
-
-          {hasPitched && role === 'BATTER' && (
-            <div className="mt-2 bg-[#C5A059] text-[#0A0D0F] px-4 py-1 font-mono text-xs font-bold z-20 animate-bounce">
-              ¡El lanzador ya pichó! Selecciona tu swing.
-            </div>
-          )}
         </div>
 
-        {/* PANEL DERECHO - Siempre STRIKEOUTS del pitcher */}
-        <div className="relative z-10 w-80 flex-shrink-0">
-          <div className="bg-[#0A0D0F]/90 border border-[#C5A059]/30 rounded p-2">
-            <div className="text-xs text-[#C5A059] font-bold mb-1 px-1">
-              🔥 STRIKEOUTS
+        {/* PANEL DERECHO - Siempre STRIKEOUTS del pitcher (Responsive) */}
+        <div className="relative z-10 w-full md:w-[450px] md:flex-shrink-0 order-2 md:order-3 overflow-y-auto max-h-[40vh] md:max-h-full">
+          <div className="bg-[#0A0D0F]/90 border border-[#C5A059]/30 rounded p-1 sm:p-2 md:p-3 text-xs md:text-sm">
+            <div className="text-[9px] sm:text-xs text-[#C5A059] font-bold mb-0.5 sm:mb-1 px-1">
+              🔥 K's
             </div>
             <GameStatsPanel
               lineup={[]}

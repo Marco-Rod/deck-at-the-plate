@@ -69,7 +69,7 @@ def run_simulation():
         )
 
         # 4. Transición de estado (Conteo, Corredores, Inning y Game Over)
-        at_bat_ended, inning_ended, event = process_at_bat_transition(game, raw_event, game.state_data)
+        at_bat_ended, inning_ended, event, event_description = process_at_bat_transition(game, raw_event, game.state_data)
 
         # 5. Formatear y mostrar evento significativo
         if at_bat_ended or event in ["STRIKE_SWINGING", "STRIKE_LOOKING", "BALL"]:

@@ -28,7 +28,7 @@ class GameEventLog(Base):
     game_id = Column(String, index=True, nullable=False)
     
     # Identificación del evento
-    event_type = Column(String, nullable=False)  # HIT_1B, HIT_2B, HIT_3B, HOME_RUN, STRIKEOUT, WALK, OUT_FLY, OUT_GROUND, BUNT, SACRIFICE_FLY
+    event_type = Column(String, nullable=False)  # HIT_1B, HIT_2B, HIT_3B, HOME_RUN, STRIKEOUT, WALK, OUT_FLY, OUT_GROUND, BUNT, SACRIFICE_FLY, DOUBLE_PLAY
     inning = Column(Integer, nullable=False)
     is_top_inning = Column(Boolean, nullable=False)  # True=Alta (visita), False=Baja (local)
     
