@@ -578,6 +578,7 @@ async def _execute_cpu_pitcher_change(
         "position": new_pitcher.position,
         "rarity": new_pitcher.rarity.value if new_pitcher.rarity else "COMMON",
         "team": new_pitcher.team.name if new_pitcher.team else "UNKNOWN",
+        "photo": new_pitcher.photo,  # ⭐ NUEVO: Incluir foto del pitcher
         "stats": format_player_stats(new_pitcher, "PITCHER"),
         "repertoire": new_pitcher.repertoire or [],
         "role": "PITCHER",
@@ -989,6 +990,7 @@ async def change_pitcher(
         "position": new_pitcher.position,
         "rarity": new_pitcher.rarity.value if new_pitcher.rarity else "COMMON",
         "team": new_pitcher.team.name if new_pitcher.team else "UNKNOWN",
+        "photo": new_pitcher.photo,  # ⭐ NUEVO: Incluir foto del pitcher
         "stats": format_player_stats(new_pitcher, "PITCHER"),
         "repertoire": new_pitcher.repertoire or [],   # ← necesario para el pitch selector
         "role": "PITCHER",
