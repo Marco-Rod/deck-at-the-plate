@@ -54,42 +54,74 @@ export const StrikeZoneGrid: React.FC<StrikeZoneGridProps> = ({
               onClick={() => onSelectZone(zone)}
               className={`relative w-16 h-16 border flex items-center justify-center font-mono text-xs cursor-pointer overflow-hidden transition-all ${
                 isSelected
-                  ? 'border-[#C5A059] bg-[#1A3323] text-[#C5A059] font-bold z-10'
-                  : 'border-[#2C3E35] text-[#E6DFD3] hover:border-[#C5A059]/60 bg-[#0A0D0F]'
+                  ? 'border-red-600 bg-red-900/30 text-red-400 font-bold z-10 shadow-lg'
+                  : 'border-[#2C3E35] text-[#E6DFD3] hover:border-white/40 bg-[#0A0D0F]'
               }`}
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
             >
-              {/* Glow effect when selected */}
-              {isSelected && (
-                <motion.div
-                  className="absolute inset-0 border-2 border-[#C5A059] pointer-events-none"
-                  animate={{
-                    boxShadow: [
-                      'inset 0 0 5px rgba(197, 160, 89, 0.4), 0 0 5px rgba(197, 160, 89, 0.4)',
-                      'inset 0 0 15px rgba(197, 160, 89, 0.9), 0 0 20px rgba(197, 160, 89, 0.8)',
-                      'inset 0 0 5px rgba(197, 160, 89, 0.4), 0 0 5px rgba(197, 160, 89, 0.4)',
-                    ],
-                  }}
-                  transition={{
-                    duration: 1.8,
-                    repeat: Infinity,
-                    ease: 'easeInOut',
-                  }}
-                />
-              )}
+              {/* White pulse effect on hover */}
+              <motion.div
+                className="absolute inset-0 border-2 border-white/30 pointer-events-none rounded-xs"
+                animate={{ opacity: [0.3, 0.8, 0.3], scale: [1, 1.1, 1] }}
+                transition={{
+                  duration: 1.2,
+                  repeat: Infinity,
+                  ease: 'easeInOut',
+                }}
+                initial={false}
+              />
 
-              {/* Rotating ring when selected */}
+              {/* Flash effect when selected - Red destello */}
               {isSelected && (
-                <motion.div
-                  className="absolute inset-1 border border-dashed border-[#C5A059]/70 pointer-events-none rounded-xs"
-                  animate={{ rotate: 360 }}
-                  transition={{
-                    duration: 10,
-                    repeat: Infinity,
-                    ease: 'linear',
-                  }}
-                />
+                <>
+                  {/* Inner glow - Red pulsing */}
+                  <motion.div
+                    className="absolute inset-0 border-2 border-red-500 pointer-events-none rounded-xs"
+                    animate={{
+                      boxShadow: [
+                        'inset 0 0 8px rgba(239, 68, 68, 0.3), 0 0 12px rgba(239, 68, 68, 0.5)',
+                        'inset 0 0 20px rgba(239, 68, 68, 0.8), 0 0 30px rgba(239, 68, 68, 0.9)',
+                        'inset 0 0 8px rgba(239, 68, 68, 0.3), 0 0 12px rgba(239, 68, 68, 0.5)',
+                      ],
+                    }}
+                    transition={{
+                      duration: 1.5,
+                      repeat: Infinity,
+                      ease: 'easeInOut',
+                    }}
+                  />
+
+                  {/* Outer rotating ring - Red */}
+                  <motion.div
+                    className="absolute -inset-1 border-2 border-dashed border-red-500/70 pointer-events-none rounded-xs"
+                    animate={{ rotate: 360 }}
+                    transition={{
+                      duration: 8,
+                      repeat: Infinity,
+                      ease: 'linear',
+                    }}
+                  />
+
+                  {/* Additional flash burst on selection */}
+                  <motion.div
+                    className="absolute inset-0 border-2 border-red-400 pointer-events-none rounded-xs"
+                    initial={{ boxShadow: '0 0 0px rgba(239, 68, 68, 0.8)' }}
+                    animate={{
+                      boxShadow: [
+                        '0 0 2px rgba(239, 68, 68, 0.8)',
+                        '0 0 25px rgba(239, 68, 68, 0.9)',
+                        '0 0 2px rgba(239, 68, 68, 0.8)',
+                      ],
+                    }}
+                    transition={{
+                      duration: 0.6,
+                      repeat: Infinity,
+                      repeatDelay: 1.5,
+                      ease: 'easeOut',
+                    }}
+                  />
+                </>
               )}
 
               {/* Zone Label */}
