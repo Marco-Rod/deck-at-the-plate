@@ -612,7 +612,18 @@ async def trigger_cpu_response_if_needed(game: GameSession, state: dict, db: Ses
             pitcher_card = db.query(PlayerCardModel).filter(PlayerCardModel.id == active_pitcher_id).first()
             
             if pitcher_card:
-                fatigue_level = state.get("active_pitcher_fatigue", 0.0)
+                # ← CORRECCIÓN: Calcular fatiga_level correctamente (no era None/0.0)
+                total_innings = state.get("total_innings", 9)
+                pitch_threshold = get_pitch_threshold(total_innings)
+                
+                if pitch_count > pitch_threshold:
+                    extra_pitches = pitch_count - pitch_threshold
+                    penalty_factor = 1.0 - (0.10 * extra_pitches)
+                    fatigue_level = min(100, max(0, (1.0 - penalty_factor) * 100))
+                else:
+                    fatigue_level = 0.0
+                
+                print(f"🤖 [CPU FATIGUE CHECK] pitcher={active_pitcher_id}, pitch_count={pitch_count}, threshold={pitch_threshold}, fatigue={fatigue_level:.1f}%")
                 
                 # Decisión de la CPU: ¿cambiar pitcher?
                 should_change = get_cpu_pitcher_change_decision(
