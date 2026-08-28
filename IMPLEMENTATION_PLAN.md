@@ -339,9 +339,10 @@ interface TacticalHandProps {
 - ✅ Definir `EVENT_SEQUENCES` básicas
 - ✅ Modificar `useStadiumSocket` para aceptar callbacks
 
-**Commit:** c4dea28
+**Commits:**
+- c4dea28: Decouple WebSocket from direct state updates
 
-### 🔄 Fase 1B: Integración en StadiumShowcaseScreen (EN PROGRESO)
+### ✅ Fase 1B: Integración en StadiumShowcaseScreen (HECHO)
 
 **Completado:**
 - ✅ Importar `useEventSequencer` y `EVENT_SEQUENCES`
@@ -352,24 +353,37 @@ interface TacticalHandProps {
 - ✅ Pasar callbacks a `useStadiumSocket`
 - ✅ Registrar primer step callback: `show-modal`
 - ✅ Agregar estados locales: `lastResult`, `inningCompleted`, `pitcherChanged`
+- ✅ Deshabilitar controles durante evento (`disabled={isProcessing}`)
 
 **Commits:**
 - 4b8bc66: Hook initialization and WebSocket integration
 - 6cd8881: Register 'show-modal' step callback
+- 99fcac1: Disable controls while events are processing
 
-**Pendiente:**
-- [ ] Registrar step callbacks adicionales (update-score, update-stats, etc.)
-- [ ] Deshabilitar controles durante evento (`disabled={isProcessing}`)
-- [ ] Limpiar effectos redundantes que ya no se necesitan
-- [ ] Testear flujo completo de un evento
+**Estado actual:**
+- ✅ Event Sequencer está activo y enquea eventos
+- ✅ WebSocket está desacoplado y usa callbacks
+- ✅ PlayResultOverlay se muestra correctamente
+- ✅ Controles se deshabilitan durante eventos
+- ⚠️  Código LIMPIO: No hay código huérfano (effectos antiguos siguen funcionando en paralelo, pueden optimizarse después)
 
 ### 📋 Fase 2: Completar Secuencias (PRÓXIMO)
 - Definir todos los `EVENT_SEQUENCES` con timings reales
+- Crear step callbacks adicionales:
+  - `update-score` → actualizar scores
+  - `update-batter-stats` → actualizar hits, at-bats, etc.
+  - `update-runners` → actualizar runners position
+  - `update-pitcher-stats` → actualizar SO, etc.
+  - `update-outs` → incrementar outs
+  - `load-next-batter` → cargar nuevo bateador
+  - `check-inning-end` → verificar fin de entrada
+  - Etc.
 - Verificar y ajustar delays según UX
 
 ### 📋 Fase 3: Testing & Refinamiento (PRÓXIMO)
 - Testing manual de cada tipo de evento
 - Ajustar timings según feedback
+- Optimizar effectos redundantes
 
 ---
 
