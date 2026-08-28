@@ -34,3 +34,64 @@ def get_cpu_swing_action(difficulty: str = "MEDIUM") -> Dict[str, Any]:
         "guessed_zone": random.randint(1, 9) if random.random() < guess_zone_prob else None,
         "guessed_pitch": random.choice(_PITCH_TYPES) if random.random() < guess_pitch_prob else None
     }
+
+
+# ---------------------------------------------------------------------------
+# CPU Pitcher Change Decision
+# ---------------------------------------------------------------------------
+
+# Mínimo de lanzamientos antes de que la CPU pueda considerar un cambio
+_CPU_MIN_PITCHES_TO_CHANGE = 5
+
+# Umbrales de fatiga (%) por dificultad a partir de los cuales la CPU decide cambiar
+_CPU_CHANGE_FATIGUE_THRESHOLD = {
+    "EASY":   95.0,  # Aguanta hasta casi colapsar
+    "MEDIUM": 65.0,  # Cambia cuando el pitcher está bastante cansado
+    "HARD":   40.0,  # Cambia proactivamente antes de que el daño sea grave
+}
+
+# Probabilidad adicional de cambiar cuando se supera el umbral (agrega variabilidad)
+_CPU_CHANGE_PROBABILITY = {
+    "EASY":   0.50,  # 50% de decisión de cambiar al superar el umbral
+    "MEDIUM": 0.75,
+    "HARD":   0.90,
+}
+
+
+def get_cpu_pitcher_change_decision(
+    pitch_count: int,
+    fatigue_level: float,
+    difficulty: str = "MEDIUM",
+) -> bool:
+    """
+    Decide si la CPU debe cambiar a su pitcher en este momento.
+
+    Lógica:
+      1. El pitcher debe haber lanzado al menos _CPU_MIN_PITCHES_TO_CHANGE.
+      2. La fatiga debe superar el umbral configurado por dificultad.
+      3. Aplica probabilidad aleatoria para añadir variabilidad (la CPU no es perfecta).
+
+    Args:
+        pitch_count:   Número de lanzamientos del pitcher activo en este partido.
+        fatigue_level: Nivel de fatiga del pitcher (0.0 – 100.0).
+        difficulty:    "EASY" | "MEDIUM" | "HARD".
+
+    Returns:
+        True si la CPU debe ejecutar un cambio de pitcher, False en caso contrario.
+    """
+    if pitch_count < _CPU_MIN_PITCHES_TO_CHANGE:
+        return False
+
+    threshold = _CPU_CHANGE_FATIGUE_THRESHOLD.get(difficulty, 65.0)
+    if fatigue_level < threshold:
+        return False
+
+    change_prob = _CPU_CHANGE_PROBABILITY.get(difficulty, 0.75)
+    decision = random.random() < change_prob
+
+    print(
+        f"🤖 [CPU PITCHER CHANGE DECISION] "
+        f"pitches={pitch_count}, fatigue={fatigue_level:.1f}%, "
+        f"threshold={threshold}%, prob={change_prob:.0%} → {'CHANGE' if decision else 'KEEP'}"
+    )
+    return decision

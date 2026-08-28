@@ -43,7 +43,7 @@ from app.engine.deck_manager import discard_used_tactic
 from app.engine.tactical_actions import resolve_bunt, resolve_steal
 from app.engine.websocket_manager import manager
 from app.engine.turn_guard import verify_player_turn
-from app.engine.cpu_ai import get_cpu_pitch_action, get_cpu_swing_action
+from app.engine.cpu_ai import get_cpu_pitch_action, get_cpu_swing_action, get_cpu_pitcher_change_decision
 from app.engine.attribute_mapper import map_card_to_pitcher_attrs, map_card_to_batter_attrs
 from app.engine.player_stats_formatter import format_player_stats
 
@@ -470,6 +470,103 @@ def _is_cpu_turn(game: GameSession, state: dict, required_role: str) -> bool:
     return False
 
 
+async def _execute_cpu_pitcher_change(
+    game: GameSession, state: dict, db: Session, game_id: str, difficulty: str
+) -> bool:
+    """
+    Ejecuta un cambio de pitcher para la CPU si hay relevistas disponibles.
+    
+    Busca el pitcher del CPU (HOME o AWAY) en el inventario global,
+    selecciona uno que no haya sido usado aún, y lo asigna como active_pitcher.
+    
+    Retorna: True si se ejecutó el cambio, False si no hay pitchers disponibles.
+    """
+    cpu_is_home = game.home_user_id == "CPU_BOT"
+    cpu_is_away = game.away_user_id == "CPU_BOT"
+    
+    if not (cpu_is_home or cpu_is_away):
+        return False  # No hay CPU en este juego
+    
+    active_pitcher_id = state.get("active_pitcher")
+    pitch_counts: dict = state.get("pitch_counts", {})
+    used_pitcher_ids = set(pitch_counts.keys())
+    
+    # Pitcher del CPU según su rol
+    cpu_pitcher_field = "home_pitcher_id" if cpu_is_home else "away_pitcher_id"
+    cpu_lineup_field = "home_lineup" if cpu_is_home else "away_lineup"
+    cpu_user_id = game.home_user_id if cpu_is_home else game.away_user_id
+    
+    # Obtener el team_id del pitcher del CPU de referencia
+    ref_pitcher_id = state.get(cpu_pitcher_field)
+    if not ref_pitcher_id:
+        return False
+    
+    ref_pitcher = db.query(PlayerCardModel).filter(PlayerCardModel.id == ref_pitcher_id).first()
+    if not ref_pitcher:
+        return False
+    
+    cpu_team_id = ref_pitcher.team_id
+    
+    # Buscar pitchers disponibles en el equipo de la CPU (no usados, no el activo)
+    available = db.query(PlayerCardModel).filter(
+        PlayerCardModel.team_id == cpu_team_id,
+        PlayerCardModel.position.in_(["SP", "RP", "CP", "TWP"]),
+        PlayerCardModel.id.notin_(used_pitcher_ids),
+        PlayerCardModel.id != active_pitcher_id,
+    ).all()
+    
+    if not available:
+        print(f"🤖 [CPU PITCHER CHANGE] No hay relevistas disponibles para el CPU")
+        return False
+    
+    # Seleccionar al relevista con mayor OVR (mejor preparado)
+    new_pitcher = max(available, key=lambda p: p.overall)
+    print(f"🤖 [CPU PITCHER CHANGE] Cambiando a {new_pitcher.name} (OVR {new_pitcher.overall})")
+    
+    # Ejecutar el cambio en state
+    old_pitcher_id = state.get("active_pitcher")
+    state["active_pitcher"] = new_pitcher.id
+    
+    # Actualizar home_pitcher_id / away_pitcher_id para que la próxima entrada lo use
+    state[cpu_pitcher_field] = new_pitcher.id
+    
+    # Resetear contador de pitches para el nuevo pitcher
+    pitch_counts[new_pitcher.id] = 0
+    state["pitch_counts"] = pitch_counts
+    
+    game.state_data = state
+    db.commit()
+    db.refresh(game)
+    
+    # Construir datos del nuevo pitcher para broadcast
+    new_pitcher_data = {
+        "id": new_pitcher.id,
+        "name": new_pitcher.name,
+        "number": new_pitcher.number,
+        "overall": new_pitcher.overall,
+        "position": new_pitcher.position,
+        "rarity": new_pitcher.rarity.value if new_pitcher.rarity else "COMMON",
+        "team": new_pitcher.team.name if new_pitcher.team else "UNKNOWN",
+        "stats": format_player_stats(new_pitcher, "PITCHER"),
+        "repertoire": new_pitcher.repertoire or [],
+        "role": "PITCHER",
+        "pitch_count": 0,
+        "fatigue_level": 0.0,
+    }
+    
+    # Broadcast del cambio vía WebSocket
+    await manager.broadcast_to_game(game_id, {
+        "type": "PITCHER_CHANGED",
+        "message": f"🔄 La CPU ha hecho un cambio de pitcher. Entra: {new_pitcher.name}",
+        "old_pitcher_id": old_pitcher_id,
+        "new_pitcher_id": new_pitcher.id,
+        "new_pitcher": new_pitcher_data,
+        "state_data": game.state_data,
+    })
+    
+    return True
+
+
 async def trigger_cpu_response_if_needed(game: GameSession, state: dict, db: Session, game_id: str) -> None:
     """
     En partidas PvE, evalúa si le toca actuar a la CPU y ejecuta su acción.
@@ -507,8 +604,32 @@ async def trigger_cpu_response_if_needed(game: GameSession, state: dict, db: Ses
     # Caso B: la CPU debe pichear (no hay picheo pendiente y es el turno de la CPU)
     if _is_cpu_turn(game, state, "PITCHER") and not state.get("current_pitch"):
         print(f"   ✅ CPU debería pichear (Caso B)")
-        # Usar solo pitch types del repertorio real de la carta del pitcher activo
+        
+        # ── NUEVO: Evaluar si la CPU debe cambiar pitcher ──────────────────
         active_pitcher_id = state.get("active_pitcher")
+        if active_pitcher_id:
+            pitch_count = state.get("pitch_counts", {}).get(active_pitcher_id, 0)
+            pitcher_card = db.query(PlayerCardModel).filter(PlayerCardModel.id == active_pitcher_id).first()
+            
+            if pitcher_card:
+                fatigue_level = state.get("active_pitcher_fatigue", 0.0)
+                
+                # Decisión de la CPU: ¿cambiar pitcher?
+                should_change = get_cpu_pitcher_change_decision(
+                    pitch_count=pitch_count,
+                    fatigue_level=fatigue_level,
+                    difficulty=difficulty,
+                )
+                
+                if should_change:
+                    # Ejecutar el cambio de pitcher
+                    changed = await _execute_cpu_pitcher_change(game, state, db, game_id, difficulty)
+                    if changed:
+                        # Recargar state después del cambio
+                        state = dict(game.state_data or {})
+                        active_pitcher_id = state.get("active_pitcher")
+        
+        # Usar solo pitch types del repertorio real de la carta del pitcher activo
         cpu_pitch = get_cpu_pitch_action(difficulty)
 
         if active_pitcher_id:
