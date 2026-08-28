@@ -11,12 +11,17 @@ interface ChangePitcherModalProps {
   isLoading?: boolean;
 }
 
+const RARITY_COLOR: Record<string, string> = {
+  DIAMOND: 'text-cyan-300',
+  GOLD:    'text-[#FFD700]',
+  SILVER:  'text-slate-300',
+  BRONZE:  'text-orange-400',
+  COMMON:  'text-[#A89968]',
+};
+
 /**
- * Modal para cambiar el lanzador por uno disponible del bullpen
- * - Muestra lanzador actual
- * - Lista de lanzadores disponibles
- * - Selección con preview en tiempo real
- * - Confirmación con cambio en backend
+ * Modal para cambiar el lanzador por uno disponible del bullpen.
+ * Layout: modal ancho con filas compactas — sin scroll en la lista.
  */
 export const ChangePitcherModal: React.FC<ChangePitcherModalProps> = ({
   isOpen,
@@ -34,12 +39,10 @@ export const ChangePitcherModal: React.FC<ChangePitcherModalProps> = ({
       setError('Por favor selecciona un lanzador');
       return;
     }
-
     if (selectedPitcherId === currentPitcher?.id) {
       setError('Debes seleccionar un lanzador diferente');
       return;
     }
-
     try {
       setError(null);
       await onConfirm(selectedPitcherId);
@@ -48,6 +51,8 @@ export const ChangePitcherModal: React.FC<ChangePitcherModalProps> = ({
       setError(err instanceof Error ? err.message : 'Error al cambiar lanzador');
     }
   };
+
+  const selectedPitcher = availablePitchers.find(p => p.id === selectedPitcherId);
 
   return (
     <AnimatePresence>
@@ -59,156 +64,215 @@ export const ChangePitcherModal: React.FC<ChangePitcherModalProps> = ({
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={onClose}
-            className="fixed inset-0 bg-black/70 z-50"
+            className="fixed inset-0 bg-black/75 z-50"
           />
 
-          {/* Modal */}
+          {/* Modal — max-w-3xl para más espacio horizontal */}
           <motion.div
-            initial={{ opacity: 0, scale: 0.95, y: 20 }}
+            initial={{ opacity: 0, scale: 0.95, y: 16 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: 20 }}
-            transition={{ duration: 0.2 }}
-            className="fixed inset-0 flex items-center justify-center z-50 p-4 pointer-events-auto"
+            exit={{ opacity: 0, scale: 0.95, y: 16 }}
+            transition={{ duration: 0.18 }}
+            className="fixed inset-0 flex items-center justify-center z-50 p-4 pointer-events-none"
           >
-            <div className="bg-[#0F1419]/95 backdrop-blur-md rounded-lg border-2 border-[#C5A059]/50 p-6 shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-              {/* Header */}
-              <div className="flex justify-between items-center mb-6 pb-4 border-b border-[#C5A059]/30">
-                <h2 className="text-2xl font-bold text-[#E6DFD3] font-mono tracking-wide">
+            <div className="pointer-events-auto bg-[#0F1419]/97 backdrop-blur-md rounded-xl border-2 border-[#C5A059]/50 shadow-2xl w-full max-w-3xl">
+
+              {/* ── Header ─────────────────────────────────────────────── */}
+              <div className="flex justify-between items-center px-6 py-4 border-b border-[#C5A059]/30">
+                <h2 className="text-xl font-bold text-[#E6DFD3] font-mono tracking-wide">
                   🔄 CAMBIO DE LANZADOR
                 </h2>
                 <button
                   onClick={onClose}
                   disabled={isLoading}
-                  className="text-[#C5A059] hover:text-[#FFD700] text-2xl font-bold disabled:opacity-50"
+                  className="text-[#C5A059] hover:text-[#FFD700] text-xl font-bold disabled:opacity-50 leading-none"
                 >
                   ✕
                 </button>
               </div>
 
-              {/* Current Pitcher */}
-              <div className="mb-6">
-                <h3 className="text-sm font-mono text-[#C5A059] uppercase mb-3 tracking-wider">
-                  Lanzador Actual
-                </h3>
-                <div className="bg-[#121619] border border-[#C5A059]/30 rounded p-4">
-                  <div className="flex items-center gap-4">
-                    <div className="flex-1">
-                      <div className="text-lg font-bold text-[#E6DFD3]">
-                        #{currentPitcher?.number || '-'} {currentPitcher?.name || 'Desconocido'}
+              {/* ── Body: columnas lado a lado en md+ ──────────────────── */}
+              <div className="flex flex-col md:flex-row gap-0 divide-y md:divide-y-0 md:divide-x divide-[#C5A059]/20">
+
+                {/* Columna izquierda — pitcher actual + seleccionado */}
+                <div className="md:w-56 flex-shrink-0 px-5 py-4 flex flex-col gap-4">
+                  {/* Pitcher actual */}
+                  <div>
+                    <p className="text-[10px] font-mono text-[#C5A059] uppercase tracking-widest mb-2">
+                      En el montículo
+                    </p>
+                    <PitcherMiniCard pitcher={currentPitcher} highlight={false} dimmed />
+                  </div>
+
+                  {/* Preview del seleccionado */}
+                  <div>
+                    <p className="text-[10px] font-mono text-[#C5A059] uppercase tracking-widest mb-2">
+                      Seleccionado
+                    </p>
+                    {selectedPitcher ? (
+                      <PitcherMiniCard pitcher={selectedPitcher} highlight />
+                    ) : (
+                      <div className="h-20 flex items-center justify-center rounded border border-dashed border-[#C5A059]/25 text-[#A89968] text-xs font-mono">
+                        — elige un pitcher —
                       </div>
-                      <div className="text-sm text-[#C5A059]">
-                        {currentPitcher?.team || 'N/A'} • {currentPitcher?.rarity || 'COMMON'}
-                      </div>
-                    </div>
-                    <div className="text-4xl font-bold text-[#C5A059]">
-                      {currentPitcher?.overall || '-'}
-                    </div>
+                    )}
                   </div>
                 </div>
-              </div>
 
-              {/* Available Pitchers */}
-              <div className="mb-6">
-                <h3 className="text-sm font-mono text-[#C5A059] uppercase mb-3 tracking-wider">
-                  Lanzadores Disponibles ({availablePitchers.length})
-                </h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-64 overflow-y-auto">
-                  {availablePitchers.length > 0 ? (
-                    availablePitchers.map((pitcher) => (
-                      <motion.button
-                        key={pitcher.id}
-                        onClick={() => setSelectedPitcherId(pitcher.id)}
-                        whileHover={{ scale: 1.02 }}
-                        whileTap={{ scale: 0.98 }}
-                        className={`p-3 rounded border-2 transition-all ${
-                          selectedPitcherId === pitcher.id
-                            ? 'border-[#FFD700] bg-[#FFD700]/10'
-                            : 'border-[#C5A059]/30 bg-[#121619] hover:border-[#C5A059]/60'
-                        }`}
-                      >
-                        <div className="text-left">
-                          <div className="flex justify-between items-start mb-1">
-                            <div className="font-bold text-[#E6DFD3]">
-                              #{pitcher.number} {pitcher.name}
-                            </div>
-                            <div className="text-2xl font-bold text-[#C5A059]">
-                              {pitcher.overall}
-                            </div>
-                          </div>
-                          <div className="text-xs text-[#C5A059]">
-                            {pitcher.team} • {pitcher.rarity}
-                          </div>
-                          {pitcher.stats && pitcher.stats.length > 0 && (
-                            <div className="text-xs text-[#A89968] mt-2 flex gap-2">
-                              {pitcher.stats.slice(0, 3).map((stat) => (
-                                <span key={stat.label}>
-                                  {stat.label}: {stat.val}
-                                </span>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                        {selectedPitcherId === pitcher.id && (
-                          <motion.div
-                            layoutId="selected-pitcher"
-                            className="absolute inset-0 border-2 border-[#FFD700] rounded pointer-events-none"
-                          />
-                        )}
-                      </motion.button>
-                    ))
+                {/* Columna derecha — lista de disponibles */}
+                <div className="flex-1 px-5 py-4 min-h-0">
+                  <p className="text-[10px] font-mono text-[#C5A059] uppercase tracking-widest mb-3">
+                    Bullpen disponible ({availablePitchers.length})
+                  </p>
+
+                  {availablePitchers.length === 0 ? (
+                    <div className="flex items-center justify-center h-32 text-[#A89968] text-sm font-mono">
+                      No hay relevistas disponibles
+                    </div>
                   ) : (
-                    <div className="col-span-2 text-center py-8 text-[#A89968]">
-                      No hay lanzadores disponibles en el bullpen
+                    /* Grid de filas compactas — 2 columnas en md */
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {availablePitchers.map((pitcher) => {
+                        const isSelected = selectedPitcherId === pitcher.id;
+                        const rarityClass = RARITY_COLOR[pitcher.rarity || 'COMMON'];
+                        const pitchStats = pitcher.stats?.slice(0, 3) ?? [];
+
+                        return (
+                          <motion.button
+                            key={pitcher.id}
+                            onClick={() => setSelectedPitcherId(pitcher.id)}
+                            whileTap={{ scale: 0.97 }}
+                            className={`relative text-left px-3 py-2.5 rounded-lg border transition-all duration-150 ${
+                              isSelected
+                                ? 'border-[#FFD700] bg-[#FFD700]/10 shadow-[0_0_8px_rgba(255,215,0,0.25)]'
+                                : 'border-[#C5A059]/25 bg-[#121619] hover:border-[#C5A059]/55 hover:bg-[#1A1F24]'
+                            }`}
+                          >
+                            {/* Row 1: nombre + OVR */}
+                            <div className="flex items-center justify-between gap-2 mb-1">
+                              <span className="font-bold text-sm text-[#E6DFD3] truncate leading-tight">
+                                #{pitcher.number} {pitcher.name}
+                              </span>
+                              <span className={`text-lg font-black flex-shrink-0 ${isSelected ? 'text-[#FFD700]' : 'text-[#C5A059]'}`}>
+                                {pitcher.overall}
+                              </span>
+                            </div>
+
+                            {/* Row 2: posición + rareza */}
+                            <div className="flex items-center gap-2 text-[11px] mb-1.5">
+                              <span className="bg-[#C5A059]/20 text-[#C5A059] font-mono font-bold px-1.5 py-0.5 rounded text-[10px]">
+                                {pitcher.position}
+                              </span>
+                              <span className={`font-mono ${rarityClass}`}>
+                                {pitcher.rarity}
+                              </span>
+                            </div>
+
+                            {/* Row 3: stats en línea */}
+                            {pitchStats.length > 0 && (
+                              <div className="flex gap-3 text-[10px] text-[#A89968] font-mono">
+                                {pitchStats.map(stat => (
+                                  <span key={stat.label}>
+                                    <span className="text-[#C5A059]/70">{stat.label}</span>{' '}
+                                    <span className="text-[#E6DFD3]">{stat.val}</span>
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+
+                            {/* Checkmark seleccionado */}
+                            {isSelected && (
+                              <span className="absolute top-2 right-2 text-[#FFD700] text-xs">✔</span>
+                            )}
+                          </motion.button>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
               </div>
 
-              {/* Error Message */}
-              <AnimatePresence>
-                {error && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    exit={{ opacity: 0, height: 0 }}
-                    className="mb-4 p-3 bg-red-500/20 border border-red-500/50 rounded text-red-300 text-sm"
-                  >
-                    {error}
-                  </motion.div>
-                )}
-              </AnimatePresence>
-
-              {/* Actions */}
-              <div className="flex gap-3 justify-end">
-                <button
-                  onClick={onClose}
-                  disabled={isLoading}
-                  className="px-4 py-2 border border-[#C5A059]/50 text-[#C5A059] rounded hover:bg-[#C5A059]/10 disabled:opacity-50 font-mono font-bold transition-colors"
-                >
-                  Cancelar
-                </button>
-                <motion.button
-                  onClick={handleConfirm}
-                  disabled={isLoading || !selectedPitcherId || selectedPitcherId === currentPitcher?.id}
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                  className="px-6 py-2 bg-[#C5A059] text-[#0F1419] rounded font-mono font-bold hover:bg-[#FFD700] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                >
-                  {isLoading ? (
-                    <span className="flex items-center gap-2">
-                      <span className="animate-spin">⟳</span>
-                      Cambiando...
-                    </span>
-                  ) : (
-                    'Confirmar Cambio'
+              {/* ── Footer ─────────────────────────────────────────────── */}
+              <div className="px-6 py-4 border-t border-[#C5A059]/20 flex flex-col sm:flex-row items-center gap-3">
+                {/* Error inline */}
+                <AnimatePresence>
+                  {error && (
+                    <motion.p
+                      initial={{ opacity: 0, x: -8 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0 }}
+                      className="flex-1 text-sm text-red-400 font-mono"
+                    >
+                      ⚠ {error}
+                    </motion.p>
                   )}
-                </motion.button>
+                </AnimatePresence>
+                <div className="flex gap-3 ml-auto">
+                  <button
+                    onClick={onClose}
+                    disabled={isLoading}
+                    className="px-4 py-2 border border-[#C5A059]/50 text-[#C5A059] rounded-lg hover:bg-[#C5A059]/10 disabled:opacity-50 font-mono font-bold text-sm transition-colors"
+                  >
+                    Cancelar
+                  </button>
+                  <motion.button
+                    onClick={handleConfirm}
+                    disabled={isLoading || !selectedPitcherId || selectedPitcherId === currentPitcher?.id}
+                    whileHover={{ scale: 1.03 }}
+                    whileTap={{ scale: 0.97 }}
+                    className="px-6 py-2 bg-[#C5A059] text-[#0F1419] rounded-lg font-mono font-bold text-sm hover:bg-[#FFD700] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {isLoading ? (
+                      <span className="flex items-center gap-2">
+                        <span className="animate-spin inline-block">⟳</span>
+                        Cambiando...
+                      </span>
+                    ) : (
+                      'Confirmar Cambio'
+                    )}
+                  </motion.button>
+                </div>
               </div>
+
             </div>
           </motion.div>
         </>
       )}
     </AnimatePresence>
+  );
+};
+
+// ── Mini-card compacta para pitcher actual / seleccionado ───────────────────
+const PitcherMiniCard: React.FC<{
+  pitcher: PlayerData | null;
+  highlight?: boolean;
+  dimmed?: boolean;
+}> = ({ pitcher, highlight = false, dimmed = false }) => {
+  if (!pitcher) return null;
+  const rarityClass = RARITY_COLOR[pitcher.rarity || 'COMMON'];
+  return (
+    <div className={`rounded-lg border px-3 py-2.5 ${
+      highlight
+        ? 'border-[#FFD700] bg-[#FFD700]/10'
+        : dimmed
+          ? 'border-[#C5A059]/20 bg-[#0C1015]'
+          : 'border-[#C5A059]/30 bg-[#121619]'
+    }`}>
+      <div className="flex items-center justify-between gap-2 mb-1">
+        <span className={`font-bold text-sm truncate ${dimmed ? 'text-[#A89968]' : 'text-[#E6DFD3]'}`}>
+          #{pitcher.number} {pitcher.name}
+        </span>
+        <span className={`text-lg font-black flex-shrink-0 ${highlight ? 'text-[#FFD700]' : 'text-[#C5A059]'}`}>
+          {pitcher.overall}
+        </span>
+      </div>
+      <div className="flex items-center gap-2 text-[10px]">
+        <span className="bg-[#C5A059]/15 text-[#C5A059] font-mono font-bold px-1.5 py-0.5 rounded">
+          {pitcher.position}
+        </span>
+        <span className={`font-mono ${rarityClass}`}>{pitcher.rarity}</span>
+      </div>
+    </div>
   );
 };
 
