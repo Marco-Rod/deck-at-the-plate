@@ -1,17 +1,16 @@
 from typing import Dict, Any
 
-# Umbrales dinámicos basados en el número de innings
-# A menos innings, más rápido se fatiga el pitcher proporcionalmente
+# ⭐ MEJORADO: Umbrales más bajos para fatiga MÁS AGRESIVA
+# Estos son los puntos donde comienza la fatiga (threshold)
 FATIGUE_THRESHOLDS = {
-    3: 18,   # 3 innings: 18 pitches (60 / 9 * 3)
-    6: 40,   # 6 innings: 40 pitches (60 / 9 * 6)
-    9: 60,   # 9 innings: 60 pitches (default)
+    3: 6,    # 3 innings: fatiga comienza a los 6 pitches (fin del 1er inning típico)
+    6: 15,   # 6 innings: fatiga comienza a los 15 pitches (mitad del 3er inning)
+    9: 25,   # 9 innings: fatiga comienza a los 25 pitches (mitad del 5to inning)
 }
 
-# ⭐ MEJORADO: Escala de fatiga más agresiva
-# Cada 3 lanzamientos extra = -3% (en lugar de cada 15)
-# Esto hace que la fatiga sea proporcional a cada juego
-FATIGUE_PENALTY_STEP = 3  # Cada 3 lanzamientos extra aplica -3% penalización
+# ⭐ MEJORADO: Degradación MUCHO MÁS AGRESIVA
+# Cada lanzamiento extra = -2% (antes era normalizado, ahora es fijo y severo)
+FATIGUE_PENALTY_STEP = 1  # Cada lanzamiento extra después del threshold
 
 def get_pitch_threshold(total_innings: int = 9) -> int:
     """
@@ -37,17 +36,27 @@ def apply_pitcher_fatigue(
     total_innings: int = 9
 ) -> Dict[str, int]:
     """
-    Aplica penalizaciones a Velocidad, Control y Movimiento si el pitcher
-    ha superado su umbral de lanzamientos en la partida.
+    Aplica penalizaciones AGRESIVAS a Velocidad, Control y Movimiento.
     
-    La fatiga es PROPORCIONAL al duración del juego:
-    - 3 innings: threshold 18 → cada pitch extra = -3% penalty
-    - 6 innings: threshold 40 → cada pitch extra = -1.5% penalty
-    - 9 innings: threshold 60 → cada pitch extra = -1% penalty
+    DISEÑO ESTRATÉGICO - Los lanzadores se cansan RÁPIDO:
     
-    Fórmula unificada:
-      penalty_factor = 1.0 - (fatigue_rate * extra_pitches)
-      penalty_rate = 0.03 / (threshold / 20)  # Normaliza a 20 pitches base
+    3 INNINGS:
+      - 6 pitches (threshold):  0% fatiga
+      - 9 pitches (3 extra):    ~67% fatiga
+      - 12 pitches (6 extra):   ~100% fatiga (max penalty)
+    
+    6 INNINGS:
+      - 15 pitches (threshold): 0% fatiga
+      - 18 pitches (3 extra):   ~40% fatiga
+      - 25 pitches (10 extra):  ~80% fatiga
+    
+    9 INNINGS:
+      - 25 pitches (threshold): 0% fatiga
+      - 30 pitches (5 extra):   ~40% fatiga
+      - 50 pitches (25 extra):  ~100% fatiga
+    
+    Fórmula: penalty_factor = 1.0 - (0.10 * extra_pitches)
+             (10% degradación por cada lanzamiento extra)
     
     Args:
         pitcher_attrs: Diccionario con velocidad, control, movimiento
@@ -63,7 +72,7 @@ def apply_pitcher_fatigue(
     pitch_threshold = get_pitch_threshold(total_innings)
     
     # ⭐ DEBUG: Log de aplicación de fatiga
-    print(f"⚙️ [APPLY PITCHER FATIGUE]")
+    print(f"⚙️ [APPLY PITCHER FATIGUE - AGGRESSIVE]")
     print(f"   Pitch Count: {pitch_count}")
     print(f"   Total Innings: {total_innings}")
     print(f"   Pitch Threshold: {pitch_threshold}")
@@ -72,18 +81,12 @@ def apply_pitcher_fatigue(
     if pitch_count > pitch_threshold:
         extra_pitches = pitch_count - pitch_threshold
         
-        # ⭐ MEJORADO: Fatiga proporcional al juego
-        # Base: 3% degradación por cada lanzamiento extra en juegos de 3 innings
-        # Para otros juegos: escalar proporcionalmente
-        # Ej: 3 innings (18 threshold) → -3% por pitch
-        #     9 innings (60 threshold) → -1% por pitch (3x más gradual)
-        fatigue_rate = 0.03 / (pitch_threshold / 20.0)  # Normaliza a base de 20 pitches
-        penalty_factor = 1.0 - (fatigue_rate * extra_pitches)
-        penalty_factor = max(0.5, penalty_factor)  # Límite: -50% máximo
-
+        # ⭐ AGRESIVO: -10% por cada lanzamiento extra (fue -3% antes)
+        penalty_factor = max(0.5, 1.0 - (0.10 * extra_pitches))
+        
         print(f"   Extra Pitches: {extra_pitches}")
-        print(f"   Fatigue Rate (per pitch): {fatigue_rate:.4f}")
         print(f"   Penalty Factor: {penalty_factor:.2f}")
+        print(f"   Degradation: {(1.0 - penalty_factor) * 100:.1f}%")
         print(f"   Original Stats: VEL={pitcher_attrs.get('velocidad')}, CTR={pitcher_attrs.get('control')}, MOV={pitcher_attrs.get('movimiento')}")
 
         modified_attrs["velocidad"] = int(modified_attrs.get("velocidad", 50) * penalty_factor)
