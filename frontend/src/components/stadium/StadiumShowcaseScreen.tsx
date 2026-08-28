@@ -957,7 +957,7 @@ export const StadiumShowcaseScreen: React.FC<StadiumShowcaseScreenProps> = ({
             selectedPitch={selectedPitch}
             repertoire={pitcherCard?.repertoire}
             hasPitched={hasPitched}
-            isAwaitingResult={isAwaitingResult}
+            isAwaitingResult={isAwaitingResult || isProcessing}
             inningTransition={inningTransition}
             onSelectZone={setSelectedZone}
             onSelectPitch={setSelectedPitch}
@@ -1065,7 +1065,7 @@ export const StadiumShowcaseScreen: React.FC<StadiumShowcaseScreenProps> = ({
         selectedTacticalId={selectedTacticalId}
         role={role}
         isIBB={selectedPitch === 'IBB'}
-        disabled={isAwaitingResult || inningTransition?.visible || (role === 'PITCHER' && !pitcherCard)}
+        disabled={isAwaitingResult || isProcessing || inningTransition?.visible || (role === 'PITCHER' && !pitcherCard)}
         onSelectTactical={(id: string) =>
           setSelectedTacticalId(selectedTacticalId === id ? null : id)
         }
