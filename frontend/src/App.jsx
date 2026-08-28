@@ -17,6 +17,7 @@ import { MyTeamScreen } from './pages/MyTeamScreen';
 import { RosterSelectionScreen } from './pages/RosterSelectionScreen';
 import { StadiumShowcaseScreen } from './components/stadium/StadiumShowcaseScreen';
 import { auth as authApi } from './utils/api';
+import { useGameRecovery, getGameSession, clearGameSession, saveGameSession } from './hooks/useGameRecovery';
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -37,6 +38,20 @@ export default function App() {
       setUser(currentUser);
     }
   }, []);
+
+  // ⭐ NUEVO: Recuperar sesión de gameplay si fue interrumpida
+  useGameRecovery((gameId, userId) => {
+    // Si hay una partida activa en localStorage, intentar reconectarse
+    const currentUser = authApi.getCurrentUser();
+    if (currentUser && currentUser.userId === userId) {
+      console.log('🎮 [App] Recuperando partida:', gameId);
+      setActiveGameId(gameId);
+      setCurrentView('STADIUM');
+    } else {
+      // El usuario logueado no coincide, limpiar sesión
+      clearGameSession();
+    }
+  });
 
   const handleLoginSuccess = (userData) => {
     setUser(userData);
@@ -65,6 +80,8 @@ export default function App() {
   };
 
   const handleLogout = () => {
+    // ⭐ Limpiar sesión al logout
+    clearGameSession();
     authApi.logout();
     setUser(null);
     setActiveGameId(null);
@@ -79,11 +96,18 @@ export default function App() {
   };
 
   const handleRosterConfirmed = (gameId) => {
+    // ⭐ Guardar sesión antes de ir al stadium
+    const currentUser = authApi.getCurrentUser();
+    if (currentUser) {
+      saveGameSession(gameId, currentUser.userId);
+    }
     setActiveGameId(gameId);
     setCurrentView('STADIUM');
   };
 
   const handleLeaveGame = () => {
+    // ⭐ Limpiar sesión al salir
+    clearGameSession();
     setActiveGameId(null);
     setPendingGameConfig(null);
     setCurrentView('LOBBY');
