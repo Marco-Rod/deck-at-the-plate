@@ -41,8 +41,9 @@ function parseStateData(payload: { current_inning: number; is_top_inning: boolea
   const stateData = payload.state_data || {};
   const runners = (stateData.runners as Record<string, string | null>) || { '1b': null, '2b': null, '3b': null };
 
+  console.log('⭐ [PARSE_STATE_DATA] pitcher_strikeouts:', payload.pitcher_strikeouts);
+  console.log('⭐ [PARSE_STATE_DATA] batter_stats keys:', Object.keys(payload.batter_stats || {}));
   console.log('⭐ [PARSE_STATE_DATA] hits:', { home_hits: payload.home_hits, away_hits: payload.away_hits });
-  console.log('⭐ [PARSE_STATE_DATA] inning_runs:', payload.inning_runs);
 
   return {
     currentInning: payload.current_inning,

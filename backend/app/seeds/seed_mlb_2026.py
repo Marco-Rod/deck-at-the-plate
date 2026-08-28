@@ -283,7 +283,7 @@ class MLBSeedHelper:
             
             # Determinar overall
             overall = 70
-            if "primaryNumber" in player_info:
+            if "jerseyNumber" in player_info and number and number != "0":
                 # Usar el número de jersey como seed para overall (70-95)
                 overall = 70 + (int(number) % 25)
 
@@ -316,7 +316,7 @@ class MLBSeedHelper:
                 number=number,
                 position=position,
                 overall=overall,
-                rarity=CardRarity.COMMON if overall < 75 else CardRarity.BRONZE if overall < 85 else CardRarity.SILVER,
+                rarity=CardRarity.DIAMOND if overall >= 90 else CardRarity.GOLD if overall >= 85 else CardRarity.SILVER if overall >= 80 else CardRarity.BRONZE if overall >= 75 else CardRarity.COMMON,
                 contact=contact,
                 power=power,
                 velocity=velocity,

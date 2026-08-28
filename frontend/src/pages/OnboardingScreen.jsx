@@ -56,7 +56,7 @@ export default function OnboardingScreen({ userId, onComplete }) {
     logo_id: 'logo_baseball_01',
   });
 
-  const [selectedFranchise, setSelectedFranchise] = useState('LAD');
+  const [selectedFranchise, setSelectedFranchise] = useState('');
   const [claimedCards, setClaimedCards] = useState([]);
   const [selectedCard, setSelectedCard] = useState(null);
 
@@ -67,8 +67,11 @@ export default function OnboardingScreen({ userId, onComplete }) {
         try {
           const teams = await userApi.getAvailableTeams();
           setAvailableTeams(teams);
-          if (teams.length > 0) {
+          console.log(`[DEBUG] Equipos cargados: ${teams.length} equipos disponibles`);
+          if (teams.length > 0 && !selectedFranchise) {
+            // Solo asignar si NO hay ya uno seleccionado
             setSelectedFranchise(teams[0].id);
+            console.log(`[DEBUG] selectedFranchise establecido a primero: ${teams[0].id}`);
           }
         } catch (err) {
           console.error('Error loading teams:', err);
@@ -77,7 +80,7 @@ export default function OnboardingScreen({ userId, onComplete }) {
       };
       loadTeams();
     }
-  }, [step, availableTeams.length]);
+  }, [step, availableTeams.length, selectedFranchise]);
 
   // 1. Manejar Creación del Club
   const handleCreateTeam = async (e) => {
@@ -92,9 +95,17 @@ export default function OnboardingScreen({ userId, onComplete }) {
       setError(null);
       if (soundFx?.playClick) soundFx.playClick();
 
+      // Asegurar que hay un franchise seleccionado
+      let franchiseToUse = selectedFranchise;
+      if (!franchiseToUse && availableTeams.length > 0) {
+        franchiseToUse = availableTeams[0].id;
+        console.log(`[DEBUG] No había franchise seleccionado. Usando primero disponible: ${franchiseToUse}`);
+        setSelectedFranchise(franchiseToUse);
+      }
+
       await userApi.createTeam(userId, {
         ...teamForm,
-        base_franchise: selectedFranchise,
+        base_franchise: franchiseToUse,
       });
 
       setStep('SELECT_FRANCHISE');
@@ -113,6 +124,9 @@ export default function OnboardingScreen({ userId, onComplete }) {
       setError(null);
       if (soundFx?.playPackOpen) soundFx.playPackOpen();
 
+      console.log(`[DEBUG] selectedFranchise STATE ANTES DE ENVIAR: "${selectedFranchise}"`);
+      console.log(`[DEBUG] Tipo de selectedFranchise: ${typeof selectedFranchise}`);
+      console.log(`[DEBUG] Enviando starter pack con selectedFranchise=${selectedFranchise}`);
       const response = await shopApi.claimStarterPack(userId, selectedFranchise);
       setClaimedCards(response.cards || []);
       setStep('PACK_UNBOX');
@@ -262,7 +276,12 @@ export default function OnboardingScreen({ userId, onComplete }) {
             <FranchiseCarousel
               teams={availableTeams}
               selectedTeamId={selectedFranchise}
-              onSelectTeam={(team) => setSelectedFranchise(team.id)}
+              onSelectTeam={(team) => {
+                console.log(`[DEBUG OnboardingScreen] onSelectTeam recibió:`, team);
+                console.log(`[DEBUG OnboardingScreen] team.id = ${team.id}`);
+                console.log(`[DEBUG OnboardingScreen] setSelectedFranchise a: ${team.id}`);
+                setSelectedFranchise(team.id);
+              }}
             />
           )}
 
@@ -392,7 +411,13 @@ export default function OnboardingScreen({ userId, onComplete }) {
                     animationDelay: `${idx * 0.05}s`,
                   }}
                 >
-                  <PlayerCard card={card} player={card} cardData={card} />
+                  <PlayerCard 
+                    card={card} 
+                    player={card} 
+                    cardData={card}
+                    mode="full"
+                    size="md"
+                  />
                 </div>
               ))}
             </div>
@@ -431,7 +456,13 @@ export default function OnboardingScreen({ userId, onComplete }) {
             </span>
 
             <div className="scale-110 my-2">
-              <PlayerCard card={selectedCard} player={selectedCard} cardData={selectedCard} />
+              <PlayerCard 
+                card={selectedCard} 
+                player={selectedCard} 
+                cardData={selectedCard}
+                mode="full"
+                size="md"
+              />
             </div>
 
             <div className="w-full bg-[#0A0D0F] border border-[#2C3E35] p-4 text-xs font-mono space-y-2 mt-2">

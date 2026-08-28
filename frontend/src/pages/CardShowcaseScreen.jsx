@@ -90,7 +90,10 @@ export const CardShowcaseScreen = ({ onBack }) => {
           {/* PlayerCard Ampliada */}
           <div className="transform scale-110 my-4">
             <PlayerCard
+              card={selectedPlayer}
               player={selectedPlayer}
+              mode="full"
+              size="lg"
               role={selectedPlayer.role}
               isSelected={true}
             />

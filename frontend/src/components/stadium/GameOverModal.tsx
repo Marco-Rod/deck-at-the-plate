@@ -7,6 +7,8 @@ interface GameOverModalProps {
   homeTeamName: string;
   awayTeamName: string;
   userRole?: 'HOME' | 'AWAY'; // ⭐ NUEVO: posición del usuario
+  winningPitcherName?: string; // ⭐ NUEVO: nombre del pitcher ganador
+  winningPitcherSO?: number; // ⭐ NUEVO: strikeouts del pitcher ganador
   onReturnToLobby: () => void;
 }
 
@@ -17,6 +19,8 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
   homeTeamName,
   awayTeamName,
   userRole = 'HOME', // ⭐ NUEVO: por defecto HOME
+  winningPitcherName, // ⭐ NUEVO: pitcher ganador
+  winningPitcherSO, // ⭐ NUEVO: SO del pitcher ganador
   onReturnToLobby,
 }) => {
   // ⭐ ARREGLADO: Intercambiar scores según userRole (igual que Scoreboard)
@@ -47,6 +51,32 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
             <span className="font-sports text-3xl text-[#F7F5F0]">{cpuScore}</span>
           </div>
         </div>
+
+        <p className="text-xs text-gray-400 mb-6">
+          Se han registrado las estadísticas y las recompensas del encuentro en tu perfil.
+        </p>
+
+        {/* ⭐ NUEVO: Estadísticas del Pitcher Ganador */}
+        {winningPitcherName && (
+          <div className="bg-[#121619] border border-[#C5A059]/40 p-4 mb-6">
+            <div className="text-xs text-[#C5A059] font-bold mb-3 uppercase tracking-widest">
+              ⚾ Pitcher Ganador
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="font-mono text-lg text-[#F7F5F0]">
+                {winningPitcherName}
+              </span>
+              <div className="flex gap-4">
+                <div className="flex flex-col items-center">
+                  <span className="text-xs text-gray-400 mb-1">STRIKEOUTS</span>
+                  <span className="font-sports text-2xl text-[#C5A059]">
+                    {winningPitcherSO ?? 0}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         <p className="text-xs text-gray-400 mb-6">
           Se han registrado las estadísticas y las recompensas del encuentro en tu perfil.

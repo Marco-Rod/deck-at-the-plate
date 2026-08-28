@@ -15,12 +15,21 @@ Las tablas se crean automáticamente con Base.metadata.create_all al iniciar
 (se recomienda migrar a Alembic para control de versiones del schema — ver TODO #13).
 """
 
+import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from app.database import engine, Base
 from app.routers import cards, games, gameplay, ws, user, shop, auth, teams
+
+# Configurar logging a nivel de aplicación
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="Deck at the Plate - API 1v1",

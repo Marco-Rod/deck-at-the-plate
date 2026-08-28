@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { soundFx } from '../utils/audioManager';
 import { user as userApi } from '../utils/api';
+import { PlayerCard } from '../components/cards/PlayerCard';
 
 // Categorización por sectores del campo
 const FIELD_SECTORS = [
@@ -320,40 +321,17 @@ export const MyTeamScreen = ({ user, onBack }) => {
             ) : (
               availableForSelectedSlot.map((card) => {
                 const isEquippedInCurrentSlot = fieldLineup[activeSlot]?.id === card.id;
-                const isCardTWP = card.position === 'TWP' || card.is_two_way;
 
                 return (
-                  <div
+                  <PlayerCard
                     key={card.id}
+                    card={card}
+                    mode="compact"
+                    size="sm"
+                    isSelected={isEquippedInCurrentSlot}
                     onClick={() => handleSelectCardForSlot(card)}
-                    className={`p-2 border transition-all cursor-pointer flex justify-between items-center rounded ${
-                      isEquippedInCurrentSlot
-                        ? 'border-[#C5A059] bg-[#1A3323]'
-                        : 'border-[#2C3E35] bg-[#121619] hover:border-gray-400'
-                    }`}
-                  >
-                    <div className="overflow-hidden mr-2">
-                      <div className="font-sports text-base text-white uppercase leading-tight truncate flex items-center gap-1">
-                        <span>{card.name}</span>
-                        {isCardTWP && (
-                          <span className="text-[8px] bg-[#C5A059] text-[#121619] px-1 rounded font-bold">
-                            TWP
-                          </span>
-                        )}
-                      </div>
-                      <span className="text-[9px] text-gray-400 font-mono block">
-                        {card.position} • C:{card.contact} P:{card.power}
-                      </span>
-                    </div>
-                    <div className="text-right shrink-0">
-                      <span className="font-sports text-lg text-[#C5A059] block leading-none">
-                        {card.overall}
-                      </span>
-                      {isEquippedInCurrentSlot && (
-                        <span className="text-[8px] text-green-400 uppercase font-bold font-mono">ASIGNADO</span>
-                      )}
-                    </div>
-                  </div>
+                    role={card.position === 'SP' || card.position === 'RP' || card.position === 'CP' ? 'PITCHER' : 'BATTER'}
+                  />
                 );
               })
             )}

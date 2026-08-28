@@ -17,12 +17,18 @@ except ModuleNotFoundError:
 
 def clean_database():
     """
-    Script de limpieza integral para resetear usuarios, inventarios,
-    lineups y equipos manteniendo las cartas maestras cargadas.
+    Script de limpieza integral para resetear completamente la BD.
+    Elimina:
+    - Usuarios y sus datos (wallets, inventarios, lineups)
+    - Equipos del usuario (user_teams)
+    - Equipos MLB (teams) - para permitir crear de 0 en seed_mlb_2026
+    
+    Mantiene:
+    - Cartas maestras (player_cards) - se recargan en seed_mlb_2026
     """
     db = SessionLocal()
     try:
-        print("⚡ Iniciando limpieza de la base de datos...")
+        print("⚡ Iniciando limpieza completa de la base de datos...")
 
         truncate_query = text("""
             TRUNCATE TABLE 
@@ -30,7 +36,8 @@ def clean_database():
                 user_lineups,
                 user_teams,
                 user_wallets,
-                users
+                users,
+                teams
             RESTART IDENTITY CASCADE;
         """)
         
@@ -40,10 +47,12 @@ def clean_database():
         print("✅ Base de datos limpiada con éxito.")
         print("   - Tabla 'users' vaciada.")
         print("   - Tabla 'user_wallets' vaciada.")
-        print("   - Tabla 'user_teams' vaciada (si existe).")
+        print("   - Tabla 'user_teams' vaciada.")
         print("   - Tabla 'user_lineups' vaciada.")
         print("   - Tabla 'user_card_inventories' vaciada.")
-        print("🚀 Entorno listo para la creación de clubes y el nuevo flujo de onboarding.")
+        print("   - Tabla 'teams' vaciada (equipos MLB listos para crear de 0).")
+        print()
+        print("🚀 Próximo paso: ejecuta seed_mlb_2026.py para recargar datos.")
 
     except Exception as e:
         db.rollback()

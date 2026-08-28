@@ -18,32 +18,38 @@ export const FranchiseCarousel = ({ teams, selectedTeamId, onSelectTeam }) => {
     }
   }, [teams, selectedTeamId]);
 
+  // Efecto para notificar al padre cuando currentIndex cambia por flechas
+  useEffect(() => {
+    if (teams.length > 0 && displayTeams.length > 0) {
+      const realIndex = currentIndex % teams.length;
+      const selectedTeam = teams[realIndex];
+      console.log(`[DEBUG FranchiseCarousel] currentIndex cambió a ${currentIndex}, notificando team=${selectedTeam.id}`);
+      onSelectTeam(selectedTeam);
+    }
+  }, [currentIndex, teams, displayTeams.length, onSelectTeam]);
+
   const handlePrevious = () => {
     setCurrentIndex((prev) => {
-      const newIndex = prev - 1;
-      // Si llegamos al inicio, saltar al último set (sin animación)
-      if (newIndex < 0) {
-        return teams.length * 2 - 1;
-      }
+      const newIndex = prev - 1 >= 0 ? prev - 1 : teams.length * 2 - 1;
+      console.log(`[DEBUG FranchiseCarousel] handlePrevious: newIndex=${newIndex}`);
       return newIndex;
     });
   };
 
   const handleNext = () => {
     setCurrentIndex((prev) => {
-      const newIndex = prev + 1;
-      // Si llegamos al final, resetear al inicio (sin animación)
-      if (newIndex >= teams.length * 3) {
-        return teams.length;
-      }
+      const newIndex = prev + 1 >= teams.length * 3 ? teams.length : prev + 1;
+      console.log(`[DEBUG FranchiseCarousel] handleNext: newIndex=${newIndex}`);
       return newIndex;
     });
   };
 
   const handleTeamSelect = (index) => {
-    const realIndex = index % teams.length;
-    onSelectTeam(teams[realIndex]);
+    console.log(`[DEBUG FranchiseCarousel] handleTeamSelect llamado con index=${index}`);
+    
+    // Actualizar currentIndex - el useEffect notificará al padre
     setCurrentIndex(index);
+    console.log(`[DEBUG FranchiseCarousel] setCurrentIndex a ${index}`);
   };
 
   if (!displayTeams.length) return null;

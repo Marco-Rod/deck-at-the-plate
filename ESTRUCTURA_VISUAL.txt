@@ -1,0 +1,296 @@
+
+================================================================================
+              🎯 ESTRUCTURA VISUAL DEL SISTEMA DE LOGGING
+================================================================================
+
+FLUJO DE DATOS (Frontend → Backend → BD)
+────────────────────────────────────────────────────────────────────────────
+
+        Frontend (OnboardingScreen.jsx:110)
+        │
+        │ claimStarterPack(userId, selectedFranchise)
+        │ ↓
+        POST /api/v1/shop/starter-pack?user_id=ABC&team_id=LAD
+        │
+        ├─ [ENDPOINT] Recibido claim_starter_pack request    ← ROUTER LOG
+        ├─ [PARAMS] user_id=ABC, team_id=LAD               ← ROUTER LOG
+        │
+        └─→ PackService.assign_starter_pack()
+            │
+            ├─ [ASSIGN_STARTER_PACK] INICIO
+            │
+            ├─ [PASO 1] Seleccionando jugadores
+            │  ├─ Query: SELECT * FROM player_card WHERE team_id='LAD' ...
+            │  ├─ [BUSQUEDA] Fielders: 7, Pitchers: 4
+            │  ├─ [SELECCIONADAS] 5 fielders + 2 pitchers
+            │  └─ total_selected = 7
+            │
+            ├─ [PASO 2] Verificando posiciones
+            │  ├─ [POSICIONES_FALTANTES] ['2B', '3B', 'SS', 'CF']
+            │  └─ [CARTAS_NECESARIAS] 6
+            │
+            ├─ [PASO 3] Obteniendo otros equipos
+            │  ├─ Query: SELECT * FROM player_card WHERE team_id != 'LAD'
+            │  ├─ favorite_team_id: NYY
+            │  └─ [SEPARACION] 28 NYY, 424 otros
+            │
+            ├─ [PASO 4] Agrupando por rareza
+            │  └─ SILVER:2, BRONZE:4, COMMON:7 (target)
+            │
+            ├─ [PASO 5] Seleccionando con distribución
+            │  ├─ SILVER: 1 favorito + 1 otros = 2 ✓
+            │  ├─ BRONZE: 2 favorito + 2 otros = 4 ✓
+            │  └─ COMMON: 0 favorito + 7 otros = 7 ✓
+            │
+            ├─ [PASO 6] Fallback
+            │  └─ Cartas faltantes: 0 (ya tenemos 13)
+            │
+            ├─ [PASO 7] Mezcla
+            │  └─ shuffle(13 cartas)
+            │
+            ├─ [PASO 8] RESUMEN FINAL
+            │  ├─ LAD: 7 ✓ | SILVER: 2 ✓ | BRONZE: 4 ✓ | COMMON: 7 ✓
+            │  ├─ Posiciones cubiertas ✓
+            │  └─ Todo validado
+            │
+            ├─ [PASO 9] Guardando inventario
+            │  ├─ INSERT INTO user_card_inventory (13 registros)
+            │  └─ [COMMIT_SUCCESS]
+            │
+            ├─ [PASO 10] Actualizando usuario
+            │  └─ UPDATE user SET favorite_team_id='LAD', has_completed_onboarding=True
+            │
+            ├─ [PASO 11] Cartera
+            │  └─ INSERT INTO user_wallet (user_id, stamps=1000)
+            │
+            └─ [ASSIGN_STARTER_PACK] FIN - 13 cartas asignadas
+
+        Response:
+        {
+          "message": "Starter pack asignado exitosamente",
+          "cards_claimed": 13,
+          "cards": [...]
+        }
+        │
+        ↓
+        Frontend recibe y muestra cartas
+
+
+ESTRUCTURA DE ARCHIVOS
+────────────────────────────────────────────────────────────────────────────
+
+backend/app/
+├── main.py                          ← MODIFICADO (logging config)
+├── routers/
+│   └── shop.py                      ← MODIFICADO (endpoint logs)
+├── services/
+│   └── pack_service.py              ← MODIFICADO (11 steps logging)
+└── seeds/
+    └── seed_cards.py                (si falta catálogo)
+
+backend/
+└── test_starter_pack_with_logging.py ← NUEVO (script de prueba)
+
+Workspace root/
+├── README_LOGGING.md                ← Resumen ejecutivo
+├── LOGGING_SETUP.md                 ← Instrucciones
+├── CHANGES_SUMMARY.md               ← Qué cambió
+├── VALIDATION_CHECKLIST.md          ← Validación (11 fases)
+├── IMPLEMENTACION_COMPLETA.md       ← Documentación técnica
+├── EJEMPLO_LOGS_EXITOSOS.md         ← Ejemplo visual
+├── NEXT_STEPS.md                    ← Plan de acción
+├── ESTRUCTURA_VISUAL.txt            ← Este archivo
+└── IMPLEMENTACION_RESUMIDA.txt      ← Resumen ejecutivo
+
+
+DIAGRAMA DE LOGGING (11 PASOS)
+────────────────────────────────────────────────────────────────────────────
+
+START
+ │
+ ├─→ [PASO 1] ✓ Equipo Elegido
+ │   └─ 5 fielders + 2 pitchers = 7 cartas
+ │
+ ├─→ [PASO 2] ✓ Posiciones
+ │   └─ Faltantes: ['2B', '3B', 'SS', 'CF']
+ │
+ ├─→ [PASO 3] ✓ Otros Equipos
+ │   └─ 28 NYY, 424 otros disponibles
+ │
+ ├─→ [PASO 4] ✓ Agrupación Rareza
+ │   └─ SILVER: 48 | BRONZE: 127 | COMMON: 277
+ │
+ ├─→ [PASO 5] ✓ Selección Distribución
+ │   └─ 2 SILVER + 4 BRONZE + 7 COMMON = 13
+ │
+ ├─→ [PASO 6] ✓ Fallback
+ │   └─ Cartas faltantes: 0
+ │
+ ├─→ [PASO 7] ✓ Mezcla
+ │   └─ shuffle([13 cartas])
+ │
+ ├─→ [PASO 8] ✓ RESUMEN FINAL
+ │   ├─ LAD: 7 cartas ✓
+ │   ├─ SILVER: 2 ✓
+ │   ├─ BRONZE: 4 ✓
+ │   ├─ COMMON: 7 ✓
+ │   └─ Posiciones: 9/9 ✓
+ │
+ ├─→ [PASO 9] ✓ Inventario
+ │   └─ INSERT 13 registros
+ │
+ ├─→ [PASO 10] ✓ Usuario
+ │   └─ UPDATE: favorite_team_id, onboarding
+ │
+ ├─→ [PASO 11] ✓ Cartera
+ │   └─ INSERT: wallet (1000 stamps)
+ │
+ └─→ END
+    └─ ✓ 13 cartas asignadas exitosamente
+
+
+VALIDACIÓN VISUAL
+────────────────────────────────────────────────────────────────────────────
+
+Cuando todo funciona correctamente:
+
+Fase 1: Datos Recibidos
+  ✓ [PARAMS] user_id=..., team_id=LAD
+
+Fase 2: Equipos Disponibles
+  ✓ [BUSQUEDA] Fielders: 7
+  ✓ [BUSQUEDA] Pitchers: 4
+
+Fase 3: Selección Equipo Elegido
+  ✓ [SELECCIONADAS] 5 fielders
+  ✓ [SELECCIONADAS] 2 pitchers
+
+Fase 4: Posiciones Cubiertas
+  ✓ [POSICIONES_FALTANTES] [] o pocas
+
+Fase 5: Distribución Rareza
+  ✓ [RAREZA: SILVER] → 2 cartas
+  ✓ [RAREZA: BRONZE] → 4 cartas
+  ✓ [RAREZA: COMMON] → 7 cartas
+
+Fase 6: Resumen Final
+  ✓ [COMPOSICION_POR_RAREZA]
+     - SILVER: 2 (esperadas 2) ✓
+     - BRONZE: 4 (esperadas 4) ✓
+     - COMMON: 7 (esperadas 7) ✓
+
+Fase 7: Equipo Elegido
+  ✓ [COMPOSICION_POR_EQUIPO]
+     - LAD: 7 cartas
+
+Fase 8: Posiciones
+  ✓ [COMPOSICION_POR_POSICION]
+     - C: 1, 1B: 1, 2B: 1, 3B: 1, SS: 1, LF: 1, CF: 1, RF: 1, P: 5
+
+Fase 9: Guardado
+  ✓ [PASO 9] 13 cartas guardadas
+  ✓ [COMMIT_SUCCESS]
+
+Fase 10: Completación
+  ✓ [ASSIGN_STARTER_PACK] FIN - 13 cartas asignadas
+
+
+CÓMO LEER LOS LOGS
+────────────────────────────────────────────────────────────────────────────
+
+Busca estas líneas clave:
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ [PARAMS] user_id=user_123_abc, team_id=LAD                         │
+│ ↓ ¿Los parámetros son correctos?                                   │
+│                                                                     │
+│ [BUSQUEDA] Fielders disponibles en LAD: 7                          │
+│ ↓ ¿Hay fielders suficientes?                                       │
+│                                                                     │
+│ [SELECCIONADAS] 5 fielders del equipo elegido                      │
+│ ↓ ¿Se seleccionaron los 5?                                         │
+│                                                                     │
+│ [COMPOSICION_POR_RAREZA]                                           │
+│ ├─ SILVER: 2 (esperadas 2) ✓  ← ¿Es ✓?                            │
+│ ├─ BRONZE: 4 (esperadas 4) ✓  ← ¿Es ✓?                            │
+│ └─ COMMON: 7 (esperadas 7) ✓  ← ¿Es ✓?                            │
+│                                                                     │
+│ [COMPOSICION_POR_EQUIPO]                                           │
+│ └─ LAD: 7 cartas  ← ¿Son exactamente 7?                           │
+│                                                                     │
+│ [ASSIGN_STARTER_PACK] FIN - 13 cartas asignadas  ← ¿FIN exitoso?  │
+└─────────────────────────────────────────────────────────────────────┘
+
+
+COMANDO RÁPIDO PARA FILTRAR
+────────────────────────────────────────────────────────────────────────────
+
+Ver solo los pasos:
+  grep "\[PASO" logs.txt
+
+Ver composición:
+  grep "COMPOSICION" logs.txt -A 5
+
+Ver validaciones:
+  grep "✓\|✗" logs.txt
+
+Ver errores:
+  grep "ERROR\|WARNING" logs.txt
+
+Ver resultado final:
+  grep "FIN -" logs.txt
+
+Ver cada carta:
+  grep "Guardando:" logs.txt
+
+
+OPCIONES DE PRUEBA
+────────────────────────────────────────────────────────────────────────────
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ OPCIÓN A: Prueba Rápida (SIN servidor)                             │
+│                                                                     │
+│ cd backend                                                          │
+│ python test_starter_pack_with_logging.py                           │
+│                                                                     │
+│ ✓ Rápido (2-5 min)                                                 │
+│ ✓ Aisla el problema                                                │
+│ ✗ No prueba el endpoint HTTP                                       │
+└─────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ OPCIÓN B: Prueba Completa (CON frontend + backend)                 │
+│                                                                     │
+│ Terminal 1: cd backend && python -m uvicorn app.main:app --reload  │
+│ Terminal 2: cd frontend && npm run dev                             │
+│ Browser: http://localhost:5173                                     │
+│ Crear usuario → Fundar club → Abrir sobre                          │
+│                                                                     │
+│ ✓ Prueba todo el flujo                                             │
+│ ✓ Valida endpoint HTTP                                             │
+│ ✗ Más complejo                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ OPCIÓN C: Con Logs a Archivo                                        │
+│                                                                     │
+│ cd backend                                                          │
+│ python -m uvicorn app.main:app --reload 2>&1 | tee logs.txt        │
+│                                                                     │
+│ ✓ Persiste los logs                                                │
+│ ✓ Fácil para debugging posterior                                   │
+│ ✓ Se puede compartir                                               │
+└─────────────────────────────────────────────────────────────────────┘
+
+
+RESUMEN
+────────────────────────────────────────────────────────────────────────────
+
+✅ Se implementó logging en 11 pasos de la lógica de asignación
+✅ Se crearon 7 documentos de referencia
+✅ Se creó 1 script de prueba standalone
+✅ Se modificaron 3 archivos backend
+✅ Sistema listo para debuggear cualquier problema
+
+Próximo paso: Ejecutar las pruebas 🚀
+
