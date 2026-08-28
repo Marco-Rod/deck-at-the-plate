@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 // Barrel imports from refactored stadium module
 import {
   GameHeader,
@@ -19,6 +19,7 @@ import { GameplayDeckAndReveal } from './GameplayDeckAndReveal';
 import { QuitGameModal } from './QuitGameModal';
 import { RivalPitcherChangeModal } from './RivalPitcherChangeModal';
 import { useStadiumSocket } from '../../hooks/useStadiumSocket';
+import { useEventSequencer, EVENT_SEQUENCES } from '../../hooks/useEventSequencer';
 import { games as gamesApi, cards as cardsApi, user as userApi } from '../../utils/api';
 
 import type {
@@ -84,11 +85,44 @@ export const StadiumShowcaseScreen: React.FC<StadiumShowcaseScreenProps> = ({
     oldPitcher: any;
     newPitcher: any;
   } | null>(null);
+
+  // ⭐ Fase 1B: Nuevos estados manejados por Event Sequencer
+  // Estos estados ANTES venían del hook, ahora los manejamos localmente
+  const [lastResult, setLastResult] = useState<{ text: string; event: string; ts: number } | null>(null);
+  const [inningCompleted, setInningCompleted] = useState<{ ts: number } | null>(null);
+  const [pitcherChanged, setPitcherChanged] = useState<{ newPitcher: any; oldPitcher?: any; ts: number } | null>(null);
   
   const lastProcessedInningCompletedRef = useRef<number | null>(null);
 
-  const { gameState, lastResult, inningCompleted, hasPitched, isConnected, pitcherChanged, sendPitch, sendSwing, sendTactic } =
-    useStadiumSocket(gameId ?? '', userId);
+  // ⭐ Fase 1B: Inicializar el Event Sequencer
+  const { enqueueEvent, queue, currentEvent, isProcessing, onStep } = useEventSequencer();
+
+  // Handlers para WebSocket callbacks - enquean los eventos
+  const handlePlayResolved = useCallback((payload: any) => {
+    const eventType = payload.event?.toUpperCase() || 'UNKNOWN';
+    console.log(`📤 [HANDLER] Enqueuing PLAY_RESOLVED event: ${eventType}`);
+    
+    // Mapear eventos a tipos de EVENT_SEQUENCES
+    const eventTypeKey = eventType.replace(/ /g, '_').toUpperCase();
+    
+    if (Object.keys(EVENT_SEQUENCES).includes(eventTypeKey)) {
+      enqueueEvent(eventTypeKey as keyof typeof EVENT_SEQUENCES, payload);
+    } else {
+      console.warn(`⚠️  [HANDLER] Unknown event type: ${eventTypeKey}`);
+    }
+  }, [enqueueEvent]);
+
+  const handlePitcherChanged = useCallback((payload: any) => {
+    console.log(`📤 [HANDLER] Enqueuing PITCHER_CHANGED event`);
+    enqueueEvent('PITCHER_CHANGED', payload);
+  }, [enqueueEvent]);
+
+  // WebSocket con callbacks
+  const { gameState, hasPitched, isConnected, sendPitch, sendSwing, sendTactic } =
+    useStadiumSocket(gameId ?? '', userId, {
+      onPlayResolved: handlePlayResolved,
+      onPitcherChanged: handlePitcherChanged,
+    });
 
   // ⭐ NUEVO: Calcular strikeouts del pitcher activo desde WebSocket
   const getPitcherStrikeouts = () => {
