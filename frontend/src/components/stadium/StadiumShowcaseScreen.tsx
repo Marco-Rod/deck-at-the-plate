@@ -758,6 +758,7 @@ export const StadiumShowcaseScreen: React.FC<StadiumShowcaseScreenProps> = ({
             isTopInning={gameState?.isTopInning ?? true}
             runners={gameState?.runners ?? { b1: null, b2: null, b3: null }}
             gameId={gameId ?? undefined}
+            userId={userId}
             fatigueLevel={gameState?.active_pitcher?.fatigue_level ?? 0}
             onPitcherChanged={(newPitcher) => {
               console.log('✅ Pitcher actualizado:', newPitcher);

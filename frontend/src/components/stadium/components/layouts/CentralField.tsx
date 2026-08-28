@@ -38,6 +38,7 @@ import { games as gamesApi } from '../../../../utils/api';
 
 export const CentralField: React.FC<CentralFieldProps & {
   gameId?: string;
+  userId?: string;
   fatigueLevel?: number;
   onPitcherChanged?: (newPitcher: any) => void;
 }> = ({
@@ -60,6 +61,7 @@ export const CentralField: React.FC<CentralFieldProps & {
   isTopInning = true,
   runners = { b1: null, b2: null, b3: null },
   gameId,
+  userId,
   fatigueLevel = 0,
   onPitcherChanged,
 }) => {
@@ -67,31 +69,29 @@ export const CentralField: React.FC<CentralFieldProps & {
   const [availablePitchers, setAvailablePitchers] = useState<any[]>([]);
   const [isLoadingPitchers, setIsLoadingPitchers] = useState(false);
 
-  // ⭐ NUEVO: Cargar pitchers disponibles cuando se abre el modal
+  // Cargar pitchers disponibles cuando se abre el modal
   useEffect(() => {
-    if (showChangePitcherModal && gameId) {
+    if (showChangePitcherModal && gameId && userId) {
       loadAvailablePitchers();
     }
-  }, [showChangePitcherModal, gameId]);
+  }, [showChangePitcherModal, gameId, userId]);
 
   const loadAvailablePitchers = async () => {
+    if (!gameId || !userId) {
+      console.warn('⚠️ loadAvailablePitchers: gameId o userId no disponible', { gameId, userId });
+      return;
+    }
     try {
       setIsLoadingPitchers(true);
-      console.log(`🔄 Cargando pitchers para gameId: ${gameId}`);
-      const response = await gamesApi.getAvailablePitchers(gameId!);
-      
-      // Debug: Ver estructura completa de response
+      console.log(`🔄 Cargando pitchers: gameId=${gameId}, userId=${userId}`);
+      const response = await gamesApi.getAvailablePitchers(gameId, userId);
+
       console.log('📋 Response completa:', response);
-      console.log('📋 Response type:', typeof response);
-      console.log('📋 Response keys:', Object.keys(response || {}));
-      
-      // La respuesta del backend viene directamente, no en response.data
       const pitchers = response?.available_pitchers || [];
       console.log(`✅ ${pitchers.length} pitchers cargados`);
       setAvailablePitchers(pitchers);
     } catch (error) {
-      console.error('❌ Error cargando pitchers:', error);
-      console.error('Error details:', error instanceof Error ? error.message : String(error));
+      console.error('❌ Error cargando pitchers:', error instanceof Error ? error.message : String(error));
       setAvailablePitchers([]);
     } finally {
       setIsLoadingPitchers(false);
@@ -103,11 +103,11 @@ export const CentralField: React.FC<CentralFieldProps & {
 
     try {
       const response = await gamesApi.changePitcher(gameId, { new_pitcher_id: newPitcherId });
-      console.log('✅ Pitcher cambiado:', response.data);
+      console.log('✅ Pitcher cambiado:', response);
       
       // Notificar al componente padre
-      if (onPitcherChanged && response.data?.active_pitcher) {
-        onPitcherChanged(response.data.active_pitcher);
+      if (onPitcherChanged && response?.active_pitcher) {
+        onPitcherChanged(response.active_pitcher);
       }
       
       setShowChangePitcherModal(false);

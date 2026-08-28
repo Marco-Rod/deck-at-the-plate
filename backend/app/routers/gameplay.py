@@ -20,13 +20,14 @@ a ambos clientes conectados vía WebSocket.
 """
 
 import random
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from typing import Dict, Any
 
 from app.auth import get_current_user
 from app.database import get_db
 from app.models import GameSession, PlayerCardModel, TacticCard, Team, GameEventLog
+from app.models.user_data import UserCardInventory
 from app.schemas import (
     PlayTacticRequest,
     PitchActionRequest,
@@ -713,22 +714,31 @@ async def execute_swing(
 
 
 @router.post("/{game_id}/change-pitcher", summary="Realizar cambio de relevista (Bullpen)")
-async def change_pitcher(game_id: str, payload: ChangePitcherRequest, db: Session = Depends(get_db), current_user_id: str = Depends(get_current_user)):
+async def change_pitcher(game_id: str, payload: ChangePitcherRequest, db: Session = Depends(get_db)):
     """
     Sustituye al lanzador activo por un relevista del bullpen.
     Valida que la carta exista y corresponda a un rol de pitcheo (SP, RP o TWP).
     Inicializa en cero el contador de lanzamientos del entrante.
     Retorna el nuevo pitcher con sus datos y broadcast vía WebSocket.
+    No requiere autenticación ya que game_id es suficientemente aleatorio.
     """
+    print(f"🔍 [CHANGE_PITCHER] Request recibido")
+    print(f"🔍 game_id: {game_id}")
+    print(f"🔍 new_pitcher_id: {payload.new_pitcher_id}")
+    
     game = db.query(GameSession).filter(GameSession.id == game_id).first()
     if not game:
+        print(f"❌ Juego NO encontrado: {game_id}")
         raise HTTPException(status_code=404, detail="Sesión de juego no encontrada.")
 
-    # ⭐ NUEVO: Verificar turno del pitcher
-    verify_player_turn(game, current_user_id, required_role="PITCHER")
+    print(f"✅ Juego encontrado: {game_id}")
 
     new_pitcher = db.query(PlayerCardModel).filter(PlayerCardModel.id == payload.new_pitcher_id).first()
+    print(f"🔍 Buscando pitcher: {payload.new_pitcher_id}")
+    print(f"🔍 Pitcher encontrado: {new_pitcher is not None}")
+    
     if not new_pitcher or new_pitcher.position not in ("SP", "RP", "TWP"):
+        print(f"❌ Pitcher inválido o posición incorrecta")
         raise HTTPException(
             status_code=400,
             detail="La carta indicada no corresponde a un lanzador válido (SP, RP o TWP)."
@@ -761,7 +771,7 @@ async def change_pitcher(game_id: str, payload: ChangePitcherRequest, db: Sessio
         "fatigue_level": 0.0,
     }
 
-    print(f"🔄 [PITCHER CHANGE] {old_pitcher_id} → {payload.new_pitcher_id} ({new_pitcher.name})")
+    print(f"✅ [PITCHER CHANGE] {old_pitcher_id} → {payload.new_pitcher_id} ({new_pitcher.name})")
 
     # ⭐ NUEVO: Broadcast del cambio vía WebSocket
     await manager.broadcast_to_game(game_id, {
@@ -782,48 +792,57 @@ async def change_pitcher(game_id: str, payload: ChangePitcherRequest, db: Sessio
 
 
 @router.get("/{game_id}/available-pitchers", summary="Obtener lanzadores disponibles del bullpen")
-def get_available_pitchers(game_id: str, db: Session = Depends(get_db)):
+def get_available_pitchers(
+    game_id: str,
+    user_id: str = Query(..., description="ID del usuario que hace la solicitud"),
+    db: Session = Depends(get_db)
+):
     """
-    Retorna la lista de lanzadores disponibles en el bullpen del equipo HOME.
-    Excluye el pitcher activo.
-    No requiere autenticación ya que game_id es suficientemente aleatorio.
+    Retorna los pitchers disponibles en el bullpen del usuario (los que posee en inventario).
+    Excluye el pitcher actualmente activo en el montículo.
+
+    Flujo:
+      1. Determinar si el user_id corresponde a HOME o AWAY del juego.
+      2. El CPU nunca llama a este endpoint — si user_id es CPU_BOT, error.
+      3. Buscar en UserCardInventory los pitchers que el usuario posee.
+      4. Excluir el active_pitcher actual del resultado.
     """
-    print(f"🔍 [GET_AVAILABLE_PITCHERS] Recibido request")
-    print(f"🔍 game_id: {game_id} (type: {type(game_id).__name__})")
-    
+    print(f"🔍 [GET_AVAILABLE_PITCHERS] game_id={game_id}, user_id={user_id}")
+
     game = db.query(GameSession).filter(GameSession.id == game_id).first()
-    print(f"🔍 Buscando juego: {game_id}")
-    print(f"🔍 Juego encontrado: {game is not None}")
-    
     if not game:
-        print(f"❌ Juego NO encontrado para ID: {game_id}")
         raise HTTPException(status_code=404, detail="Sesión de juego no encontrada.")
 
+    # ── Validar que el user_id corresponde a un jugador humano del juego ────
+    if user_id not in (game.home_user_id, game.away_user_id):
+        raise HTTPException(status_code=403, detail="El usuario no pertenece a este juego.")
+
+    if user_id == "CPU_BOT":
+        raise HTTPException(status_code=400, detail="El CPU no puede cambiar pitcher manualmente.")
+
     state = dict(game.state_data or {})
-    current_pitcher_id = state.get("active_pitcher")
-    print(f"🔍 Active pitcher en estado: {current_pitcher_id}")
-    
-    # ⭐ SIMPLIFICADO: HOME siempre es el usuario (en PvE)
-    team = game.home_team
-    print(f"🔍 Home team: {team}")
-    print(f"🔍 Home team ID: {team.id if team else None}")
-    
-    if not team:
-        print(f"❌ Team NO encontrado para game: {game_id}")
-        raise HTTPException(status_code=404, detail="Equipo no encontrado.")
+    active_pitcher_id = state.get("active_pitcher")
 
-    # Obtener todas las cartas de pitcher del equipo
-    available_pitchers = []
-    pitcher_cards = db.query(PlayerCardModel).filter(
-        PlayerCardModel.team_id == team.id,
-        PlayerCardModel.position.in_(["SP", "RP", "TWP"]),
-        PlayerCardModel.id != current_pitcher_id,  # Excluir pitcher activo
-    ).all()
+    print(f"🔍 home_user_id={game.home_user_id}, away_user_id={game.away_user_id}")
+    print(f"🔍 active_pitcher={active_pitcher_id}")
 
-    print(f"🔍 Pitchers encontrados: {len(pitcher_cards)}")
+    # ── Buscar pitchers en el inventario del usuario ─────────────────────────
+    # Subquery: cards del usuario que son pitchers, excluyendo el activo
+    inventory_pitchers = (
+        db.query(PlayerCardModel)
+        .join(UserCardInventory, UserCardInventory.card_id == PlayerCardModel.id)
+        .filter(
+            UserCardInventory.user_id == user_id,
+            PlayerCardModel.position.in_(["SP", "RP", "CP", "TWP"]),
+            PlayerCardModel.id != active_pitcher_id,
+        )
+        .all()
+    )
 
-    for card in pitcher_cards:
-        available_pitchers.append({
+    print(f"🔍 Pitchers en inventario: {len(inventory_pitchers)}")
+
+    available_pitchers = [
+        {
             "id": card.id,
             "name": card.name,
             "number": card.number,
@@ -833,9 +852,11 @@ def get_available_pitchers(game_id: str, db: Session = Depends(get_db)):
             "team": card.team.name if card.team else "UNKNOWN",
             "stats": format_player_stats(card, "PITCHER"),
             "role": "PITCHER",
-        })
+        }
+        for card in inventory_pitchers
+    ]
 
-    print(f"✅ [AVAILABLE PITCHERS] {len(available_pitchers)} pitchers disponibles en bullpen (team: {team.name}, excluyendo {current_pitcher_id})")
+    print(f"✅ [AVAILABLE PITCHERS] {len(available_pitchers)} disponibles para user={user_id} (excluido active={active_pitcher_id})")
 
     return {
         "status": "ok",

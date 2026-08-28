@@ -220,10 +220,11 @@ export const games = {
   /**
    * Obtiene los lanzadores disponibles en el bullpen.
    * @param {string} gameId
+   * @param {string} userId - ID del usuario para determinar su equipo (HOME o AWAY)
    * @returns {Promise<{available_pitchers: Array}>}
    */
-  getAvailablePitchers: (gameId) => {
-    const url = `/api/v1/games/${gameId}/available-pitchers`;
+  getAvailablePitchers: (gameId, userId) => {
+    const url = `/api/v1/games/${gameId}/available-pitchers?user_id=${userId}`;
     console.log(`📡 GET request a: ${url}`);
     return _request(url, { method: 'GET' });
   },
