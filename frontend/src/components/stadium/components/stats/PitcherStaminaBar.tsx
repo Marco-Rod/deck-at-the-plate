@@ -34,6 +34,7 @@ import { motion } from 'framer-motion';
 interface PitcherStaminaBarProps {
   pitchCount?: number;
   fatigueLevel?: number;
+  totalInnings?: number; // ⭐ NUEVO: Total de innings para mostrar umbral dinámico
   basePitcherStats?: {
     velocidad?: number;
     control?: number;
@@ -46,6 +47,25 @@ interface FatigueStats {
   control: number;
   movimiento: number;
 }
+
+/**
+ * Calcula el umbral dinámico de lanzamientos basado en los innings
+ * Proporciona igualdad en el balance del juego según la duración
+ */
+const getPitchThreshold = (totalInnings: number = 9): number => {
+  const THRESHOLDS: Record<number, number> = {
+    3: 18,  // 3 innings: 18 pitches (20% del tiempo)
+    6: 40,  // 6 innings: 40 pitches (66% del tiempo)
+    9: 60,  // 9 innings: 60 pitches (100% del tiempo)
+  };
+
+  if (THRESHOLDS[totalInnings]) {
+    return THRESHOLDS[totalInnings];
+  }
+
+  // Interpolación: threshold = (60 / 9) * total_innings
+  return Math.max(6, Math.round((60.0 / 9.0) * totalInnings));
+};
 
 /**
  * Calcula la penalización de fatiga basada en el porcentaje
@@ -116,6 +136,7 @@ const getStaminaColor = (fatigueLevel: number): { color: string; label: string; 
 export const PitcherStaminaBar: React.FC<PitcherStaminaBarProps> = ({
   pitchCount = 0,
   fatigueLevel = 0,
+  totalInnings = 9,
   basePitcherStats = {},
 }) => {
   // Calcular stats con penalización de fatiga
@@ -192,7 +213,7 @@ export const PitcherStaminaBar: React.FC<PitcherStaminaBarProps> = ({
             {pitchCount}
           </span>
           <span className="font-mono text-[8px] sm:text-[9px] md:text-[10px] text-[#E6DFD3]/50">
-            / 60 umbral
+            / {getPitchThreshold(totalInnings)} umbral
           </span>
         </div>
       </div>

@@ -767,6 +767,7 @@ export const StadiumShowcaseScreen: React.FC<StadiumShowcaseScreenProps> = ({
             <PitcherStaminaBar
               pitchCount={gameState?.active_pitcher?.pitch_count || 0}
               fatigueLevel={gameState?.active_pitcher?.fatigue_level || 0}
+              totalInnings={gameState?.totalInnings || 9}
               basePitcherStats={{
                 velocidad: gameState?.active_pitcher?.stats?.find((s: any) => s.label === 'VELO')?.val || 75,
                 control: gameState?.active_pitcher?.stats?.find((s: any) => s.label === 'CTRL')?.val || 75,

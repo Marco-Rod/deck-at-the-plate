@@ -146,15 +146,20 @@ def _build_play_resolved_payload(game: GameSession, event: str, description: str
         if active_pitcher_id:
             pitcher_card = db.query(PlayerCardModel).filter(PlayerCardModel.id == active_pitcher_id).first()
             if pitcher_card:
-                # ⭐ NUEVO: Calcular pitch count y fatigue level
+                # ⭐ MEJORADO: Calcular pitch count y fatigue level con umbral dinámico por innings
+                from app.engine.fatigue_manager import get_pitch_threshold
+                
                 pitch_counts = state_with_role.get("pitch_counts", {})
                 current_pitch_count = pitch_counts.get(active_pitcher_id, 0)
                 
+                # Obtener umbral dinámico basado en total_innings
+                total_innings = state_with_role.get("total_innings", 9)
+                pitch_threshold = get_pitch_threshold(total_innings)
+                
                 # Calcular fatigue level (0-100%)
-                PITCH_THRESHOLD = 60
                 FATIGUE_PENALTY_STEP = 15
-                if current_pitch_count > PITCH_THRESHOLD:
-                    extra_pitches = current_pitch_count - PITCH_THRESHOLD
+                if current_pitch_count > pitch_threshold:
+                    extra_pitches = current_pitch_count - pitch_threshold
                     fatigue_level = min(100, (extra_pitches / (FATIGUE_PENALTY_STEP * 5)) * 100)
                 else:
                     fatigue_level = 0.0
@@ -306,7 +311,10 @@ async def _resolve_swing(
 
     raw_pitcher_attrs = map_card_to_pitcher_attrs(pitcher_card) if pitcher_card else {"velocidad": 75, "control": 70, "movimiento": 70}
     batter_attrs = map_card_to_batter_attrs(batter_card) if batter_card else {"contacto": 70, "poder": 70, "vision": 70}
-    pitcher_attrs = apply_pitcher_fatigue(raw_pitcher_attrs, current_count)
+    
+    # ⭐ MEJORADO: Pasar total_innings para ajustar dinámicamente el umbral de fatiga
+    total_innings = state.get("total_innings", 9)
+    pitcher_attrs = apply_pitcher_fatigue(raw_pitcher_attrs, current_count, total_innings)
 
     # --- NUEVO: Extraer estadísticas específicas del picheo lanzado desde el repertorio ---
     selected_pitch_type = current_pitch.get("pitch_type", "4-SEAM")
