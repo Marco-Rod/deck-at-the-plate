@@ -828,7 +828,9 @@ async def execute_swing(
         print(f"❌ TURN VERIFICATION FAILED: {e.detail}")
         raise
 
-    # ⭐ NUEVO: Refrescar la sesión desde la DB para asegurar estado fresco
+    # ⭐ NUEVO: Expulsar todas las sesiones cacheadas y obtener una fresca de la BD
+    db.expunge_all()
+    game = db.query(GameSession).filter(GameSession.id == game_id).first()
     db.refresh(game)
     state = dict(game.state_data or {})
     
