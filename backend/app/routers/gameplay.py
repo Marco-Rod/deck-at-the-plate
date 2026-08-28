@@ -38,7 +38,7 @@ from app.schemas import (
 )
 from app.engine.calculator import calculate_play_outcome
 from app.engine.state_manager import process_at_bat_transition
-from app.engine.fatigue_manager import apply_pitcher_fatigue
+from app.engine.fatigue_manager import apply_pitcher_fatigue, get_pitch_threshold
 from app.engine.deck_manager import discard_used_tactic
 from app.engine.tactical_actions import resolve_bunt, resolve_steal
 from app.engine.websocket_manager import manager
