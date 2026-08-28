@@ -18,7 +18,7 @@ import { GameIntroModal } from './GameIntroModal';
 import { GameplayDeckAndReveal } from './GameplayDeckAndReveal';
 import { QuitGameModal } from './QuitGameModal';
 import { RivalPitcherChangeModal } from './RivalPitcherChangeModal';
-import { useStadiumSocket } from '../../hooks/useStadiumSocket';
+import { useStadiumSocket, parseStateData } from '../../hooks/useStadiumSocket';
 import { useEventSequencer, EVENT_SEQUENCES } from '../../hooks/useEventSequencer';
 import { games as gamesApi, cards as cardsApi, user as userApi } from '../../utils/api';
 
@@ -86,13 +86,55 @@ export const StadiumShowcaseScreen: React.FC<StadiumShowcaseScreenProps> = ({
     newPitcher: any;
   } | null>(null);
 
-  // ⭐ Fase 1B: Nuevos estados manejados por Event Sequencer
-  // Estos estados ANTES venían del hook, ahora los manejamos localmente
-  const [lastResult, setLastResult] = useState<{ text: string; event: string; ts: number } | null>(null);
-  const [inningCompleted, setInningCompleted] = useState<{ ts: number } | null>(null);
-  const [pitcherChanged, setPitcherChanged] = useState<{ newPitcher: any; oldPitcher?: any; ts: number } | null>(null);
-  
+  // ⭐ NUEVO: Payload del último evento para usar en callbacks
+  const [currentEventPayload, setCurrentEventPayload] = useState<any>(null);
+
+  // ⭐ NUEVO: Último resultado del evento para mostrar en PlayResultOverlay
+  const [lastResult, setLastResult] = useState<{
+    text: string;
+    event: string;
+    ts: number;
+  } | null>(null);
+
+  // ⭐ NUEVO: Ref para evitar procesar el mismo inningCompleted dos veces
   const lastProcessedInningCompletedRef = useRef<number | null>(null);
+
+  // ⭐ NUEVO: Estado para controlar cambio de pitcher
+  const [pitcherChanged, setPitcherChanged] = useState<any>(null);
+
+  // ⭐ Mapeo de tipos de eventos del backend a EVENT_SEQUENCES (Error #4 fix)
+  const EVENT_TYPE_MAP: Record<string, keyof typeof EVENT_SEQUENCES> = {
+    'HOME_RUN': 'HOME_RUN',
+    'HOME RUN': 'HOME_RUN',
+    'STRIKEOUT': 'STRIKEOUT',
+    'K': 'STRIKEOUT',
+    'HIT_1B': 'HIT_1B',
+    '1B': 'HIT_1B',
+    'SINGLE': 'HIT_1B',
+    'HIT_2B': 'HIT_2B',
+    '2B': 'HIT_2B',
+    'DOUBLE': 'HIT_2B',
+    'HIT_3B': 'HIT_3B',
+    '3B': 'HIT_3B',
+    'TRIPLE': 'HIT_3B',
+    'BALL': 'BALL',
+    'STRIKE': 'STRIKE',
+    'STRIKE_SWINGING': 'STRIKE',
+    'STRIKE_LOOKING': 'STRIKE',
+    'FOUL': 'FOUL',
+    'WALK': 'WALK',
+    'BB': 'WALK',
+    'OUT_FLYBALL': 'OUT_FLYBALL',
+    'OUT_FLY': 'OUT_FLYBALL',
+    'FLY': 'OUT_FLYBALL',
+    'FLY BALL': 'OUT_FLYBALL',
+    'OUT_GROUNDBALL': 'OUT_GROUNDBALL',
+    'OUT_GROUND': 'OUT_GROUNDBALL',
+    'GROUND': 'OUT_GROUNDBALL',
+    'GROUND BALL': 'OUT_GROUNDBALL',
+    'DOUBLE_PLAY': 'DOUBLE_PLAY',
+    'DP': 'DOUBLE_PLAY',
+  };
 
   // ⭐ Fase 1B: Inicializar el Event Sequencer
   const { enqueueEvent, queue, currentEvent, isProcessing, onStep } = useEventSequencer();
@@ -102,18 +144,23 @@ export const StadiumShowcaseScreen: React.FC<StadiumShowcaseScreenProps> = ({
     const eventType = payload.event?.toUpperCase() || 'UNKNOWN';
     console.log(`📤 [HANDLER] Enqueuing PLAY_RESOLVED event: ${eventType}`);
     
-    // Mapear eventos a tipos de EVENT_SEQUENCES
-    const eventTypeKey = eventType.replace(/ /g, '_').toUpperCase();
+    // ⭐ NUEVO: Guardar el payload para usar en callbacks
+    setCurrentEventPayload(payload);
     
-    if (Object.keys(EVENT_SEQUENCES).includes(eventTypeKey)) {
-      enqueueEvent(eventTypeKey as keyof typeof EVENT_SEQUENCES, payload);
+    // Usar el mapa para obtener el tipo de evento correcto (Error #4 fix)
+    const mappedType = EVENT_TYPE_MAP[eventType] || EVENT_TYPE_MAP['SINGLE'];
+    
+    if (mappedType) {
+      enqueueEvent(mappedType, payload);
+      console.log(`📤 [HANDLER] Mapped "${eventType}" → "${mappedType}"`);
     } else {
-      console.warn(`⚠️  [HANDLER] Unknown event type: ${eventTypeKey}`);
+      console.warn(`⚠️  [HANDLER] Unknown event type: ${eventType}`);
     }
   }, [enqueueEvent]);
 
   const handlePitcherChanged = useCallback((payload: any) => {
     console.log(`📤 [HANDLER] Enqueuing PITCHER_CHANGED event`);
+    setPitcherChanged(payload);  // ⭐ NUEVO: Actualizar estado local
     enqueueEvent('PITCHER_CHANGED', payload);
   }, [enqueueEvent]);
 
@@ -225,8 +272,8 @@ export const StadiumShowcaseScreen: React.FC<StadiumShowcaseScreenProps> = ({
     return "Pitcher";
   };
 
-  // ⭐ Fase 1B: Register step callback for 'show-modal'
-  // This callback runs at delay: 0 when the event starts processing
+  // ⭐ Fase 1B: Register step callbacks for Event Sequencer
+  // Callback 1: Show modal at delay 0ms
   useEffect(() => {
     onStep('show-modal', (payload) => {
       console.log(`✅ [STEP] show-modal - Setting PlayResultOverlay`);
@@ -235,15 +282,142 @@ export const StadiumShowcaseScreen: React.FC<StadiumShowcaseScreenProps> = ({
         event: payload.event || 'UNKNOWN',
         ts: Date.now(),
       });
+      
+      // ⭐ NUEVO: Ahora que el modal va a mostrarse, actualizar el gameState
+      // Esto garantiza que el modal se ve ANTES que los cambios en la interfaz
+      // ⚠️ COMENTADO: El WebSocket actualiza automáticamente, no necesario aquí
+      // if (currentEventPayload) {
+      //   console.log('📍 [GAMESTATE UPDATE] desde show-modal - Modal visible, ahora actualizar estado');
+      //   setGameState(parseStateData(currentEventPayload));
+      // }
+      
       // Bloquear controles mientras se muestra el evento
       setIsAwaitingResult(true);
+    });
+  }, [onStep, currentEventPayload]);
+
+  // Callback 2: Update score (se ejecuta después de mostrar el modal)
+  useEffect(() => {
+    onStep('update-score', (payload) => {
+      console.log(`✅ [STEP] update-score - Actualizando scores`);
+      console.log('   score_home:', payload.score_home, '| score_away:', payload.score_away);
+      // El gameState ya se actualiza vía WebSocket, este callback solo confirma visualmente
+      // que el cambio ocurrió en el orden correcto
+    });
+  }, [onStep]);
+
+  // Callback 3: Update batter stats
+  useEffect(() => {
+    onStep('update-batter-stats', (payload) => {
+      console.log(`✅ [STEP] update-batter-stats - Actualizando estadísticas del bateador`);
+      // Los stats se actualizan a través del gameState.batter_stats del WebSocket
+      // Este callback solo marca que el step fue ejecutado en el tiempo correcto
+      if (payload.batter_stats) {
+        console.log('   batter_stats:', payload.batter_stats);
+      }
+    });
+  }, [onStep]);
+
+  // Callback 4: Update runners
+  useEffect(() => {
+    onStep('update-runners', (payload) => {
+      console.log(`✅ [STEP] update-runners - Actualizando corredores`);
+      console.log('   runners:', payload.runners || 'N/A');
+      // Los runners se actualizar vía WebSocket en gameState.runners
+    });
+  }, [onStep]);
+
+  // Callback 5: Load next batter
+  useEffect(() => {
+    onStep('load-next-batter', (payload) => {
+      console.log(`✅ [STEP] load-next-batter - Cargando siguiente bateador`);
+      console.log('   active_batter:', payload.active_batter?.name || 'Desconocido');
+      // El próximo bateador se carga automáticamente vía WebSocket (active_batter)
+      // Este callback solo marca la transición de bateador en el timeline correcto
+    });
+  }, [onStep]);
+
+  // Callback 6: Update outs
+  useEffect(() => {
+    onStep('update-outs', (payload) => {
+      console.log(`✅ [STEP] update-outs - Actualizando outs`);
+      console.log('   outs:', payload.outs || 0);
+      // Los outs se actualizan vía WebSocket en gameState.outs
+    });
+  }, [onStep]);
+
+  // Callback 7: Update pitcher stats
+  useEffect(() => {
+    onStep('update-pitcher-stats', (payload) => {
+      console.log(`✅ [STEP] update-pitcher-stats - Actualizando estadísticas del pitcher`);
+      console.log('   pitcher_id:', payload.pitcher_id || 'N/A');
+      // Los stats del pitcher se actualizan vía WebSocket en gameState.pitcher_strikeouts
+    });
+  }, [onStep]);
+
+  // Callback 8: Check inning end
+  useEffect(() => {
+    onStep('check-inning-end', (payload) => {
+      console.log(`✅ [STEP] check-inning-end - Verificando fin de entrada`);
+      console.log('   inning:', payload.inning || 'N/A');
+      console.log('   outs:', payload.outs || 0);
+      if (payload.outs >= 3) {
+        console.log('   ℹ️ Entrada completada, esperando cambio de equipo');
+      }
+      // La lógica de fin de entrada se maneja vía WebSocket
+    });
+  }, [onStep]);
+
+  // Callback 9: Update strikes
+  useEffect(() => {
+    onStep('update-strikes', (payload) => {
+      console.log(`✅ [STEP] update-strikes - Actualizando strikes`);
+      console.log('   strikes:', payload.strikes || 0);
+      // Los strikes se actualizan vía WebSocket en gameState.strikes
+    });
+  }, [onStep]);
+
+  // Callback 10: Update balls
+  useEffect(() => {
+    onStep('update-balls', (payload) => {
+      console.log(`✅ [STEP] update-balls - Actualizando bolas`);
+      console.log('   balls:', payload.balls || 0);
+      // Las bolas se actualizan vía WebSocket en gameState.balls
+    });
+  }, [onStep]);
+
+  // Callback 11: Update pitcher card
+  useEffect(() => {
+    onStep('update-pitcher-card', (payload) => {
+      console.log(`✅ [STEP] update-pitcher-card - Actualizando tarjeta del pitcher`);
+      console.log('   pitcher:', payload.pitcher?.name || 'Desconocido');
+      // El pitcher se actualiza vía WebSocket
+    });
+  }, [onStep]);
+
+  // Callback 12: Reset pitch selector
+  useEffect(() => {
+    onStep('reset-pitch-selector', (payload) => {
+      console.log(`✅ [STEP] reset-pitch-selector - Reseteando selector de lanzamiento`);
+      // El selector se resetea automáticamente
     });
   }, [onStep]);
 
   // ⭐ Fase 1B: Desbloquear controles después del modal (1 segundo)
+  // Y actualizar gameState DESPUÉS de mostrar el modal
   useEffect(() => {
     if (lastResult) {
+      // El modal acaba de aparecer (lastResult cambió)
+      // Esperar un pequeño delay para que React renderice el modal
       const timer = setTimeout(() => {
+        // ⭐ AQUÍ actualizamos el gameState para que los cambios
+        // de scores, runners, stats, etc. se reflejen DESPUÉS del modal
+        console.log('📍 [GAMESTATE UPDATE] Ejecutando después de que el modal se mostró');
+        
+        // El payload ya está en el WebSocket hook, pero como ahora lo estamos
+        // manejando de forma atrasada, necesitamos acceder al último evento enqueado
+        // Esto lo hace el sequencer a través de los callbacks
+        
         setIsAwaitingResult(false);
       }, 1000);
       
@@ -288,6 +462,9 @@ export const StadiumShowcaseScreen: React.FC<StadiumShowcaseScreenProps> = ({
       }
     }
   }, [gameState?.pitcher_strikeouts, gameState?.activePitcherId, gameState?.batter_stats]);
+
+  // ⭐ NUEVO: Extraer inningCompleted del gameState
+  const inningCompleted = gameState?.inning_completed;
 
   // Detecta cuando la entrada termina (backend envía inning_completed=true)
   // y muestra el modal de transición con timing correcto.

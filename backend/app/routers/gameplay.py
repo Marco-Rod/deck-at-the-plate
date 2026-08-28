@@ -777,6 +777,13 @@ async def select_pitch(
     En PvE, tras registrar el picheo del jugador humano (Bot inning), la CPU ejecuta
     su swing automáticamente y resuelve la jugada completa.
     """
+    # ⭐ DEBUG: Verificar que los datos llegan correctamente
+    print(f"🎯 [DEBUG] Endpoint /pitch recibió:")
+    print(f"   game_id: {game_id}")
+    print(f"   payload.pitch_type: {payload.pitch_type}")
+    print(f"   payload.zone: {payload.zone}")
+    print(f"   current_user_id: {current_user_id}")
+    
     game = db.query(GameSession).filter(GameSession.id == game_id).first()
     if not game:
         raise HTTPException(status_code=404, detail="Sesión de juego no encontrada.")
@@ -785,12 +792,20 @@ async def select_pitch(
 
     state = dict(game.state_data or {})
     active_pitcher_id = state.get("active_pitcher")
+    
+    print(f"🎯 [DEBUG] active_pitcher_id: {active_pitcher_id}")
+    
     if active_pitcher_id:
         pitcher_card = db.query(PlayerCardModel).filter(PlayerCardModel.id == active_pitcher_id).first()
+        print(f"🎯 [DEBUG] pitcher_card: {pitcher_card.name if pitcher_card else 'NOT FOUND'}")
+        
         if pitcher_card and payload.pitch_type != "IBB":
             # Validar que existe en repertorio
             pitch_stats = pitcher_card.get_pitch_stats(payload.pitch_type)
+            print(f"🎯 [DEBUG] pitch_stats para '{payload.pitch_type}': {pitch_stats}")
+            
             if not pitch_stats:
+                print(f"❌ [ERROR] El lanzador {pitcher_card.name} no tiene '{payload.pitch_type}' en repertorio")
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"El lanzador {pitcher_card.name} no tiene el picheo '{payload.pitch_type}' en su repertorio."
@@ -798,6 +813,7 @@ async def select_pitch(
             
             # ⭐ Validar que no exceda máximo de 4 pitcheos
             if not pitcher_card.validate_repertoire():
+                print(f"❌ [ERROR] Repertorio inválido para {pitcher_card.name}")
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"El lanzador {pitcher_card.name} tiene un repertorio inválido (máximo 4 pitcheos únicos)."
@@ -809,6 +825,7 @@ async def select_pitch(
     }
     game.state_data = state
     db.commit()
+    print(f"✅ [DEBUG] State guardado con pitch: {state['current_pitch']}")
 
     await manager.broadcast_to_game(game_id, {
         "type": "PITCH_COMMITTED",

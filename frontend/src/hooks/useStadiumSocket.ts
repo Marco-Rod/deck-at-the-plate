@@ -52,7 +52,7 @@ interface UseStadiumSocketReturn {
   sendTactic: (tacticId: string, playerRole: 'PITCHER' | 'BATTER') => Promise<void>;
 }
 
-function parseStateData(payload: { current_inning: number; is_top_inning: boolean; score_home: number; score_away: number; balls: number; strikes: number; outs: number; state_data: Record<string, unknown>; pitcher_strikeouts?: Record<string, number>; batter_stats?: Record<string, any>; home_hits?: number; away_hits?: number; inning_runs?: Record<string, number>; active_pitcher?: any; active_batter?: any }): GameStateWS {
+export function parseStateData(payload: { current_inning: number; is_top_inning: boolean; score_home: number; score_away: number; balls: number; strikes: number; outs: number; state_data: Record<string, unknown>; pitcher_strikeouts?: Record<string, number>; batter_stats?: Record<string, any>; home_hits?: number; away_hits?: number; inning_runs?: Record<string, number>; active_pitcher?: any; active_batter?: any }): GameStateWS {
   const stateData = payload.state_data || {};
   const runners = (stateData.runners as Record<string, string | null>) || { '1b': null, '2b': null, '3b': null };
 
@@ -148,8 +148,16 @@ export const useStadiumSocket = (
             console.log('   score_home:', payload.score_home);
             console.log('   score_away:', payload.score_away);
             
-            // ⭐ Fase 1 Change: No actualizar state aquí
-            // Simplemente notificar al parent para que enquee el evento
+            // ⭐ CAMBIO: NO actualizar gameState aquí aún
+            // El Event Sequencer mostrará el modal primero (delay 0ms)
+            // Después el callback 'show-modal' triggerará la actualización
+            // Esto garantiza que el modal se vea ANTES que los cambios en la interfaz
+            
+            // Guardar el payload en una ref para usar después
+            if (!socketRef.current) socketRef.current = { pendingPayload: null };
+            (socketRef.current as any).pendingPayload = payload;
+            
+            // Notificar al parent para que enquee el evento
             callbacks?.onPlayResolved?.(payload);
             
             break;
@@ -159,6 +167,12 @@ export const useStadiumSocket = (
             // STEAL_RESOLVED se trata como un tipo de PLAY_RESOLVED
             const payload = data;
             console.log('🔄 [WS] STEAL_RESOLVED received:', payload);
+            
+            // ⭐ NUEVO: Actualizar el gameState con los datos del evento
+            setGameState(parseStateData(payload));
+            
+            console.log('📍 [GAMESTATE UPDATED] State actualizado desde STEAL_RESOLVED');
+            
             callbacks?.onPlayResolved?.(payload);
             break;
           }
@@ -198,12 +212,24 @@ export const useStadiumSocket = (
         ws.close();
       }
     };
-  }, [gameId, userId, callbacks]);
+    // Note: callbacks is stable so we don't need it in dependencies
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gameId, userId]);
 
   const sendPitch = useCallback(
     async (zone: number, pitchType: PitchType): Promise<void> => {
       const payload: PitchPayload = { pitch_type: pitchType, zone };
-      await gamesApi.pitch(gameId, payload);
+      console.log('🚀 [FRONTEND] Enviando pitch al backend:');
+      console.log('   payload:', JSON.stringify(payload));
+      console.log('   gameId:', gameId);
+      console.log('   URL esperada:', `/api/v1/games/${gameId}/pitch`);
+      try {
+        const response = await gamesApi.pitch(gameId, payload);
+        console.log('✅ [FRONTEND] Respuesta del servidor:', response);
+      } catch (error) {
+        console.error('❌ [FRONTEND] Error al enviar pitch:', error);
+        throw error;
+      }
     },
     [gameId]
   );

@@ -24,7 +24,20 @@
  */
 
 import { useRef, useState, useEffect, useCallback } from 'react';
-import { v4 as nanoid } from 'uuid';
+
+/**
+ * Simple ID generator (no external dependencies)
+ */
+const generateId = (): string => {
+  return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+};
+
+/**
+ * Calculate the maximum delay from event sequence steps
+ */
+const getMaxStepDelay = (steps: Array<{ name: string; delay: number }>): number => {
+  return Math.max(...steps.map(s => s.delay), 0);
+};
 
 /**
  * Define qué ocurre en cada tipo de evento y en qué orden
@@ -101,14 +114,14 @@ export const EVENT_SEQUENCES = {
     displayDuration: 1800,
     steps: [
       { name: 'show-modal', delay: 0 },
-      { name: 'update-count', delay: 1900 },
+      { name: 'update-balls', delay: 1900 },
     ],
   },
   STRIKE: {
     displayDuration: 1800,
     steps: [
       { name: 'show-modal', delay: 0 },
-      { name: 'update-count', delay: 1900 },
+      { name: 'update-strikes', delay: 1900 },
     ],
   },
   PITCHER_CHANGED: {
@@ -117,6 +130,30 @@ export const EVENT_SEQUENCES = {
       { name: 'show-modal', delay: 0 },
       { name: 'update-pitcher-card', delay: 2100 },
       { name: 'reset-pitch-selector', delay: 2150 },
+    ],
+  },
+  FOUL: {
+    displayDuration: 1800,
+    steps: [
+      { name: 'show-modal', delay: 0 },
+      { name: 'update-strikes', delay: 1900 },
+    ],
+  },
+  WALK: {
+    displayDuration: 2400,
+    steps: [
+      { name: 'show-modal', delay: 0 },
+      { name: 'update-runners', delay: 1600 },
+      { name: 'load-next-batter', delay: 1800 },
+    ],
+  },
+  DOUBLE_PLAY: {
+    displayDuration: 2600,
+    steps: [
+      { name: 'show-modal', delay: 0 },
+      { name: 'update-outs', delay: 2700 },
+      { name: 'update-runners', delay: 2800 },
+      { name: 'check-inning-end', delay: 2900 },
     ],
   },
 };
@@ -165,18 +202,28 @@ export const useEventSequencer = (): UseEventSequencerReturn => {
    * Agregar un evento a la queue
    */
   const enqueueEvent = useCallback((type: keyof typeof EVENT_SEQUENCES, payload: any) => {
-    const newEvent: QueuedGameEvent = {
-      id: nanoid(),
-      type,
-      payload,
-      createdAt: Date.now(),
-      order: queue.length,
-      status: 'pending',
-    };
+    const MAX_QUEUE_SIZE = 50;
+    
+    setQueue(prev => {
+      // Evitar que la queue crezca indefinidamente
+      if (prev.length >= MAX_QUEUE_SIZE) {
+        console.warn(`⚠️  [EVENT QUEUE] Queue full (${prev.length}), dropping oldest event`);
+        prev = prev.slice(1);
+      }
 
-    console.log(`📤 [EVENT QUEUE] Enqueued: ${type} (order: ${newEvent.order})`);
-    setQueue(prev => [...prev, newEvent]);
-  }, [queue.length]);
+      const newEvent: QueuedGameEvent = {
+        id: generateId(),
+        type,
+        payload,
+        createdAt: Date.now(),
+        order: prev.length,
+        status: 'pending',
+      };
+
+      console.log(`📤 [EVENT QUEUE] Enqueued: ${type} (order: ${newEvent.order}, queue size: ${prev.length + 1})`);
+      return [...prev, newEvent];
+    });
+  }, []);
 
   /**
    * Registrar un callback para un step específico
@@ -207,12 +254,19 @@ export const useEventSequencer = (): UseEventSequencerReturn => {
 
     // Ejecutar cada step en su momento exacto
     sequence.steps.forEach(step => {
-      const timer = setTimeout(async () => {
+      const timer = setTimeout(() => {
         const callback = stepCallbacksRef.current.get(step.name);
         if (callback) {
           try {
             console.log(`  📍 [STEP] ${step.name} (delay: ${step.delay}ms) - executing callback`);
-            await callback(event.payload, step.name);
+            // Execute callback without awaiting in setTimeout
+            // If it's a promise, let it resolve independently
+            const result = callback(event.payload, step.name);
+            if (result instanceof Promise) {
+              result.catch(err => {
+                console.error(`  ❌ [STEP] Error in ${step.name}:`, err);
+              });
+            }
           } catch (err) {
             console.error(`  ❌ [STEP] Error in ${step.name}:`, err);
           }
@@ -224,6 +278,10 @@ export const useEventSequencer = (): UseEventSequencerReturn => {
       timersRef.current.set(`${event.id}-${step.name}`, timer);
     });
 
+    // Calculate completion time based on maximum step delay (Error #2 fix)
+    const maxStepDelay = getMaxStepDelay(sequence.steps);
+    const eventCompletionTime = maxStepDelay + 500; // 500ms buffer after last step
+
     // Cuando el evento se completa, removerlo de la queue y procesar el siguiente
     const completeTimer = setTimeout(() => {
       console.log(`✅ [EVENT SEQUENCER] Event completed: ${event.type}`);
@@ -232,7 +290,7 @@ export const useEventSequencer = (): UseEventSequencerReturn => {
       setCurrentEvent(null);
       processingRef.current = false;
       
-      // Limpiar todos los timers de este evento
+      // Limpiar todos los timers de este evento específicamente (Error #5 fix)
       Array.from(timersRef.current.keys()).forEach(key => {
         if (key.startsWith(event.id)) {
           const timer = timersRef.current.get(key);
@@ -240,18 +298,19 @@ export const useEventSequencer = (): UseEventSequencerReturn => {
           timersRef.current.delete(key);
         }
       });
-    }, sequence.displayDuration + 1000); // Esperar a que terminen todos los steps
+    }, eventCompletionTime);
 
     timersRef.current.set(`${event.id}-complete`, completeTimer);
 
     return () => {
-      // Cleanup: cancelar todos los timers si el efecto se desmonta
+      // Cleanup: cancelar solo los timers de este evento específico
       Array.from(timersRef.current.keys()).forEach(key => {
-        const timer = timersRef.current.get(key);
-        if (timer) clearTimeout(timer);
+        if (key.startsWith(event.id)) {
+          const timer = timersRef.current.get(key);
+          if (timer) clearTimeout(timer);
+          timersRef.current.delete(key);
+        }
       });
-      timersRef.current.clear();
-      processingRef.current = false;
     };
   }, [queue]);
 

@@ -33,6 +33,9 @@ function _buildHeaders(extra = {}) {
   const token = localStorage.getItem('jwt_token');
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
+    console.log('🔐 [API] Token adjuntado:', token.substring(0, 20) + '...');
+  } else {
+    console.warn('⚠️  [API] ⚠️  NO HAY TOKEN EN LOCALSTORAGE - Solicitud sin autenticación');
   }
   return headers;
 }
