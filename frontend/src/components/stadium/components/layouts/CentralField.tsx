@@ -40,6 +40,7 @@ export const CentralField: React.FC<CentralFieldProps & {
   gameId?: string;
   userId?: string;
   fatigueLevel?: number;
+  pitchCount?: number;
   onPitcherChanged?: (newPitcher: any) => void;
 }> = ({
   role,
@@ -63,11 +64,26 @@ export const CentralField: React.FC<CentralFieldProps & {
   gameId,
   userId,
   fatigueLevel = 0,
+  pitchCount = 0,
   onPitcherChanged,
 }) => {
   const [showChangePitcherModal, setShowChangePitcherModal] = useState(false);
   const [availablePitchers, setAvailablePitchers] = useState<any[]>([]);
   const [isLoadingPitchers, setIsLoadingPitchers] = useState(false);
+  const [showMinPitchesHint, setShowMinPitchesHint] = useState(false);
+
+  const MIN_PITCHES_TO_CHANGE = 5;
+  const canChangePitcher = pitchCount >= MIN_PITCHES_TO_CHANGE;
+
+  const handleClickPitcherCard = () => {
+    if (!canChangePitcher) {
+      // Mostrar hint brevemente
+      setShowMinPitchesHint(true);
+      setTimeout(() => setShowMinPitchesHint(false), 2000);
+      return;
+    }
+    setShowChangePitcherModal(true);
+  };
 
   // Cargar pitchers disponibles cuando se abre el modal
   useEffect(() => {
@@ -138,14 +154,39 @@ export const CentralField: React.FC<CentralFieldProps & {
       <div className="w-full flex flex-col sm:flex-row justify-center items-center gap-1 sm:gap-2 md:gap-4 lg:gap-6 flex-wrap">
         {/* PITCHER CARD - Responsive sizing */}
         <div className="flex-shrink-0 w-24 sm:w-32 md:w-40 lg:w-56 flex items-start justify-center">
-          <PlayerCard
-            player={pitcherCard}
-            role="PITCHER"
-            disablePulse={true}
-            size="sm"
-            fatigueLevel={fatigueLevel} // ⭐ MEJORADO: Pasar fatiga real
-            onClickPitcher={() => setShowChangePitcherModal(true)}
-          />
+          <div className="relative">
+            <PlayerCard
+              player={pitcherCard}
+              role="PITCHER"
+              disablePulse={true}
+              size="sm"
+              fatigueLevel={fatigueLevel}
+              onClickPitcher={handleClickPitcherCard}
+            />
+
+            {/* Indicador de lanzamientos mínimos — visible cuando no puede cambiarse */}
+            {role === 'PITCHER' && !canChangePitcher && pitchCount > 0 && (
+              <div className="absolute -bottom-5 left-0 right-0 flex justify-center pointer-events-none">
+                <span className="text-[9px] font-mono text-[#A89968]/70 whitespace-nowrap">
+                  {MIN_PITCHES_TO_CHANGE - pitchCount} lanz. para cambio
+                </span>
+              </div>
+            )}
+
+            {/* Hint animado cuando intenta abrir el modal sin cumplir el mínimo */}
+            {showMinPitchesHint && (
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
+                <div className="bg-[#0F1419]/95 border border-[#C5A059]/60 rounded-lg px-2 py-1.5 text-center shadow-lg">
+                  <p className="text-[10px] font-mono text-[#C5A059] font-bold leading-tight">
+                    Mín. {MIN_PITCHES_TO_CHANGE} lanzamientos
+                  </p>
+                  <p className="text-[9px] font-mono text-[#A89968] leading-tight">
+                    Faltan {MIN_PITCHES_TO_CHANGE - pitchCount}
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* PITCH ZONE GRID - Responsive */}

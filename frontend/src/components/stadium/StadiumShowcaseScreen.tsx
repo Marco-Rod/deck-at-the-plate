@@ -799,6 +799,7 @@ export const StadiumShowcaseScreen: React.FC<StadiumShowcaseScreenProps> = ({
             gameId={gameId ?? undefined}
             userId={userId}
             fatigueLevel={gameState?.active_pitcher?.fatigue_level ?? 0}
+            pitchCount={gameState?.active_pitcher?.pitch_count ?? 0}
             onPitcherChanged={(newPitcher) => {
               console.log('🔄 [onPitcherChanged] Fallback local recibido:', newPitcher?.name);
               // El WS PITCHER_CHANGED es la fuente principal.

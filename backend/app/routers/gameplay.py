@@ -745,6 +745,19 @@ async def change_pitcher(game_id: str, payload: ChangePitcherRequest, db: Sessio
         )
 
     state = dict(game.state_data or {})
+
+    # ── Validar mínimo de lanzamientos antes de permitir el cambio ──────────
+    MIN_PITCHES_TO_CHANGE = 5
+    active_pitcher_id = state.get("active_pitcher")
+    pitch_counts_check: dict = state.get("pitch_counts", {})
+    current_pitch_count = pitch_counts_check.get(active_pitcher_id, 0) if active_pitcher_id else 0
+
+    if current_pitch_count < MIN_PITCHES_TO_CHANGE:
+        raise HTTPException(
+            status_code=400,
+            detail=f"El lanzador debe haber lanzado al menos {MIN_PITCHES_TO_CHANGE} pitches. Lleva {current_pitch_count}."
+        )
+
     old_pitcher_id = state.get("active_pitcher")
     state["active_pitcher"] = payload.new_pitcher_id
 
