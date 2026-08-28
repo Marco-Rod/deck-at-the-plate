@@ -537,10 +537,14 @@ export const StadiumShowcaseScreen: React.FC<StadiumShowcaseScreenProps> = ({
   // Cuando el backend confirma el cambio, actualizamos la carta, reseteamos
   // el pitch_count, la fatiga, y el selectedPitch al primer lanzamiento del nuevo pitcher.
   useEffect(() => {
-    if (!pitcherChanged) return;
+    if (!pitcherChanged) {
+      console.log('🔄 [PITCHER_CHANGED] Efecto ejecutado pero pitcherChanged es null/undefined');
+      return;
+    }
 
     const { newPitcher } = pitcherChanged;
     console.log('🔄 [PITCHER_CHANGED] Actualizando carta del pitcher:', newPitcher?.name);
+    console.log('🔄 [PITCHER_CHANGED] pitcherChanged object:', pitcherChanged);
     console.log('🔄 [PITCHER_CHANGED] Datos recibidos:', {
       id: newPitcher?.id,
       name: newPitcher?.name,
@@ -570,6 +574,7 @@ export const StadiumShowcaseScreen: React.FC<StadiumShowcaseScreenProps> = ({
       pitch_count: 0,
       fatigue_level: 0,
     });
+    console.log('🔄 [PITCHER_CHANGED] setPitcherCard() llamado con ID:', newPitcher.id);
 
     // 2. Resetear el tipo de pitch seleccionado al primero del repertorio nuevo
     const repertoire = newPitcher.repertoire || newPitcher.stats?.repertoire || [];
@@ -582,7 +587,7 @@ export const StadiumShowcaseScreen: React.FC<StadiumShowcaseScreenProps> = ({
     setStrikeoutAnimationTrigger(false);
     console.log('🔄 [PITCHER_CHANGED] ✅ Actualización completada');
 
-  }, [pitcherChanged?.ts]);
+  }, [pitcherChanged]);
 
   // ── Fallback: si el gameState.active_pitcher cambió pero pitcherChanged aún no llegó ──
   // Esto asegura que el UI se sincronice incluso si el WS se retrasa

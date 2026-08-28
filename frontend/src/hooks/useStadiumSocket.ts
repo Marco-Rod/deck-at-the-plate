@@ -162,6 +162,7 @@ export const useStadiumSocket = (
 
       case 'PITCHER_CHANGED': {
         console.log('🔄 [WS] PITCHER_CHANGED recibido:', data);
+        console.log('🔄 [WS] Conexión activa, isConnected:', isConnected);
         console.log('🔄 [WS] new_pitcher datos:', {
           id: data.new_pitcher?.id,
           name: data.new_pitcher?.name,
@@ -175,13 +176,14 @@ export const useStadiumSocket = (
         if (data.new_pitcher) {
           console.log('🔄 [WS] Setting pitcherChanged signal with ts:', Date.now());
           setPitcherChanged({ newPitcher: data.new_pitcher, ts: Date.now() });
+          console.log('🔄 [WS] pitcherChanged signal set. New pitcher ID:', data.new_pitcher.id);
         }
         // También actualizar el gameState si viene state_data actualizado
         if (data.state_data) {
           console.log('🔄 [WS] Actualizando gameState con state_data');
           setGameState(prev => {
             if (!prev) return prev;
-            return {
+            const updated = {
               ...prev,
               activePitcherId: data.new_pitcher_id,
               active_pitcher: {
@@ -195,6 +197,8 @@ export const useStadiumSocket = (
                 active_pitcher: data.new_pitcher_id,
               },
             };
+            console.log('🔄 [WS] gameState actualizado. Nueva active_pitcher ID:', updated.active_pitcher?.id);
+            return updated;
           });
         }
         break;
