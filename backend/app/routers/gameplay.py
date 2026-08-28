@@ -870,7 +870,6 @@ async def execute_swing(
     # ⭐ CRÍTICO: Si no hay picheo y debería haber CPU pitcher, ejecutar CPU response aquí
     if not current_pitch:
         print(f"   ⚠️ No hay pitch. Verificando si CPU debería haber lanzado...")
-        from app.routers.gameplay import _is_cpu_turn, trigger_cpu_response_if_needed
         
         if _is_cpu_turn(game, state, "PITCHER"):
             print(f"   🤖 CPU debería haber lanzado! Ejecutando trigger ahora...")
