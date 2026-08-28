@@ -31,11 +31,13 @@ export interface PlayerData {
   overall: number;
   position: string;
   photo: string;
-  team?: string; // ⭐ NUEVO: Nombre del equipo
-  role: PlayerRole; // ⭐ NUEVO: Tipo de jugador (PITCHER o BATTER)
-  rarity?: string; // ⭐ NUEVO: Rareza de la carta (DIAMOND, GOLD, SILVER, BRONZE, COMMON)
+  team?: string;
+  role: PlayerRole;
+  rarity?: string;
   repertoire?: { pitch_type: string; velocity: number; control: number; movement: number }[];
   stats: PlayerStat[];
+  pitch_count?: number; // ⭐ NUEVO: Número de lanzamientos realizados (solo para pitcher)
+  fatigue_level?: number; // ⭐ NUEVO: Porcentaje de fatiga 0-100 (solo para pitcher)
 }
 
 export interface TacticalCard {

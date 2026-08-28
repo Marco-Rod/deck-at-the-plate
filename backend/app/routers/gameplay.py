@@ -146,6 +146,19 @@ def _build_play_resolved_payload(game: GameSession, event: str, description: str
         if active_pitcher_id:
             pitcher_card = db.query(PlayerCardModel).filter(PlayerCardModel.id == active_pitcher_id).first()
             if pitcher_card:
+                # ⭐ NUEVO: Calcular pitch count y fatigue level
+                pitch_counts = state_with_role.get("pitch_counts", {})
+                current_pitch_count = pitch_counts.get(active_pitcher_id, 0)
+                
+                # Calcular fatigue level (0-100%)
+                PITCH_THRESHOLD = 60
+                FATIGUE_PENALTY_STEP = 15
+                if current_pitch_count > PITCH_THRESHOLD:
+                    extra_pitches = current_pitch_count - PITCH_THRESHOLD
+                    fatigue_level = min(100, (extra_pitches / (FATIGUE_PENALTY_STEP * 5)) * 100)
+                else:
+                    fatigue_level = 0.0
+                
                 active_pitcher_data = {
                     "id": pitcher_card.id,
                     "name": pitcher_card.name,
@@ -156,6 +169,8 @@ def _build_play_resolved_payload(game: GameSession, event: str, description: str
                     "team": pitcher_card.team.name if pitcher_card.team else "UNKNOWN",
                     "stats": format_player_stats(pitcher_card, "PITCHER"),
                     "role": "PITCHER",
+                    "pitch_count": current_pitch_count,  # ⭐ Número de lanzamientos
+                    "fatigue_level": fatigue_level,  # ⭐ Porcentaje de fatiga (0-100)
                 }
         
         # Obtener datos del bateador

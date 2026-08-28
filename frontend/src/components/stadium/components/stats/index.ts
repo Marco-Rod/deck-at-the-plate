@@ -5,3 +5,4 @@
 export { GameStatsPanel } from './GameStatsPanel';
 export { LineupPanel } from './LineupPanel';
 export { StrikeoutCounter } from './StrikeoutCounter';
+export { PitcherStaminaBar } from './PitcherStaminaBar';

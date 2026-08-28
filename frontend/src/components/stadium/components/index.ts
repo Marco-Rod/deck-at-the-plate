@@ -16,7 +16,7 @@ export { GameInfo } from './base';
 export { PitchZoneGrid, PitchSelector, StrikeZoneGrid } from './pitch';
 
 // Stats Components
-export { GameStatsPanel, LineupPanel, StrikeoutCounter } from './stats';
+export { GameStatsPanel, LineupPanel, StrikeoutCounter, PitcherStaminaBar } from './stats';
 
 // Tactical Components
 export { TacticalHand, TacticalCardItem, SubmitPlayButton } from './tactical';

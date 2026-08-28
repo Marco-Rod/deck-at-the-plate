@@ -24,6 +24,7 @@ export {
   TacticalCardItem,
   SubmitPlayButton,
   CentralField,
+  PitcherStaminaBar,
 } from './components';
 
 // Types

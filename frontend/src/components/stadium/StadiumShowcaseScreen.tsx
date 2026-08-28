@@ -8,6 +8,7 @@ import {
   GameStatsPanel,
   TacticalHand,
   CentralField,
+  PitcherStaminaBar,
 } from './index';
 import { PlayerCard } from './PlayerCard';
 import { PlayResultOverlay } from './PlayResultOverlay';
@@ -761,18 +762,32 @@ export const StadiumShowcaseScreen: React.FC<StadiumShowcaseScreenProps> = ({
 
         {/* PANEL DERECHO - Siempre STRIKEOUTS del pitcher (Responsive) */}
         <div className="relative z-10 w-full md:w-[450px] md:flex-shrink-0 order-2 md:order-3 overflow-y-auto max-h-[40vh] md:max-h-full">
-          <div className="bg-[#0A0D0F]/90 border border-[#C5A059]/30 rounded p-1 sm:p-2 md:p-3 text-xs md:text-sm">
-            <div className="text-[9px] sm:text-xs text-[#C5A059] font-bold mb-0.5 sm:mb-1 px-1">
-              🔥 K's
-            </div>
-            <GameStatsPanel
-              lineup={[]}
-              stats={{}}
-              isPitcher={true}
-              pitcherStrikeouts={getPitcherStrikeouts()}
-              pitcherName={getActivePitcherName()}
-              animateStrikeout={strikeoutAnimationTrigger}
+          <div className="bg-[#0A0D0F]/90 border border-[#C5A059]/30 rounded p-1 sm:p-2 md:p-3 text-xs md:text-sm flex flex-col gap-2 sm:gap-3">
+            {/* PITCHER STAMINA BAR - Nueva sección arriba de strikeouts */}
+            <PitcherStaminaBar
+              pitchCount={gameState?.active_pitcher?.pitch_count || 0}
+              fatigueLevel={gameState?.active_pitcher?.fatigue_level || 0}
+              basePitcherStats={{
+                velocidad: gameState?.active_pitcher?.stats?.find((s: any) => s.label === 'VELO')?.val || 75,
+                control: gameState?.active_pitcher?.stats?.find((s: any) => s.label === 'CTRL')?.val || 75,
+                movimiento: gameState?.active_pitcher?.stats?.find((s: any) => s.label === 'MVTO')?.val || 75,
+              }}
             />
+
+            {/* STRIKEOUTS COUNTER */}
+            <div>
+              <div className="text-[9px] sm:text-xs text-[#C5A059] font-bold mb-0.5 sm:mb-1 px-1">
+                🔥 K's
+              </div>
+              <GameStatsPanel
+                lineup={[]}
+                stats={{}}
+                isPitcher={true}
+                pitcherStrikeouts={getPitcherStrikeouts()}
+                pitcherName={getActivePitcherName()}
+                animateStrikeout={strikeoutAnimationTrigger}
+              />
+            </div>
           </div>
         </div>
       </main>
