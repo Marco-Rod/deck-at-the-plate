@@ -153,11 +153,11 @@ export const PlayerCard: React.FC<PlayerCardProps> = ({
       whileTap={animationConfig.whileTap}
     >
       {/* HEADER: Tier + OVR - Responsive sizing */}
-      <div className="flex justify-between items-center border-b pb-1 sm:pb-1.5 md:pb-2 mb-2 md:mb-3" style={{ borderColor: tierConfig.accentColor }}>
-        <span className={`font-mono ${headerSize} font-bold tracking-wider uppercase`} style={{ color: tierConfig.accentColor }}>
-          {tierConfig.tierLabel.substring(0, 3)}
+      <div className="flex justify-between items-center border-b pb-1 sm:pb-1.5 md:pb-2 mb-2 md:mb-3 gap-1 w-full" style={{ borderColor: tierConfig.accentColor }}>
+        <span className={`font-mono ${headerSize} font-bold tracking-wider uppercase truncate flex-1`} style={{ color: tierConfig.accentColor }}>
+          {tierConfig.tierLabel}
         </span>
-        <span className={`font-mono text-sm sm:text-base md:text-lg font-bold`} style={{ color: tierConfig.accentColor }}>
+        <span className={`font-mono text-sm sm:text-base md:text-lg font-bold flex-shrink-0`} style={{ color: tierConfig.accentColor }}>
           {player?.overall ?? '--'}
         </span>
       </div>
