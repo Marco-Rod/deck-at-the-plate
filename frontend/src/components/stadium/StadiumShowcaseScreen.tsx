@@ -17,6 +17,7 @@ import { InningTransitionModal } from './InningTransitionModal';
 import { GameIntroModal } from './GameIntroModal';
 import { GameplayDeckAndReveal } from './GameplayDeckAndReveal';
 import { QuitGameModal } from './QuitGameModal';
+import { RivalPitcherChangeModal } from './RivalPitcherChangeModal';
 import { useStadiumSocket } from '../../hooks/useStadiumSocket';
 import { games as gamesApi, cards as cardsApi, user as userApi } from '../../utils/api';
 
@@ -76,6 +77,13 @@ export const StadiumShowcaseScreen: React.FC<StadiumShowcaseScreenProps> = ({
   // ⭐ NUEVO: Estados para el modal de finalizar partido
   const [showQuitModal, setShowQuitModal] = useState(false);
   const [isQuittingGame, setIsQuittingGame] = useState(false);
+
+  // ⭐ NUEVO: Estados para el modal del cambio de pitcher rival
+  const [showRivalPitcherChangeModal, setShowRivalPitcherChangeModal] = useState(false);
+  const [rivalPitcherChangeData, setRivalPitcherChangeData] = useState<{
+    oldPitcher: any;
+    newPitcher: any;
+  } | null>(null);
   
   const lastProcessedInningCompletedRef = useRef<number | null>(null);
 
@@ -589,6 +597,53 @@ export const StadiumShowcaseScreen: React.FC<StadiumShowcaseScreenProps> = ({
 
   }, [pitcherChanged]);
 
+  // ⭐ NUEVO: Mostrar modal cuando el rival (CPU) cambia de pitcher
+  useEffect(() => {
+    if (!pitcherChanged) return;
+
+    const { newPitcher, oldPitcher } = pitcherChanged;
+    
+    // Verificar si es el pitcher del usuario (actual) o del rival
+    // Si es el mismo que está en pitcherCard, es nuestro pitcher (no mostrar modal)
+    // Si es diferente, es del rival y debemos mostrar notificación
+    
+    if (pitcherCard?.id === newPitcher?.id) {
+      // Es nuestro pitcher, no mostrar modal
+      console.log('🔄 [PITCHER_CHANGED] Es nuestro pitcher, no mostrar modal');
+      return;
+    }
+
+    // Es el pitcher del rival - mostrar modal
+    console.log('🔄 [RIVAL PITCHER CHANGE] El rival cambió de pitcher:', {
+      oldPitcher: oldPitcher?.name,
+      newPitcher: newPitcher?.name,
+    });
+
+    setRivalPitcherChangeData({
+      oldPitcher: {
+        id: oldPitcher?.id,
+        name: oldPitcher?.name,
+        number: oldPitcher?.number,
+        overall: oldPitcher?.overall,
+        position: oldPitcher?.position,
+        team: oldPitcher?.team,
+        rarity: oldPitcher?.rarity,
+      },
+      newPitcher: {
+        id: newPitcher?.id,
+        name: newPitcher?.name,
+        number: newPitcher?.number,
+        overall: newPitcher?.overall,
+        position: newPitcher?.position,
+        team: newPitcher?.team,
+        rarity: newPitcher?.rarity,
+      },
+    });
+
+    setShowRivalPitcherChangeModal(true);
+
+  }, [pitcherChanged, pitcherCard?.id]);
+
   // ── Fallback: si el gameState.active_pitcher cambió pero pitcherChanged aún no llegó ──
   // Esto asegura que el UI se sincronice incluso si el WS se retrasa
   useEffect(() => {
@@ -977,6 +1032,19 @@ export const StadiumShowcaseScreen: React.FC<StadiumShowcaseScreenProps> = ({
         onCancel={() => setShowQuitModal(false)}
         isLoading={isQuittingGame}
       />
+
+      {/* Modal de Cambio de Pitcher del Rival */}
+      {rivalPitcherChangeData && (
+        <RivalPitcherChangeModal
+          isOpen={showRivalPitcherChangeModal}
+          oldPitcher={rivalPitcherChangeData.oldPitcher}
+          newPitcher={rivalPitcherChangeData.newPitcher}
+          onAccept={() => {
+            console.log('✅ [RIVAL PITCHER CHANGE] Usuario aceptó notificación');
+            setShowRivalPitcherChangeModal(false);
+          }}
+        />
+      )}
     </div>
   );
 };
