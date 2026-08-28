@@ -85,23 +85,28 @@ def advance_runners(
             
             if random.random() < dp_chance:
                 # ✅ DOBLE PLAY: corredor en 1B out en 2B, bateador out en 1B
-                # El corredor en 2B (si existe) avanza a 3B
-                # El corredor en 3B (si existe) anota (fuerza anotación en DP)
-                print(f"⚾ [DOUBLE PLAY] ¡Doble play! Corredor en 1B ({r1}) eliminado + bateador out")
+                # Regla de doble play:
+                # - Corredor en 1B → OUT en 2B (fuerza)
+                # - Bateador → OUT en 1B
+                # - Corredor en 2B → Avanza a 3B (fuerza de 1B out)
+                # - Corredor en 3B → Anota (fuerza por out en 1B y 2B)
+                print(f"⚾ [DOUBLE PLAY] ¡Doble play! Corredor en 1B ({r1}) out en 2B + bateador out en 1B")
                 event_adjusted = "DOUBLE_PLAY"
                 
-                # Corredor en 3B anota por fuerza en doble play
+                # Aplicar fuerza y anotación:
+                # r3 anota siempre en DP (fuerza de dos outs)
                 if r3:
                     runs = 1
-                    new_runners = {"1b": None, "2b": r2, "3b": None}
-                # Corredor en 2B avanza a 3B
-                elif r2:
-                    runs = 0
-                    new_runners = {"1b": None, "2b": None, "3b": r2}
-                # Solo el corredor en 1B (que es out)
                 else:
                     runs = 0
-                    new_runners = {"1b": None, "2b": None, "3b": None}
+                
+                # r2 avanza a 3B (fuerza de 1B out)
+                # r1 es out en 2B
+                new_runners = {
+                    "1b": None,           # Bateador out en 1B
+                    "2b": None,           # r1 out en 2B
+                    "3b": r2 if r2 else None  # r2 avanza a 3B o queda vacío
+                }
             else:
                 # ❌ No se logró el doble play, solo out del bateador
                 # Los corredores se quedan donde están (no avanzan en un ground out)
