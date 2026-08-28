@@ -842,6 +842,13 @@ def get_available_pitchers(
 
     print(f"🔍 Pitchers en inventario: {len(inventory_pitchers)}")
 
+    # ── Pitchers que ya lanzaron en este partido ────────────────────────────
+    # pitch_counts guarda {pitcher_id: count} para todo pitcher que haya lanzado.
+    pitch_counts: dict = state.get("pitch_counts", {})
+    used_pitcher_ids = set(pitch_counts.keys())
+
+    print(f"🔍 Pitchers ya usados en el partido: {used_pitcher_ids}")
+
     available_pitchers = [
         {
             "id": card.id,
@@ -853,6 +860,7 @@ def get_available_pitchers(
             "team": card.team.name if card.team else "UNKNOWN",
             "stats": format_player_stats(card, "PITCHER"),
             "role": "PITCHER",
+            "already_used": card.id in used_pitcher_ids,  # ← clave del filtro
         }
         for card in inventory_pitchers
     ]

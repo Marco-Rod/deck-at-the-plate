@@ -2,11 +2,16 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { PlayerData } from '../../types/stadium';
 
+// Extiende PlayerData con el campo de uso previo que viene del backend
+interface BullpenPitcher extends PlayerData {
+  already_used?: boolean;
+}
+
 interface ChangePitcherModalProps {
   isOpen: boolean;
   onClose: () => void;
   currentPitcher: PlayerData | null;
-  availablePitchers: PlayerData[];
+  availablePitchers: BullpenPitcher[];
   onConfirm: (newPitcherId: string) => Promise<void>;
   isLoading?: boolean;
 }
@@ -22,6 +27,7 @@ const RARITY_COLOR: Record<string, string> = {
 /**
  * Modal para cambiar el lanzador por uno disponible del bullpen.
  * Layout: modal ancho con filas compactas — sin scroll en la lista.
+ * Los pitchers ya usados en el partido aparecen deshabilitados con badge "YA USADO".
  */
 export const ChangePitcherModal: React.FC<ChangePitcherModalProps> = ({
   isOpen,
@@ -53,6 +59,7 @@ export const ChangePitcherModal: React.FC<ChangePitcherModalProps> = ({
   };
 
   const selectedPitcher = availablePitchers.find(p => p.id === selectedPitcherId);
+  const freshCount = availablePitchers.filter(p => !p.already_used).length;
 
   return (
     <AnimatePresence>
@@ -67,7 +74,7 @@ export const ChangePitcherModal: React.FC<ChangePitcherModalProps> = ({
             className="fixed inset-0 bg-black/75 z-50"
           />
 
-          {/* Modal — max-w-3xl para más espacio horizontal */}
+          {/* Modal */}
           <motion.div
             initial={{ opacity: 0, scale: 0.95, y: 16 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -91,20 +98,17 @@ export const ChangePitcherModal: React.FC<ChangePitcherModalProps> = ({
                 </button>
               </div>
 
-              {/* ── Body: columnas lado a lado en md+ ──────────────────── */}
+              {/* ── Body ───────────────────────────────────────────────── */}
               <div className="flex flex-col md:flex-row gap-0 divide-y md:divide-y-0 md:divide-x divide-[#C5A059]/20">
 
-                {/* Columna izquierda — pitcher actual + seleccionado */}
+                {/* Columna izquierda — pitcher actual + preview seleccionado */}
                 <div className="md:w-56 flex-shrink-0 px-5 py-4 flex flex-col gap-4">
-                  {/* Pitcher actual */}
                   <div>
                     <p className="text-[10px] font-mono text-[#C5A059] uppercase tracking-widest mb-2">
                       En el montículo
                     </p>
-                    <PitcherMiniCard pitcher={currentPitcher} highlight={false} dimmed />
+                    <PitcherMiniCard pitcher={currentPitcher} dimmed />
                   </div>
-
-                  {/* Preview del seleccionado */}
                   <div>
                     <p className="text-[10px] font-mono text-[#C5A059] uppercase tracking-widest mb-2">
                       Seleccionado
@@ -119,57 +123,79 @@ export const ChangePitcherModal: React.FC<ChangePitcherModalProps> = ({
                   </div>
                 </div>
 
-                {/* Columna derecha — lista de disponibles */}
+                {/* Columna derecha — bullpen */}
                 <div className="flex-1 px-5 py-4 min-h-0">
                   <p className="text-[10px] font-mono text-[#C5A059] uppercase tracking-widest mb-3">
-                    Bullpen disponible ({availablePitchers.length})
+                    Bullpen —{' '}
+                    <span className="text-[#E6DFD3]">{freshCount}</span> disponibles
+                    {availablePitchers.length > freshCount && (
+                      <span className="text-[#A89968]">
+                        {' '}· {availablePitchers.length - freshCount} ya usados
+                      </span>
+                    )}
                   </p>
 
                   {availablePitchers.length === 0 ? (
                     <div className="flex items-center justify-center h-32 text-[#A89968] text-sm font-mono">
-                      No hay relevistas disponibles
+                      No hay relevistas en el bullpen
                     </div>
                   ) : (
-                    /* Grid de filas compactas — 2 columnas en md */
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       {availablePitchers.map((pitcher) => {
                         const isSelected = selectedPitcherId === pitcher.id;
+                        const isUsed = !!pitcher.already_used;
                         const rarityClass = RARITY_COLOR[pitcher.rarity || 'COMMON'];
                         const pitchStats = pitcher.stats?.slice(0, 3) ?? [];
 
                         return (
                           <motion.button
                             key={pitcher.id}
-                            onClick={() => setSelectedPitcherId(pitcher.id)}
-                            whileTap={{ scale: 0.97 }}
+                            onClick={() => !isUsed && setSelectedPitcherId(pitcher.id)}
+                            whileTap={isUsed ? {} : { scale: 0.97 }}
+                            disabled={isUsed}
+                            title={isUsed ? 'Este lanzador ya fue usado en el partido' : undefined}
                             className={`relative text-left px-3 py-2.5 rounded-lg border transition-all duration-150 ${
-                              isSelected
-                                ? 'border-[#FFD700] bg-[#FFD700]/10 shadow-[0_0_8px_rgba(255,215,0,0.25)]'
-                                : 'border-[#C5A059]/25 bg-[#121619] hover:border-[#C5A059]/55 hover:bg-[#1A1F24]'
+                              isUsed
+                                ? 'border-[#C5A059]/10 bg-[#0C0F12] opacity-45 cursor-not-allowed'
+                                : isSelected
+                                  ? 'border-[#FFD700] bg-[#FFD700]/10 shadow-[0_0_8px_rgba(255,215,0,0.25)]'
+                                  : 'border-[#C5A059]/25 bg-[#121619] hover:border-[#C5A059]/55 hover:bg-[#1A1F24]'
                             }`}
                           >
                             {/* Row 1: nombre + OVR */}
                             <div className="flex items-center justify-between gap-2 mb-1">
-                              <span className="font-bold text-sm text-[#E6DFD3] truncate leading-tight">
+                              <span className={`font-bold text-sm truncate leading-tight ${
+                                isUsed ? 'text-[#5A5A5A]' : 'text-[#E6DFD3]'
+                              }`}>
                                 #{pitcher.number} {pitcher.name}
                               </span>
-                              <span className={`text-lg font-black flex-shrink-0 ${isSelected ? 'text-[#FFD700]' : 'text-[#C5A059]'}`}>
+                              <span className={`text-lg font-black flex-shrink-0 ${
+                                isUsed ? 'text-[#4A4A4A]' : isSelected ? 'text-[#FFD700]' : 'text-[#C5A059]'
+                              }`}>
                                 {pitcher.overall}
                               </span>
                             </div>
 
-                            {/* Row 2: posición + rareza */}
-                            <div className="flex items-center gap-2 text-[11px] mb-1.5">
-                              <span className="bg-[#C5A059]/20 text-[#C5A059] font-mono font-bold px-1.5 py-0.5 rounded text-[10px]">
+                            {/* Row 2: posición + rareza / badge usado */}
+                            <div className="flex items-center gap-2 text-[11px] mb-1.5 flex-wrap">
+                              <span className={`font-mono font-bold px-1.5 py-0.5 rounded text-[10px] ${
+                                isUsed ? 'bg-[#2A2A2A] text-[#555]' : 'bg-[#C5A059]/20 text-[#C5A059]'
+                              }`}>
                                 {pitcher.position}
                               </span>
-                              <span className={`font-mono ${rarityClass}`}>
-                                {pitcher.rarity}
-                              </span>
+                              {isUsed ? (
+                                <span className="font-mono text-[10px] text-red-500/70 font-bold tracking-wide">
+                                  ✗ YA USADO
+                                </span>
+                              ) : (
+                                <span className={`font-mono ${rarityClass}`}>
+                                  {pitcher.rarity}
+                                </span>
+                              )}
                             </div>
 
-                            {/* Row 3: stats en línea */}
-                            {pitchStats.length > 0 && (
+                            {/* Row 3: stats (solo si disponible) */}
+                            {!isUsed && pitchStats.length > 0 && (
                               <div className="flex gap-3 text-[10px] text-[#A89968] font-mono">
                                 {pitchStats.map(stat => (
                                   <span key={stat.label}>
@@ -181,7 +207,7 @@ export const ChangePitcherModal: React.FC<ChangePitcherModalProps> = ({
                             )}
 
                             {/* Checkmark seleccionado */}
-                            {isSelected && (
+                            {isSelected && !isUsed && (
                               <span className="absolute top-2 right-2 text-[#FFD700] text-xs">✔</span>
                             )}
                           </motion.button>
@@ -194,7 +220,6 @@ export const ChangePitcherModal: React.FC<ChangePitcherModalProps> = ({
 
               {/* ── Footer ─────────────────────────────────────────────── */}
               <div className="px-6 py-4 border-t border-[#C5A059]/20 flex flex-col sm:flex-row items-center gap-3">
-                {/* Error inline */}
                 <AnimatePresence>
                   {error && (
                     <motion.p
