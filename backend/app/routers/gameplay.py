@@ -152,8 +152,10 @@ def _build_play_resolved_payload(game: GameSession, event: str, description: str
                     "number": pitcher_card.number,
                     "overall": pitcher_card.overall,
                     "position": pitcher_card.position,
+                    "rarity": pitcher_card.rarity.value if pitcher_card.rarity else "COMMON",
                     "team": pitcher_card.team.name if pitcher_card.team else "UNKNOWN",
                     "stats": format_player_stats(pitcher_card, "PITCHER"),
+                    "role": "PITCHER",
                 }
         
         # Obtener datos del bateador
@@ -166,8 +168,10 @@ def _build_play_resolved_payload(game: GameSession, event: str, description: str
                     "number": batter_card.number,
                     "overall": batter_card.overall,
                     "position": batter_card.position,
+                    "rarity": batter_card.rarity.value if batter_card.rarity else "COMMON",
                     "team": batter_card.team.name if batter_card.team else "UNKNOWN",
                     "stats": format_player_stats(batter_card, "BATTER"),
+                    "role": "BATTER",
                 }
     
     # ⭐ DEBUG

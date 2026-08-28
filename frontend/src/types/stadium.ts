@@ -31,6 +31,9 @@ export interface PlayerData {
   overall: number;
   position: string;
   photo: string;
+  team?: string; // ⭐ NUEVO: Nombre del equipo
+  role: PlayerRole; // ⭐ NUEVO: Tipo de jugador (PITCHER o BATTER)
+  rarity?: string; // ⭐ NUEVO: Rareza de la carta (DIAMOND, GOLD, SILVER, BRONZE, COMMON)
   repertoire?: { pitch_type: string; velocity: number; control: number; movement: number }[];
   stats: PlayerStat[];
 }
@@ -87,6 +90,8 @@ export interface PlayResolvedPayload {
   home_hits?: number; // ⭐ NUEVO
   away_hits?: number; // ⭐ NUEVO
   inning_runs?: Record<string, number>; // ⭐ NUEVO: {"1_true": 2, "1_false": 1}
+  active_pitcher?: PlayerData; // ⭐ NUEVO: Datos del pitcher para la tarjeta
+  active_batter?: PlayerData;  // ⭐ NUEVO: Datos del bateador para la tarjeta
 }
 
 export interface PitchCommittedPayload {
