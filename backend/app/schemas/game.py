@@ -68,8 +68,8 @@ class PlayResultResponse(BaseModel):
 
 
 class ChangePitcherRequest(BaseModel):
-    player_role: str = Field(..., description="Debe ser 'PITCHER'")
     new_pitcher_id: str = Field(..., description="ID de la carta del lanzador de relevo")
+    player_role: str = Field(default="PITCHER", description="Siempre 'PITCHER' — campo legado opcional")
 
 
 # Nuevo esquema para robo de base
