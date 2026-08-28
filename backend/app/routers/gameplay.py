@@ -788,17 +788,28 @@ def get_available_pitchers(game_id: str, db: Session = Depends(get_db)):
     Excluye el pitcher activo.
     No requiere autenticación ya que game_id es suficientemente aleatorio.
     """
+    print(f"🔍 [GET_AVAILABLE_PITCHERS] Recibido request")
+    print(f"🔍 game_id: {game_id} (type: {type(game_id).__name__})")
+    
     game = db.query(GameSession).filter(GameSession.id == game_id).first()
+    print(f"🔍 Buscando juego: {game_id}")
+    print(f"🔍 Juego encontrado: {game is not None}")
+    
     if not game:
+        print(f"❌ Juego NO encontrado para ID: {game_id}")
         raise HTTPException(status_code=404, detail="Sesión de juego no encontrada.")
 
     state = dict(game.state_data or {})
     current_pitcher_id = state.get("active_pitcher")
+    print(f"🔍 Active pitcher en estado: {current_pitcher_id}")
     
     # ⭐ SIMPLIFICADO: HOME siempre es el usuario (en PvE)
     team = game.home_team
+    print(f"🔍 Home team: {team}")
+    print(f"🔍 Home team ID: {team.id if team else None}")
     
     if not team:
+        print(f"❌ Team NO encontrado para game: {game_id}")
         raise HTTPException(status_code=404, detail="Equipo no encontrado.")
 
     # Obtener todas las cartas de pitcher del equipo
@@ -808,6 +819,8 @@ def get_available_pitchers(game_id: str, db: Session = Depends(get_db)):
         PlayerCardModel.position.in_(["SP", "RP", "TWP"]),
         PlayerCardModel.id != current_pitcher_id,  # Excluir pitcher activo
     ).all()
+
+    print(f"🔍 Pitchers encontrados: {len(pitcher_cards)}")
 
     for card in pitcher_cards:
         available_pitchers.append({
@@ -822,7 +835,7 @@ def get_available_pitchers(game_id: str, db: Session = Depends(get_db)):
             "role": "PITCHER",
         })
 
-    print(f"🔥 [AVAILABLE PITCHERS] {len(available_pitchers)} pitchers disponibles en bullpen (team: {team.name}, excluyendo {current_pitcher_id})")
+    print(f"✅ [AVAILABLE PITCHERS] {len(available_pitchers)} pitchers disponibles en bullpen (team: {team.name}, excluyendo {current_pitcher_id})")
 
     return {
         "status": "ok",

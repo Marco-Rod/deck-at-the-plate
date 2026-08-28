@@ -77,11 +77,21 @@ export const CentralField: React.FC<CentralFieldProps & {
   const loadAvailablePitchers = async () => {
     try {
       setIsLoadingPitchers(true);
+      console.log(`🔄 Cargando pitchers para gameId: ${gameId}`);
       const response = await gamesApi.getAvailablePitchers(gameId!);
-      console.log('📋 Pitchers disponibles:', response.data);
-      setAvailablePitchers(response.data?.available_pitchers || []);
+      
+      // Debug: Ver estructura completa de response
+      console.log('📋 Response completa:', response);
+      console.log('📋 Response type:', typeof response);
+      console.log('📋 Response keys:', Object.keys(response || {}));
+      
+      // La respuesta del backend viene directamente, no en response.data
+      const pitchers = response?.available_pitchers || [];
+      console.log(`✅ ${pitchers.length} pitchers cargados`);
+      setAvailablePitchers(pitchers);
     } catch (error) {
-      console.error('Error cargando pitchers:', error);
+      console.error('❌ Error cargando pitchers:', error);
+      console.error('Error details:', error instanceof Error ? error.message : String(error));
       setAvailablePitchers([]);
     } finally {
       setIsLoadingPitchers(false);

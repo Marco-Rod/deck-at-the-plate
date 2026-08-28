@@ -222,8 +222,11 @@ export const games = {
    * @param {string} gameId
    * @returns {Promise<{available_pitchers: Array}>}
    */
-  getAvailablePitchers: (gameId) =>
-    _request(`/api/v1/games/${gameId}/available-pitchers`),
+  getAvailablePitchers: (gameId) => {
+    const url = `/api/v1/games/${gameId}/available-pitchers`;
+    console.log(`📡 GET request a: ${url}`);
+    return _request(url, { method: 'GET' });
+  },
 
   /**
    * Intenta un robo de base.
