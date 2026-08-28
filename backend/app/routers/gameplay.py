@@ -850,10 +850,22 @@ async def execute_swing(
     state = dict(game.state_data or {})
     
     current_pitch = state.get("current_pitch")
-    print(f"   current_pitch value: {current_pitch}")
-    print(f"   current_pitch type: {type(current_pitch)}")
-    print(f"   current_pitch bool: {bool(current_pitch)}")
-    print(f"   Full state_data: {game.state_data}")
+    
+    # ⭐ CRÍTICO: Si no hay picheo y debería haber CPU pitcher, ejecutar CPU response aquí
+    if not current_pitch:
+        print(f"   ⚠️ No hay pitch. Verificando si CPU debería haber lanzado...")
+        from app.routers.gameplay import _is_cpu_turn, trigger_cpu_response_if_needed
+        
+        if _is_cpu_turn(game, state, "PITCHER"):
+            print(f"   🤖 CPU debería haber lanzado! Ejecutando trigger ahora...")
+            await trigger_cpu_response_if_needed(game, state, db, game_id)
+            # Recargar state después de que CPU lance
+            db.expunge_all()
+            game = db.query(GameSession).filter(GameSession.id == game_id).first()
+            db.refresh(game)
+            state = dict(game.state_data or {})
+            current_pitch = state.get("current_pitch")
+            print(f"   ✅ Después de trigger, current_pitch = {bool(current_pitch)}")
     
     if not current_pitch:
         print(f"❌ ERROR: No hay picheo previo en state")
