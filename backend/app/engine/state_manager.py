@@ -94,7 +94,16 @@ def process_at_bat_transition(
     # Excluye: STRIKEOUT (no mueve corredores)
     # Incluye: OUT_GROUND (puede ser double play), OUT_FLY, HIT_*, WALK, HOME_RUN
     if at_bat_ended and final_event not in ("STRIKEOUT",):
-        current_runners = state.get("runners", {"1b": None, "2b": None, "3b": None})
+        # Asegurar que runners tiene todas las claves necesarias
+        current_runners = state.get("runners", {})
+        if not isinstance(current_runners, dict):
+            current_runners = {}
+        
+        # Garantizar que existen todas las claves
+        for base in ["1b", "2b", "3b"]:
+            if base not in current_runners:
+                current_runners[base] = None
+        
         active_batter = state.get("active_batter", "BATTER")
 
         print(f"🏃 [RUNNER ADVANCE] event={final_event}, batter={active_batter}, runners_before={current_runners}")
@@ -102,6 +111,12 @@ def process_at_bat_transition(
         # IMPORTANTE: advance_runners ahora retorna 3 valores (runners, runs, event_adjusted)
         # El event_adjusted puede ser "DOUBLE_PLAY" si se logró un doble play
         updated_runners, runs_scored, event_adjusted = advance_runners(current_runners, final_event, active_batter)
+        
+        # Asegurar que el resultado también tiene todas las claves
+        for base in ["1b", "2b", "3b"]:
+            if base not in updated_runners:
+                updated_runners[base] = None
+        
         state["runners"] = updated_runners
 
         # Si fue doble play, sumar out adicional
@@ -222,7 +237,7 @@ def process_at_bat_transition(
 
     # --- Generar descripción según el evento ---
     if final_event == "DOUBLE_PLAY":
-        description = "¡Doble play! El corredor en primera fue eliminado y elbateador también."
+        description = "¡Doble play! El corredor en primera fue eliminado y el bateador también."
     elif final_event == "STRIKEOUT":
         description = "Strikeout! El bateador no pudo conectar."
     elif final_event == "OUT_GROUND":
@@ -241,5 +256,9 @@ def process_at_bat_transition(
         description = "Base por bolas."
     else:
         description = final_event  # Para otros eventos, usar el nombre del evento
+
+    # Añadir notificación de cambio de entrada si es necesario
+    if inning_ended:
+        description += " Tres outs registrados. Cambio de entrada."
 
     return at_bat_ended, inning_ended, final_event, description

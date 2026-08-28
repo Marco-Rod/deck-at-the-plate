@@ -135,8 +135,8 @@ def get_game_box_score(db: Session, game_id: str) -> dict:
                 "walks": 0,
             }
         
-        # Contar at-bats (cualquier evento es un AB excepto walks)
-        if event.event_type != "WALK":
+        # Contar at-bats (cualquier evento es un AB excepto walks y doble play sin movimiento)
+        if event.event_type not in ("WALK",):
             batters[event.batter_id]["at_bats"] += 1
         
         # Contar hits y sus tipos
@@ -156,6 +156,10 @@ def get_game_box_score(db: Session, game_id: str) -> dict:
             batters[event.batter_id]["strikeouts"] += 1
         elif event.event_type == "WALK":
             batters[event.batter_id]["walks"] += 1
+        elif event.event_type == "DOUBLE_PLAY":
+            # El bateador tiene un at-bat en doble play (ya contado arriba)
+            # No es un hit, así que no se suma a hits
+            pass
         
         # RBIs y carreras
         batters[event.batter_id]["rbi"] += event.rbi

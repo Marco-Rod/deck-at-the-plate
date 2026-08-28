@@ -24,7 +24,8 @@ class MockGameSession:
             "active_pitcher": "PITCHER_MOCK",
             "active_tactics": {"home": None, "away": None},
             "is_game_over": False,
-            "winner_message": ""
+            "winner_message": "",
+            "score_history": {},  # ✅ Inicializar score_history
         }
 
 def run_simulation():

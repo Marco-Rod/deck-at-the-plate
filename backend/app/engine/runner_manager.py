@@ -72,7 +72,7 @@ def advance_runners(
         # Las bases quedan vacías (new_runners en Nones)
 
     # --- OUTS EN JUEGO (OUT_GROUND, OUT_FLY) ---
-    #posible DOUBLE PLAY si hay corredor en 1B y es roletazo al cuadro
+    # Posible DOUBLE PLAY si hay corredor en 1B y es roletazo al cuadro
     elif event in ("OUT_GROUND", "OUT_FLY"):
         # Detectar doble play: corredor en 1B + roletazo al cuadro (OUT_GROUND)
         if event == "OUT_GROUND" and r1 is not None:
@@ -84,14 +84,27 @@ def advance_runners(
                 dp_chance = 0.65  # 65% con corredor en ambas
             
             if random.random() < dp_chance:
-                # ✅ DOBLE PLAY: corredor en 1B out, bateador out
+                # ✅ DOBLE PLAY: corredor en 1B out en 2B, bateador out en 1B
+                # El corredor en 2B (si existe) avanza a 3B
+                # El corredor en 3B (si existe) anota (fuerza anotación en DP)
                 print(f"⚾ [DOUBLE PLAY] ¡Doble play! Corredor en 1B ({r1}) eliminado + bateador out")
                 event_adjusted = "DOUBLE_PLAY"
-                runs = 0
-                # El corredor en 1B queda out, bases se limpian hasta donde corresponda
-                new_runners = {"1b": None, "2b": r2, "3b": r3} if r2 else {"1b": None, "2b": None, "3b": r3}
+                
+                # Corredor en 3B anota por fuerza en doble play
+                if r3:
+                    runs = 1
+                    new_runners = {"1b": None, "2b": r2, "3b": None}
+                # Corredor en 2B avanza a 3B
+                elif r2:
+                    runs = 0
+                    new_runners = {"1b": None, "2b": None, "3b": r2}
+                # Solo el corredor en 1B (que es out)
+                else:
+                    runs = 0
+                    new_runners = {"1b": None, "2b": None, "3b": None}
             else:
                 # ❌ No se logró el doble play, solo out del bateador
+                # Los corredores se quedan donde están (no avanzan en un ground out)
                 new_runners = {"1b": r1, "2b": r2, "3b": r3}
         else:
             # Sin corredor en 1B o fly ball → out normal sin avance

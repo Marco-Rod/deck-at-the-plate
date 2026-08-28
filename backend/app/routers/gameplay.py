@@ -330,18 +330,10 @@ async def _resolve_swing(
         )
 
     # --- 6. Transición de estado ---
-    at_bat_ended, inning_ended, event, event_description = process_at_bat_transition(game, raw_event, state)
+    at_bat_ended, inning_ended, event, description = process_at_bat_transition(game, raw_event, state)
 
-    # Si la descripción del evento se actualizó (ej. DOUBLE_PLAY), usarla
-    if event == "DOUBLE_PLAY":
-        description = event_description
-
-    if event == "STRIKEOUT":
-        description = "¡Tercer strike! Bateador ponchado."
-    elif event == "WALK":
-        description = "Cuatro bolas malas. Bateador toma base por bolas."
-    if inning_ended:
-        description += " Tres outs registrados. Cambio de entrada."
+    # La descripción ya está completa desde state_manager.py
+    # No la sobrescribimos, solo la usamos directamente
 
     # ⭐ NUEVO: Registrar evento en estadísticas
     if at_bat_ended:
