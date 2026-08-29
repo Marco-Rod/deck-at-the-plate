@@ -365,6 +365,15 @@ export const useEventSequencer = (): UseEventSequencerReturn => {
         console.log(`   📊 Queue before removal: ${queue.length}, After will be: ${queue.length - 1}`);
         console.log(`   🔓 Setting isProcessing to FALSE to allow next event`);
         
+        // Limpiar todos los timers de este evento ANTES de actualizar la queue
+        Array.from(timersRef.current.keys()).forEach(key => {
+          if (key.startsWith(event.id)) {
+            const timer = timersRef.current.get(key);
+            if (timer) clearTimeout(timer);
+            timersRef.current.delete(key);
+          }
+        });
+        
         setQueue(prev => {
           console.log(`   🔄 setQueue called: removing first event, new length: ${prev.length - 1}`);
           return prev.slice(1);
@@ -374,29 +383,14 @@ export const useEventSequencer = (): UseEventSequencerReturn => {
         console.log(`   ✋ processingRef.current set to false`);
         setIsProcessing(false);
         console.log(`   ✅ setIsProcessing(false) executed`);
-        
-        // Limpiar todos los timers de este evento específicamente
-        Array.from(timersRef.current.keys()).forEach(key => {
-          if (key.startsWith(event.id)) {
-            const timer = timersRef.current.get(key);
-            if (timer) clearTimeout(timer);
-            timersRef.current.delete(key);
-          }
-        });
       }, eventCompletionTime);
 
       timersRef.current.set(`${event.id}-complete`, completeTimer);
       console.log(`   ⏰ Complete timer scheduled for ${eventCompletionTime}ms`);
 
       return () => {
-        // Cleanup: cancelar solo los timers de este evento específico
-        Array.from(timersRef.current.keys()).forEach(key => {
-          if (key.startsWith(event.id)) {
-            const timer = timersRef.current.get(key);
-            if (timer) clearTimeout(timer);
-            timersRef.current.delete(key);
-          }
-        });
+        // NO hacer cleanup aquí para evitar cancelar timers en progreso
+        // Los timers ya se limpian en el completion handler
       };
     }
   }, [queue.length]); // ← BUGFIX: Solo queue.length, no isProcessing. Esto evita cancelar el setTimeout cuando isProcessing cambia
