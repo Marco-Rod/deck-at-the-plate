@@ -20,6 +20,7 @@ import {
   InitGameStatePayload,
 } from '../types/stadium';
 import { games as gamesApi } from '../utils/api';
+import { persistGameState, clearPersistedGameState, recoverGameState } from './useGameStatePersistence';
 
 interface PitchPayload {
   pitch_type: PitchType;
@@ -41,6 +42,7 @@ interface WebSocketCallbacks {
   onPlayResolved?: (payload: PlayResolvedPayload) => void;
   onPitcherChanged?: (payload: any) => void;
   onGameStateInit?: (payload: InitGameStatePayload) => void;
+  onError?: (message: string) => void;
 }
 
 interface UseStadiumSocketReturn {
@@ -52,15 +54,9 @@ interface UseStadiumSocketReturn {
   sendTactic: (tacticId: string, playerRole: 'PITCHER' | 'BATTER') => Promise<void>;
 }
 
-export function parseStateData(payload: { current_inning: number; is_top_inning: boolean; score_home: number; score_away: number; balls: number; strikes: number; outs: number; state_data: Record<string, unknown>; pitcher_strikeouts?: Record<string, number>; batter_stats?: Record<string, any>; home_hits?: number; away_hits?: number; inning_runs?: Record<string, number>; active_pitcher?: any; active_batter?: any }): GameStateWS {
+export function parseStateData(payload: { current_inning: number; is_top_inning: boolean; score_home: number; score_away: number; balls: number; strikes: number; outs: number; state_data: Record<string, unknown>; pitcher_strikeouts?: Record<string, number>; batter_stats?: Record<string, any>; home_hits?: number; away_hits?: number; inning_runs?: Record<string, number>; active_pitcher?: any; active_batter?: any; inning_completed?: any }): GameStateWS {
   const stateData = payload.state_data || {};
   const runners = (stateData.runners as Record<string, string | null>) || { '1b': null, '2b': null, '3b': null };
-
-  console.log('⭐ [PARSE_STATE_DATA] pitcher_strikeouts:', payload.pitcher_strikeouts);
-  console.log('⭐ [PARSE_STATE_DATA] batter_stats keys:', Object.keys(payload.batter_stats || {}));
-  console.log('⭐ [PARSE_STATE_DATA] hits:', { home_hits: payload.home_hits, away_hits: payload.away_hits });
-  console.log('⭐ [PARSE_STATE_DATA] active_pitcher rarity:', payload.active_pitcher?.rarity);
-  console.log('⭐ [PARSE_STATE_DATA] active_batter rarity:', payload.active_batter?.rarity);
 
   return {
     currentInning: payload.current_inning,
@@ -81,14 +77,16 @@ export function parseStateData(payload: { current_inning: number; is_top_inning:
     isGameOver: !!(stateData.is_game_over),
     winnerMessage: stateData.winner_message as string | undefined,
     rivalTeamName: stateData.rival_team_name as string | undefined,
+    userRole: (stateData.user_role as 'HOME' | 'AWAY') || 'HOME', // ⭐ NUEVO: user_role del estado del juego
     state_data: stateData,
     pitcher_strikeouts: payload.pitcher_strikeouts || {},
     batter_stats: payload.batter_stats || {},
-    homeHits: payload.home_hits || 0, // ⭐ del backend
-    awayHits: payload.away_hits || 0, // ⭐ del backend
-    inning_runs: payload.inning_runs || {}, // ⭐ del backend: {"1_true": 2, "1_false": 1}
-    active_pitcher: payload.active_pitcher, // ⭐ NUEVO: Datos completos del pitcher (incluyendo rarity)
-    active_batter: payload.active_batter, // ⭐ NUEVO: Datos completos del bateador (incluyendo rarity)
+    homeHits: payload.home_hits || 0,
+    awayHits: payload.away_hits || 0,
+    inning_runs: payload.inning_runs || {},
+    active_pitcher: payload.active_pitcher,
+    active_batter: payload.active_batter,
+    inning_completed: payload.inning_completed,
   };
 }
 
@@ -97,10 +95,21 @@ export const useStadiumSocket = (
   userId: string,
   callbacks?: WebSocketCallbacks
 ): UseStadiumSocketReturn => {
-  const [gameState, setGameState] = useState<GameStateWS | null>(null);
+  // 💾 Inicializar con estado guardado
+  const [gameState, setGameState] = useState<GameStateWS | null>(() => {
+    return recoverGameState(gameId, userId);
+  });
   const [hasPitched, setHasPitched] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
   const socketRef = useRef<WebSocket | null>(null);
+
+  // 💾 Efecto para limpiar persistencia cuando el juego termina
+  useEffect(() => {
+    if (gameState?.isGameOver) {
+      console.log('🏁 [PERSISTENCE] Juego terminado, limpiando estado guardado');
+      clearPersistedGameState();
+    }
+  }, [gameState?.isGameOver]);
 
   useEffect(() => {
     if (!gameId || !userId) return;
@@ -129,7 +138,12 @@ export const useStadiumSocket = (
         switch (data.type) {
           case 'INIT_GAME_STATE': {
             const payload = data as InitGameStatePayload;
-            setGameState(parseStateData(payload));
+            const newState = parseStateData(payload);
+            setGameState(newState);
+            
+            // 💾 PERSIST: Guardar en localStorage
+            persistGameState(newState, gameId, userId);
+            
             callbacks?.onGameStateInit?.(payload);
             break;
           }
@@ -148,16 +162,17 @@ export const useStadiumSocket = (
             console.log('   score_home:', payload.score_home);
             console.log('   score_away:', payload.score_away);
             
-            // ⭐ CAMBIO: NO actualizar gameState aquí aún
-            // El Event Sequencer mostrará el modal primero (delay 0ms)
-            // Después el callback 'show-modal' triggerará la actualización
-            // Esto garantiza que el modal se vea ANTES que los cambios en la interfaz
+            // ⭐ CRITICAL: Update gameState immediately
+            // This is necessary because gameState is not accessible outside this hook
+            // The Event Sequencer controls the CALLBACKS timing, not the state update
+            // React will batch these updates with the callback triggers
+            const newState = parseStateData(payload);
+            setGameState(newState);
             
-            // Guardar el payload en una ref para usar después
-            if (!socketRef.current) socketRef.current = { pendingPayload: null };
-            (socketRef.current as any).pendingPayload = payload;
+            // 💾 PERSIST: Guardar en localStorage
+            persistGameState(newState, gameId, userId);
             
-            // Notificar al parent para que enquee el evento
+            // Notify parent to enqueue the event for sequencing
             callbacks?.onPlayResolved?.(payload);
             
             break;
@@ -168,8 +183,12 @@ export const useStadiumSocket = (
             const payload = data;
             console.log('🔄 [WS] STEAL_RESOLVED received:', payload);
             
-            // ⭐ NUEVO: Actualizar el gameState con los datos del evento
-            setGameState(parseStateData(payload));
+            // ⭐ CRITICAL: Update gameState immediately (same as PLAY_RESOLVED)
+            const newState = parseStateData(payload);
+            setGameState(newState);
+            
+            // 💾 PERSIST: Guardar en localStorage
+            persistGameState(newState, gameId, userId);
             
             console.log('📍 [GAMESTATE UPDATED] State actualizado desde STEAL_RESOLVED');
             
@@ -182,6 +201,14 @@ export const useStadiumSocket = (
             // ⭐ Fase 1 Change: No actualizar state aquí
             // Notificar al parent para que enquee el evento
             callbacks?.onPitcherChanged?.(data);
+            break;
+          }
+
+          case 'ERROR': {
+            const payload = data as { message: string };
+            console.error('❌ [WS] ERROR recibido:', payload.message);
+            // Notificar al parent del error
+            callbacks?.onError?.(payload.message);
             break;
           }
 

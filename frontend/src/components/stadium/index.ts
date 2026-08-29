@@ -9,7 +9,7 @@
  * import { useStadiumLayout } from '@/components/stadium';
  */
 
-// Components
+// Components - Base stadium components
 export {
   GameHeader,
   Scoreboard,
@@ -26,6 +26,11 @@ export {
   CentralField,
   PitcherStaminaBar,
 } from './components';
+
+// Components - Refactored screens
+export { GameplayModals } from './GameplayModals';
+export { GameplayInterface } from './GameplayInterface';
+export { StadiumShowcaseScreen } from './StadiumShowcaseScreen';
 
 // Types
 export type {
@@ -72,7 +77,7 @@ export {
   getOverlayDuration,
 } from './constants/stadium.constants';
 
-// Hooks
+// Hooks - Stadium Layout
 export {
   useStadiumLayout,
   useGameStateFormatting,
@@ -81,3 +86,12 @@ export {
   classNames,
   conditionalStyle,
 } from './hooks/useStadiumLayout';
+
+// Hooks - Game Logic (imported from parent hooks directory)
+export {
+  useGameStateSetup,
+  useModalSequencing,
+  useCardLoading,
+  useTacticalControls,
+  useEventSequencerCallbacks,
+} from '../../hooks';

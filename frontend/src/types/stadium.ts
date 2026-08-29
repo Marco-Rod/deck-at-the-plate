@@ -66,14 +66,16 @@ export interface GameStateWS {
   activePitcherId?: string;
   activeBatterId?: string;
   rivalTeamName?: string;
+  userRole: 'HOME' | 'AWAY'; // ⭐ NUEVO: Rol del usuario en este juego
   state_data?: Record<string, unknown>;
-  pitcher_strikeouts?: Record<string, number>; // {pitcher_id: strikeout_count}
-  batter_stats?: Record<string, { at_bats: number; hits: number; doubles: number; triples: number; home_runs: number; rbi: number; runs: number; strikeouts: number; walks: number }>; // ⭐ NUEVO
-  homeHits?: number; // ⭐ NUEVO: Total hits HOME team
-  awayHits?: number; // ⭐ NUEVO: Total hits AWAY team
-  inning_runs?: Record<string, number>; // ⭐ NUEVO: {"1_true": 2, "1_false": 1, "6_false": 2} = inning_is_top: runs
-  active_pitcher?: PlayerData; // ⭐ NUEVO: Datos completos del pitcher (incluyendo rarity)
-  active_batter?: PlayerData;  // ⭐ NUEVO: Datos completos del bateador (incluyendo rarity)
+  pitcher_strikeouts?: Record<string, number>;
+  batter_stats?: Record<string, { at_bats: number; hits: number; doubles: number; triples: number; home_runs: number; rbi: number; runs: number; strikeouts: number; walks: number }>;
+  homeHits?: number;
+  awayHits?: number;
+  inning_runs?: Record<string, number>;
+  active_pitcher?: PlayerData;
+  active_batter?: PlayerData;
+  inning_completed?: boolean;
 }
 
 export interface PlayResolvedPayload {

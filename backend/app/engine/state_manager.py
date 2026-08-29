@@ -30,7 +30,8 @@ from app.engine.deck_manager import draw_card
 def process_at_bat_transition(
     game: GameSession,
     event: str,
-    state: Dict[str, Any]
+    state: Dict[str, Any],
+    db: 'Session' = None
 ) -> Tuple[bool, bool, str, str]:
     """
     Procesa el resultado de un swing/pitcheo y actualiza el estado completo del juego.
@@ -215,6 +216,12 @@ def process_at_bat_transition(
                 away_lineup = state.get("away_lineup", [])
                 if away_lineup:
                     state["active_batter"] = away_lineup[away_idx]
+                
+                # Log: qué pitcher está en el montículo en la Alta
+                from app.models import PlayerCardModel
+                pitcher_card = db.query(PlayerCardModel).filter(PlayerCardModel.id == home_pitcher).first() if db else None
+                print(f"🔄 [INNING CHANGE] → ALTA de Inning {game.current_inning}")
+                print(f"   HOME pitcher al montículo: {pitcher_card.name if pitcher_card else 'UNKNOWN'} ({home_pitcher})")
             else:
                 # Recién pasamos a la Baja: away_pitcher lanza, primer bateador home batea
                 away_pitcher = state.get("away_pitcher_id") or state.get("active_pitcher")
@@ -223,6 +230,12 @@ def process_at_bat_transition(
                 home_lineup = state.get("home_lineup", [])
                 if home_lineup:
                     state["active_batter"] = home_lineup[home_idx]
+                
+                # Log: qué pitcher está en el montículo en la Baja
+                from app.models import PlayerCardModel
+                pitcher_card = db.query(PlayerCardModel).filter(PlayerCardModel.id == away_pitcher).first() if db else None
+                print(f"🔄 [INNING CHANGE] → BAJA de Inning {game.current_inning}")
+                print(f"   AWAY pitcher al montículo: {pitcher_card.name if pitcher_card else 'UNKNOWN'} ({away_pitcher})")
 
             # --- Ghost runner en extra innings ---
             # Se coloca al inicio de cada media entrada a partir del inning total_innings+1.

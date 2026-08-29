@@ -263,7 +263,13 @@ export const PlayResultOverlay: React.FC<PlayResultOverlayProps> = ({
     const eventKey = resultEvent?.toUpperCase() ?? '';
     const theme = EVENT_THEMES[eventKey] ?? DEFAULT_THEME;
     pendingRef.current = { text: resultText, theme };
-    setTriggerCount(c => c + 1);
+    console.log(`   📥 [PlayResultOverlay] Received new event data:`, { resultEvent, resultText, resultTs });
+    console.log(`   📈 triggerCount before: ${triggerCount} → incrementing`);
+    setTriggerCount(c => {
+      const newCount = c + 1;
+      console.log(`   📈 triggerCount after: ${newCount}`);
+      return newCount;
+    });
   }, [resultTs]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Mostrar con delay, respetar la duración del tema
@@ -276,6 +282,13 @@ export const PlayResultOverlay: React.FC<PlayResultOverlayProps> = ({
       // Limpiar timer previo si el usuario juega rápido
       if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
 
+      console.log('🎬 [PlayResultOverlay] Modal is now VISIBLE', {
+        event: resultEvent,
+        text,
+        duration: theme.duration,
+        timestamp: Date.now(),
+      });
+
       setCurrentTheme(theme);
       setCurrentText(text);
       setVisible(true);
@@ -284,6 +297,10 @@ export const PlayResultOverlay: React.FC<PlayResultOverlayProps> = ({
       playEventSound(resultEvent?.toUpperCase() ?? '');
 
       hideTimerRef.current = setTimeout(() => {
+        console.log('🎬 [PlayResultOverlay] Modal is now HIDDEN', {
+          event: resultEvent,
+          timestamp: Date.now(),
+        });
         setVisible(false);
       }, theme.duration);
     }, delayMs);

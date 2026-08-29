@@ -381,7 +381,7 @@ async def _resolve_swing(
         )
 
     # --- 6. Transición de estado ---
-    at_bat_ended, inning_ended, event, description = process_at_bat_transition(game, raw_event, state)
+    at_bat_ended, inning_ended, event, description = process_at_bat_transition(game, raw_event, state, db)
 
     # La descripción ya está completa desde state_manager.py
     # No la sobrescribimos, solo la usamos directamente
@@ -569,6 +569,25 @@ async def _execute_cpu_pitcher_change(
     
     print(f"🤖 [CPU PITCHER CHANGE] ✅ Cambio completado y guardado en BD")
     
+    # ⭐ NUEVO: Obtener datos del pitcher anterior
+    old_pitcher = None
+    old_pitcher_data = None
+    if old_pitcher_id:
+        old_pitcher = db.query(PlayerCardModel).filter(PlayerCardModel.id == old_pitcher_id).first()
+        if old_pitcher:
+            old_pitcher_data = {
+                "id": old_pitcher.id,
+                "name": old_pitcher.name,
+                "number": old_pitcher.number,
+                "overall": old_pitcher.overall,
+                "position": old_pitcher.position,
+                "rarity": old_pitcher.rarity.value if old_pitcher.rarity else "COMMON",
+                "team": old_pitcher.team.name if old_pitcher.team else "UNKNOWN",
+                "stats": format_player_stats(old_pitcher, "PITCHER"),
+                "repertoire": old_pitcher.repertoire or [],
+                "role": "PITCHER",
+            }
+    
     # Construir datos del nuevo pitcher para broadcast
     new_pitcher_data = {
         "id": new_pitcher.id,
@@ -590,10 +609,20 @@ async def _execute_cpu_pitcher_change(
         "type": "PITCHER_CHANGED",
         "message": f"🔄 La CPU ha hecho un cambio de pitcher. Entra: {new_pitcher.name}",
         "old_pitcher_id": old_pitcher_id,
+        "old_pitcher_data": old_pitcher_data,
         "new_pitcher_id": new_pitcher.id,
         "new_pitcher": new_pitcher_data,
         "state_data": game.state_data,
     })
+    
+    # ⭐ NUEVO: Marcar que se está esperando confirmación del usuario
+    state["awaiting_pitcher_change_acknowledgment"] = True
+    state["pending_pitcher_change"] = {
+        "old_pitcher_id": old_pitcher_id,
+        "new_pitcher_id": new_pitcher.id,
+    }
+    game.state_data = state
+    db.commit()
     
     return True
 
@@ -788,9 +817,16 @@ async def select_pitch(
     if not game:
         raise HTTPException(status_code=404, detail="Sesión de juego no encontrada.")
 
-    verify_player_turn(game, current_user_id, required_role="PITCHER")
-
+    # ⭐ NUEVO: Validar que no haya cambio de pitcher pendiente
     state = dict(game.state_data or {})
+    if state.get("awaiting_pitcher_change_acknowledgment"):
+        print(f"🚫 [PITCH BLOCKED] Cambio de pitcher del rival pendiente de confirmación")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="El rival cambió de pitcher. Debes confirmar el cambio antes de continuar.",
+        )
+
+    verify_player_turn(game, current_user_id, required_role="PITCHER")
     active_pitcher_id = state.get("active_pitcher")
     
     print(f"🎯 [DEBUG] active_pitcher_id: {active_pitcher_id}")
@@ -882,6 +918,14 @@ async def execute_swing(
     db.refresh(game)
     state = dict(game.state_data or {})
     
+    # ⭐ NUEVO: Validar que no haya cambio de pitcher pendiente
+    if state.get("awaiting_pitcher_change_acknowledgment"):
+        print(f"🚫 [SWING BLOCKED] Cambio de pitcher del rival pendiente de confirmación")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="El rival cambió de pitcher. Debes confirmar el cambio antes de continuar.",
+        )
+    
     current_pitch = state.get("current_pitch")
     
     # ⭐ CRÍTICO: Si no hay picheo y debería haber CPU pitcher, ejecutar CPU response aquí
@@ -951,8 +995,10 @@ async def change_pitcher(
     print(f"✅ Juego encontrado: {game_id}")
 
     new_pitcher = db.query(PlayerCardModel).filter(PlayerCardModel.id == payload.new_pitcher_id).first()
-    print(f"🔍 Buscando pitcher: {payload.new_pitcher_id}")
-    print(f"🔍 Pitcher encontrado: {new_pitcher is not None}")
+    old_pitcher = db.query(PlayerCardModel).filter(PlayerCardModel.id == (dict(game.state_data or {}).get("active_pitcher"))).first()
+    
+    print(f"🔍 Pitcher anterior: {old_pitcher.name if old_pitcher else 'UNKNOWN'} ({old_pitcher.id if old_pitcher else 'N/A'})")
+    print(f"🔍 Pitcher nuevo: {new_pitcher.name if new_pitcher else 'UNKNOWN'} ({payload.new_pitcher_id})")
     
     if not new_pitcher or new_pitcher.position not in ("SP", "RP", "TWP"):
         print(f"❌ Pitcher inválido o posición incorrecta")
@@ -987,11 +1033,24 @@ async def change_pitcher(
     else:
         state["away_pitcher_id"] = payload.new_pitcher_id
 
-    print(f"🔄 [CHANGE_PITCHER] Actualizando {'home' if is_home_user else 'away'}_pitcher_id → {payload.new_pitcher_id}")
+    print(f"🔄 [CHANGE_PITCHER] Cambiando {'HOME' if is_home_user else 'AWAY'} pitcher")
+    print(f"   {old_pitcher.name if old_pitcher else 'OLD PITCHER'} ({old_pitcher_id}) → {new_pitcher.name} ({payload.new_pitcher_id})")
 
     pitch_counts = state.get("pitch_counts", {})
     pitch_counts[payload.new_pitcher_id] = 0  # Reset pitch count para el nuevo pitcher
     state["pitch_counts"] = pitch_counts
+    
+    # Log remaining available pitchers
+    print(f"\n📊 [PITCHERS REMAINING AFTER CHANGE]")
+    remaining_pitchers = [p for p in db.query(PlayerCardModel).filter(
+        PlayerCardModel.team_id == new_pitcher.team_id,
+        PlayerCardModel.position.in_(["SP", "RP", "CP", "TWP"]),
+        PlayerCardModel.id.notin_([payload.new_pitcher_id])
+    ).all()]
+    print(f"   Available backups: {len(remaining_pitchers)}")
+    for p in remaining_pitchers[:5]:
+        print(f"      - {p.name} ({p.id}) | OVR: {p.overall}")
+    print()
 
     game.state_data = state
     db.commit()
@@ -1033,6 +1092,109 @@ async def change_pitcher(
     }
 
 
+@router.get("/{game_id}/rival-available-pitchers", summary="Obtener lanzadores disponibles del equipo rival")
+def get_rival_available_pitchers(
+    game_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Retorna los pitchers disponibles del equipo rival (CPU).
+    Similar a get_available_pitchers pero para el lado contrario.
+    
+    Flujo:
+      1. Obtener la sesión de juego
+      2. Determinar qué equipo es el rival (CPU)
+      3. Buscar todos los pitchers del team_id del rival
+      4. Excluir el pitcher actualmente activo
+      5. Retornar la lista
+    """
+    print(f"🔍 [GET_RIVAL_AVAILABLE_PITCHERS] game_id={game_id}")
+
+    game = db.query(GameSession).filter(GameSession.id == game_id).first()
+    if not game:
+        raise HTTPException(status_code=404, detail="Sesión de juego no encontrada.")
+
+    state = dict(game.state_data or {})
+    active_pitcher_id = state.get("active_pitcher")
+    
+    # Determinar el team_id del rival (CPU)
+    # El rival es el que NO es el usuario
+    user_role = state.get("user_role")  # 'HOME' o 'AWAY'
+    
+    if user_role == "HOME":
+        # Usuario es HOME, rival es AWAY
+        rival_pitcher_id = state.get("away_pitcher_id")
+    else:
+        # Usuario es AWAY, rival es HOME
+        rival_pitcher_id = state.get("home_pitcher_id")
+    
+    # Obtener el pitcher actual del rival para extraer su team_id
+    ref_pitcher = db.query(PlayerCardModel).filter(PlayerCardModel.id == rival_pitcher_id).first()
+    if not ref_pitcher or not ref_pitcher.team_id:
+        print(f"❌ No rival pitcher found or team_id missing: {rival_pitcher_id}")
+        return {
+            "status": "error",
+            "count": 0,
+            "available_pitchers": [],
+            "message": "No se pudo determinar el equipo rival"
+        }
+    
+    rival_team_id = ref_pitcher.team_id
+    print(f"🔍 Rival team_id: {rival_team_id}, active_pitcher={active_pitcher_id}")
+
+    # ── Buscar todos los pitchers del equipo rival ──────────────────────────
+    rival_pitchers = (
+        db.query(PlayerCardModel)
+        .filter(
+            PlayerCardModel.team_id == rival_team_id,
+            PlayerCardModel.position.in_(["SP", "RP", "CP", "TWP"]),
+            PlayerCardModel.id != active_pitcher_id,
+        )
+        .all()
+    )
+
+    print(f"🔍 Total pitchers del equipo rival: {len(rival_pitchers)}")
+    for p in rival_pitchers[:10]:
+        print(f"   - {p.name} ({p.id}) | Pos: {p.position} | OVR: {p.overall}")
+
+    # ── Pitchers que ya lanzaron en este partido ────────────────────────────
+    pitch_counts: dict = state.get("pitch_counts", {})
+    used_pitcher_ids = set(pitch_counts.keys())
+
+    print(f"🔍 Pitchers ya usados en el partido: {len(used_pitcher_ids)}")
+    if used_pitcher_ids:
+        for pid in list(used_pitcher_ids)[:5]:
+            used_pitcher = db.query(PlayerCardModel).filter(PlayerCardModel.id == pid).first()
+            if used_pitcher:
+                print(f"   - {used_pitcher.name} ({pid}) | Pitches: {pitch_counts[pid]}")
+
+    available_pitchers = [
+        {
+            "id": card.id,
+            "name": card.name,
+            "number": card.number,
+            "overall": card.overall,
+            "position": card.position,
+            "rarity": card.rarity.value if card.rarity else "COMMON",
+            "team": card.team.name if card.team else "UNKNOWN",
+            "stats": format_player_stats(card, "PITCHER"),
+            "role": "PITCHER",
+            "already_used": card.id in used_pitcher_ids,
+        }
+        for card in rival_pitchers
+    ]
+
+    print(f"✅ [RIVAL AVAILABLE PITCHERS] {len(available_pitchers)} disponibles (excluido active={active_pitcher_id})")
+    for p in available_pitchers[:5]:
+        print(f"   ✓ {p['name']} ({p['id']}) | Already Used: {p['already_used']}")
+
+    return {
+        "status": "ok",
+        "count": len(available_pitchers),
+        "available_pitchers": available_pitchers,
+    }
+
+
 @router.get("/{game_id}/available-pitchers", summary="Obtener lanzadores disponibles del bullpen")
 def get_available_pitchers(
     game_id: str,
@@ -1049,27 +1211,44 @@ def get_available_pitchers(
       3. Buscar en UserCardInventory los pitchers que el usuario posee.
       4. Excluir el active_pitcher actual del resultado.
     """
-    print(f"🔍 [GET_AVAILABLE_PITCHERS] game_id={game_id}, user_id={user_id}")
+    print(f"\n🔍 [GET_AVAILABLE_PITCHERS] game_id={game_id}, user_id={user_id}")
 
     game = db.query(GameSession).filter(GameSession.id == game_id).first()
     if not game:
+        print(f"❌ Game not found: {game_id}")
         raise HTTPException(status_code=404, detail="Sesión de juego no encontrada.")
 
     # ── Validar que el user_id corresponde a un jugador humano del juego ────
     if user_id not in (game.home_user_id, game.away_user_id):
+        print(f"❌ User {user_id} not in game. home={game.home_user_id}, away={game.away_user_id}")
         raise HTTPException(status_code=403, detail="El usuario no pertenece a este juego.")
 
     if user_id == "CPU_BOT":
+        print(f"❌ CPU_BOT cannot change pitcher")
         raise HTTPException(status_code=400, detail="El CPU no puede cambiar pitcher manualmente.")
 
     state = dict(game.state_data or {})
     active_pitcher_id = state.get("active_pitcher")
 
-    print(f"🔍 home_user_id={game.home_user_id}, away_user_id={game.away_user_id}")
-    print(f"🔍 active_pitcher={active_pitcher_id}")
+    print(f"📋 Game info:")
+    print(f"   home_user_id={game.home_user_id}")
+    print(f"   away_user_id={game.away_user_id}")
+    print(f"   active_pitcher_id={active_pitcher_id}")
+
+    # ── DEBUG: Contar total de cards en UserCardInventory del usuario ────
+    total_inventory = db.query(UserCardInventory).filter(UserCardInventory.user_id == user_id).count()
+    print(f"\n📦 [INVENTORY DEBUG]")
+    print(f"   Total cards en inventario del usuario: {total_inventory}")
+
+    # ── DEBUG: Mostrar primeras 10 cartas del usuario ────
+    all_user_cards = db.query(UserCardInventory).filter(UserCardInventory.user_id == user_id).limit(10).all()
+    print(f"   Primeras 10 cartas del usuario:")
+    for inv_card in all_user_cards:
+        card = db.query(PlayerCardModel).filter(PlayerCardModel.id == inv_card.card_id).first()
+        if card:
+            print(f"      - {card.name} ({card.id}) | Pos: {card.position}")
 
     # ── Buscar pitchers en el inventario del usuario ─────────────────────────
-    # Subquery: cards del usuario que son pitchers, excluyendo el activo
     inventory_pitchers = (
         db.query(PlayerCardModel)
         .join(UserCardInventory, UserCardInventory.card_id == PlayerCardModel.id)
@@ -1081,14 +1260,22 @@ def get_available_pitchers(
         .all()
     )
 
-    print(f"🔍 Pitchers en inventario: {len(inventory_pitchers)}")
+    print(f"\n🎯 [PITCHERS QUERY]")
+    print(f"   Pitchers encontrados en inventario: {len(inventory_pitchers)}")
+    for p in inventory_pitchers[:15]:
+        print(f"      - {p.name} ({p.id}) | Pos: {p.position} | OVR: {p.overall}")
 
     # ── Pitchers que ya lanzaron en este partido ────────────────────────────
-    # pitch_counts guarda {pitcher_id: count} para todo pitcher que haya lanzado.
     pitch_counts: dict = state.get("pitch_counts", {})
     used_pitcher_ids = set(pitch_counts.keys())
 
-    print(f"🔍 Pitchers ya usados en el partido: {used_pitcher_ids}")
+    print(f"\n📊 [PITCH HISTORY]")
+    print(f"   Pitchers ya usados en el partido: {len(used_pitcher_ids)}")
+    if used_pitcher_ids:
+        for pid in list(used_pitcher_ids)[:10]:
+            used_pitcher = db.query(PlayerCardModel).filter(PlayerCardModel.id == pid).first()
+            if used_pitcher:
+                print(f"      - {used_pitcher.name} ({pid}) | Pitches: {pitch_counts[pid]}")
 
     available_pitchers = [
         {
@@ -1101,17 +1288,72 @@ def get_available_pitchers(
             "team": card.team.name if card.team else "UNKNOWN",
             "stats": format_player_stats(card, "PITCHER"),
             "role": "PITCHER",
-            "already_used": card.id in used_pitcher_ids,  # ← clave del filtro
+            "already_used": card.id in used_pitcher_ids,
         }
         for card in inventory_pitchers
     ]
 
-    print(f"✅ [AVAILABLE PITCHERS] {len(available_pitchers)} disponibles para user={user_id} (excluido active={active_pitcher_id})")
+    print(f"\n✅ [RESULT]")
+    print(f"   Total disponibles: {len(available_pitchers)}")
+    for p in available_pitchers[:10]:
+        print(f"      ✓ {p['name']} ({p['id']}) | OVR: {p['overall']} | Already Used: {p['already_used']}")
+    print()
 
     return {
         "status": "ok",
         "count": len(available_pitchers),
         "available_pitchers": available_pitchers,
+    }
+
+
+@router.post("/{game_id}/acknowledge-pitcher-change", summary="Confirmar cambio de pitcher del rival")
+def acknowledge_pitcher_change(game_id: str, db: Session = Depends(get_db)):
+    """
+    El usuario confirma que vio y aceptó el cambio de pitcher de la CPU.
+    
+    Esto desbloqueará el juego para que continúe. Si se llama sin que haya
+    un cambio pendiente, retorna un error.
+    """
+    game = db.query(GameSession).filter(GameSession.id == game_id).first()
+    if not game:
+        raise HTTPException(status_code=404, detail="Sesión de juego no encontrada.")
+    
+    state = dict(game.state_data or {})
+    
+    if not state.get("awaiting_pitcher_change_acknowledgment"):
+        print(f"⚠️  [ACK PITCHER CHANGE] No hay cambio pendiente para confirmar")
+        return {
+            "status": "ok",
+            "message": "No hay cambio de pitcher pendiente",
+        }
+    
+    print(f"✅ [ACK PITCHER CHANGE] Usuario confirmó cambio de pitcher")
+    print(f"   old_pitcher: {state.get('pending_pitcher_change', {}).get('old_pitcher_id')}")
+    print(f"   new_pitcher: {state.get('pending_pitcher_change', {}).get('new_pitcher_id')}")
+    
+    # Limpiar los flags de bloqueo
+    state["awaiting_pitcher_change_acknowledgment"] = False
+    state["pending_pitcher_change"] = None
+    
+    game.state_data = state
+    db.commit()
+    db.refresh(game)
+    
+    # Broadcast para notificar que se desbloqueó
+    import asyncio
+    from app.engine.websocket_manager import manager
+    try:
+        asyncio.run(manager.broadcast_to_game(game_id, {
+            "type": "PITCHER_CHANGE_ACKNOWLEDGED",
+            "message": "El juego continúa. El nuevo pitcher está listo.",
+            "state_data": game.state_data,
+        }))
+    except:
+        pass  # Si falla el broadcast, al menos el estado está actualizado
+    
+    return {
+        "status": "ok",
+        "message": "Cambio de pitcher confirmado. El juego continúa.",
     }
 
 

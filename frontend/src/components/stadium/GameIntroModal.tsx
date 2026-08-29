@@ -27,6 +27,16 @@ export const GameIntroModal: React.FC<GameIntroModalProps> = ({
 }) => {
   const [isVisible, setIsVisible] = useState(true);
 
+  React.useEffect(() => {
+    console.log('📋 GameIntroModal received:', {
+      userPitcher: userPitcher?.name,
+      cpuPitcher: cpuPitcher?.name,
+      userLineupCount: userLineup.length,
+      cpuLineupCount: cpuLineup.length,
+      cpuPitcherFull: cpuPitcher
+    });
+  }, [userPitcher, cpuPitcher, userLineup, cpuLineup]);
+
   const handlePlayBall = () => {
     setIsVisible(false);
     // Pequeño delay para que la animación de salida termine

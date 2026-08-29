@@ -82,6 +82,8 @@ export const CentralField: React.FC<CentralFieldProps & {
       setTimeout(() => setShowMinPitchesHint(false), 2000);
       return;
     }
+    console.log(`🔓 [MODAL ABIERTO] Modal de sustitución de lanzador abierto`);
+    console.log(`   gameId=${gameId}, userId=${userId}`);
     setShowChangePitcherModal(true);
   };
 
@@ -94,31 +96,15 @@ export const CentralField: React.FC<CentralFieldProps & {
 
   const loadAvailablePitchers = async () => {
     if (!gameId || !userId) {
-      console.warn('⚠️ loadAvailablePitchers: gameId o userId no disponible', { gameId, userId });
       return;
     }
     try {
       setIsLoadingPitchers(true);
-      console.log(`🔄 [LOAD PITCHERS] Cargando pitchers: gameId=${gameId}, userId=${userId}`);
+      console.log(`📡 [SOLICITUD] GET /api/v1/games/${gameId}/available-pitchers?user_id=${userId}`);
       const response = await gamesApi.getAvailablePitchers(gameId, userId);
-
-      console.log(`📋 [PITCHERS RESPONSE] Response completa:`, response);
       const pitchers = response?.available_pitchers || [];
-      console.log(`✅ [PITCHERS LOADED] ${pitchers.length} pitchers cargados`);
-      
-      if (pitchers.length === 0) {
-        console.warn(`⚠️  [NO PITCHERS] Lista vacía de pitchers disponibles`);
-      } else {
-        console.log(`📊 [PITCHERS DETAILS]:`);
-        pitchers.forEach((p, idx) => {
-          console.log(`   ${idx + 1}. ${p.name} (${p.id}) | OVR: ${p.overall} | POS: ${p.position} | Rareza: ${p.rarity} | YaUsado: ${p.already_used}`);
-        });
-      }
-      
       setAvailablePitchers(pitchers);
     } catch (error) {
-      console.error('❌ Error cargando pitchers:', error instanceof Error ? error.message : String(error));
-      console.error('Full error:', error);
       setAvailablePitchers([]);
     } finally {
       setIsLoadingPitchers(false);
@@ -130,7 +116,6 @@ export const CentralField: React.FC<CentralFieldProps & {
 
     try {
       const response = await gamesApi.changePitcher(gameId, { new_pitcher_id: newPitcherId }, userId);
-      console.log('✅ Pitcher cambiado:', response);
       
       // Notificar al componente padre
       if (onPitcherChanged && response?.active_pitcher) {
@@ -139,7 +124,6 @@ export const CentralField: React.FC<CentralFieldProps & {
       
       setShowChangePitcherModal(false);
     } catch (error) {
-      console.error('Error cambiando pitcher:', error);
       throw error;
     }
   };

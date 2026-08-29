@@ -33,9 +33,6 @@ function _buildHeaders(extra = {}) {
   const token = localStorage.getItem('jwt_token');
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
-    console.log('🔐 [API] Token adjuntado:', token.substring(0, 20) + '...');
-  } else {
-    console.warn('⚠️  [API] ⚠️  NO HAY TOKEN EN LOCALSTORAGE - Solicitud sin autenticación');
   }
   return headers;
 }
@@ -47,7 +44,9 @@ function _buildHeaders(extra = {}) {
  * @returns {Promise<any>} - JSON parseado de la respuesta
  */
 async function _request(path, options = {}) {
-  const response = await fetch(`${BASE_URL}${path}`, {
+  const fullUrl = `${BASE_URL}${path}`;
+  
+  const response = await fetch(fullUrl, {
     ...options,
     headers: _buildHeaders(options.headers || {}),
   });
@@ -228,9 +227,30 @@ export const games = {
    */
   getAvailablePitchers: (gameId, userId) => {
     const url = `/api/v1/games/${gameId}/available-pitchers?user_id=${userId}`;
+    return _request(url, { method: 'GET' });
+  },
+
+  /**
+   * Obtiene los lanzadores disponibles del equipo rival (CPU).
+   * @param {string} gameId
+   * @returns {Promise<{available_pitchers: Array}>}
+   */
+  getRivalAvailablePitchers: (gameId) => {
+    const url = `/api/v1/games/${gameId}/rival-available-pitchers`;
     console.log(`📡 GET request a: ${url}`);
     return _request(url, { method: 'GET' });
   },
+
+  /**
+   * Confirma que el usuario vio el cambio de pitcher del rival.
+   * @param {string} gameId
+   * @returns {Promise<{status, message}>}
+   */
+  acknowledgePitcherChange: (gameId) =>
+    _request(`/api/v1/games/${gameId}/acknowledge-pitcher-change`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    }),
 
   /**
    * Intenta un robo de base.

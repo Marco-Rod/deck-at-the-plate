@@ -1,231 +1,173 @@
-# 🧪 Instrucciones para Validar Fixes de Pack Assignment
+# Testing Instructions for Modal Disappearing Bug Fix
 
-## Resumen de Bugs Corregidos
+## Quick Test Checklist
 
-### Bug #1: Distribución de rareza incorrecta
-- **Problema**: Todas las cartas COMMON (0 SILVER, 0 BRONZE, 13 COMMON en lugar de 2-4-7)
-- **Causa**: 
-  - seed_mlb_2026.py verificaba "primaryNumber" pero guardaba "jerseyNumber" → todos overall=70
-  - Rarity mapping incompleto (solo COMMON/BRONZE/SILVER, sin GOLD/DIAMOND)
-- **Correcciones**:
-  - ✅ Línea 287: Cambié verificación a "jerseyNumber"
-  - ✅ Línea 319: Agregué mapeo completo DIAMOND(90+)/GOLD(85+)/SILVER(80+)/BRONZE(75+)/COMMON
+### Before Running
+1. Ensure Docker container is clean (no cached builds)
+2. Check that you see NO TypeScript errors in `npm run build`
+3. Verify the three modified files have correct syntax:
+   - `frontend/src/hooks/useEventSequencer.ts`
+   - `frontend/src/hooks/useEventSequencerCallbacks.ts`
+   - `frontend/src/components/stadium/StadiumShowcaseScreen.tsx`
 
-### Bug #2: Equipo favorito no respetado
-- **Problema**: Frontend enviaba LAD en lugar del equipo seleccionado (SF, PIT, etc)
-- **Causa**:
-  - OnboardingScreen.jsx inicializaba selectedFranchise='LAD' hardcodeado
-  - pack_service.py sobrescribía favorite_team_id con el team_id del pack
-- **Correcciones**:
-  - ✅ OnboardingScreen.jsx línea 59: Cambié a `useState('')`
-  - ✅ OnboardingScreen.jsx líneas 97-101: Agregué fallback para asegurar equipo seleccionado
-  - ✅ pack_service.py líneas 457-460: Modificada lógica para NO sobrescribir favorite_team_id existente
+### Step 1: Start Game
+1. Open browser DevTools (F12)
+2. Go to Console tab
+3. Start a new game (choose team, select lineup, etc.)
+4. Look for console output like:
+   ```
+   📌 [REGISTER STEP] Registering callback for step: show-modal
+   📌 [REGISTER STEP] Registering callback for step: close-modal
+   ... (more steps)
+   ✅ Step "show-modal" now has callback. Total steps registered: 11
+   ```
 
----
-
-## 📋 Pasos para Validar
-
-### Opción A: Reset Completo (Recomendado para dev)
-
-```bash
-# Terminal 1: Limpiar BD y recargar datos
-cd backend
-python run_complete_reset.py
-
-# Cuando se pida confirmación, escribe: s
-
-# Debería ver output similar a:
-# ✅ Base de datos limpiada con éxito.
-# ✅ Seed completado exitosamente
-# ✓ Todos los usuarios eliminados
-# ✓ Todos los equipos recreados de 0
-# ✓ ~1200 cartas cargadas con fixes
+### Step 2: First Event (HOME_RUN typically)
+Watch for this exact sequence in console:
 ```
+⚙️  [EVENT SEQUENCER] Processing event: HOME_RUN (id: 1234567-abc...)
+   🕐 Event sequence starting at T=1234567890
 
-### Opción B: Reset Manual (Por pasos)
+  📍 [STEP] show-modal (delay: 0ms) - executing callback
+    🎬 [SHOW-MODAL] Event: HOME_RUN
+    → Setting isModalVisible to TRUE
+    → Setting modalEventData: {text: "HOME RUN!", event: "HOME_RUN", ts: 1234567890}
+    📊 [STADIUM] isModalVisible STATE CHANGED: {
+      isModalVisible: true,
+      modalEventData: "HOME_RUN",
+      deferredGameState: <current inning>
+    }
+    ✅ show-modal completed in Xms
 
-```bash
-# Terminal 1: Limpiar base de datos
-cd backend
-python app/seeds/clean_db.py
-# Confirma con: s
-
-# Terminal 2: Cargar datos MLB 2026 (solo si está disponible pip)
-python app/seeds/seed_mlb_2026.py
-```
-
-### Paso 2: Iniciar Backend
-
-```bash
-# Terminal (en backend/)
-python -m uvicorn app.main:app --reload
-# Debería ver: Uvicorn running on http://127.0.0.1:8000
-```
-
-### Paso 3: Iniciar Frontend
-
-```bash
-# Terminal (en frontend/)
-npm run dev
-# Debería ver: ➜ Local: http://localhost:5173/
-```
-
-### Paso 4: Testing en Browser
-
-1. **Abre**: http://localhost:5173
-2. **Crea un nuevo usuario**:
-   - Nombre de club: "Test Club"
-   - Siglas: "TST"
-   - Otros campos: valores por defecto
-
-3. **En la pantalla de selección de franquicia**:
-   - **IMPORTANTE**: Selecciona un equipo distinto a LAD
-   - Ejemplos: SF (Giants), NYY (Yankees), BOS (Red Sox), etc.
-   - Verifica en la consola (F12) que muestre: `[DEBUG OnboardingScreen] setSelectedFranchise a: SF`
-
-4. **Abre el sobre inicial**:
-   - Haz clic en "Confirmar y Reclamar Sobre"
-   - Se abrirá una animación
-   - Haz clic en el sobre para revelar las cartas
-
-5. **Verifica los Logs** (en Terminal del backend):
-   - Busca sección `[COMPOSICION_POR_RAREZA]`:
-     ```
-     - DIAMOND: X (esperadas 0) ✓
-     - GOLD: X (esperadas 0) ✓
-     - SILVER: 2 (esperadas 2) ✓
-     - BRONZE: 4 (esperadas 4) ✓
-     - COMMON: 7 (esperadas 7) ✓
-     ```
-   - Busca sección `[COMPOSICION_POR_EQUIPO]`:
-     ```
-     - SF: 7 cartas (team_id seleccionado)
-     - (otros equipos): 1-2 cartas cada uno
-     ```
-   - Busca sección `[UPDATE]`:
-     ```
-     [UPDATE] favorite_team_id asignado a = SF (no existía)
-     ```
-
-6. **Verifica en la UI**:
-   - Las cartas mostradas deben tener rarity correcta:
-     - 2 cartas con fondo dorado/plateado (SILVER)
-     - 4 cartas con fondo cobre/bronce (BRONZE)
-     - 7 cartas con fondo gris/común (COMMON)
-   - Los valores OVR deben variar: algunos 70s, 80s, 90s (no todos 70)
-   - Al hacer clic en una carta, verifica "RAREZA" en el modal
-
----
-
-## ✅ Criterios de Éxito
-
-### Bug #1 - Rarity Distribution
-- [ ] Logs muestran SILVER: 2, BRONZE: 4, COMMON: 7
-- [ ] Cards en UI reflejan rareza visualmente (colores diferentes)
-- [ ] OVR values son variados (no todos 70)
-
-### Bug #2 - Team Selection
-- [ ] Seleccionas SF (u otro) → logs muestran SF en [COMPOSICION_POR_EQUIPO]
-- [ ] favorite_team_id en logs = SF (no LAD)
-- [ ] 7 cartas del equipo seleccionado, 6 de otros
-- [ ] Console log (F12) muestra `[DEBUG] setSelectedFranchise a: SF`
-
-### General
-- [ ] Sin errores en consola (frontend) excepto warnings normales
-- [ ] Sin errores en logs (backend) excepto INFO
-- [ ] Página carga sin freezes
-- [ ] Sobre se abre correctamente
-
----
-
-## 🐛 Si Hay Errores
-
-### Error: "ModuleNotFoundError: No module named 'requests'"
-```bash
-# En backend/
-pip install -r requirements.txt
-python run_complete_reset.py
-```
-
-### Error: "database connection refused"
-- Verifica que PostgreSQL está corriendo: `docker ps`
-- Si no: `docker-compose up -d` (si tienes docker-compose.yml)
-
-### Las cartas aún muestran todas COMMON
-- Verifica que seed_mlb_2026.py ejecutó sin errores
-- Busca en logs: `✅ Seed completado exitosamente`
-- Intenta ejecutar nuevamente
-
-### Frontend sigue enviando LAD
-- Limpia cache: Ctrl+Shift+Delete o Cmd+Shift+Delete
-- Abre dev tools (F12), tab Network, desactiva caché
-- Recarga: Ctrl+F5 o Cmd+Shift+R
-- Verifica que OnboardingScreen.jsx línea 59 tiene `useState('')`
-
----
-
-## 📊 Expected Output
-
-### Backend Logs (seed)
-```
-🔄 Iniciando seed de datos MLB 2026...
-📅 Fecha de datos: 25 de Marzo de 2026
-
-🧹 Limpiando todas las cartas previas...
-   ✓ 0 referencias de inventario eliminadas
-   ✓ 1200 cartas previas eliminadas
-
-📥 Obteniendo equipos de MLB...
-✓ Se obtuvieron 30 equipos
-[1/30] 🏟️  Los Angeles Dodgers → Dodgers Ficticios
-    ✓ Equipo creado
-    📋 Obteniendo roster de 40 jugadores...
-    ✓ 40 jugadores encontrados
-    ✓ 12 lanzadores + 28 bateadores agregados
-[2/30] 🏟️  New York Yankees → Yankees Ficticios
+  📍 [STEP] update-score (delay: 3600ms)
     ...
-✅ Seed completado exitosamente
-📊 Resumen: 30 equipos x ~40 jugadores = 1200 jugadores cargados
+
+  📍 [STEP] close-modal (delay: 4100ms) - executing callback
+    🚪 [CLOSE-MODAL] Closing modal
+    → Setting isModalVisible to FALSE
+    → Setting deferredGameState to NULL
+    📊 [STADIUM] isModalVisible STATE CHANGED: {
+      isModalVisible: false,
+      modalEventData: "HOME_RUN",  ← Should STILL have the event data
+      deferredGameState: null
+    }
+    ✅ close-modal completed in Xms
+
+✅ [EVENT SEQUENCER] Event completed: HOME_RUN
 ```
 
-### Backend Logs (pack assignment)
-```
-[PASO 8] RESUMEN FINAL - Cartas a guardar (13 total)
-  [COMPOSICION_POR_EQUIPO]
-    - SF: 7 cartas
-    - LAD: 1 cartas
-    - NYY: 1 cartas
-    - BOS: 1 cartas
-    - ATL: 1 cartas
-    - MIN: 1 carta
-  [COMPOSICION_POR_RAREZA]
-    - DIAMOND: 0 (esperadas 0) ✓
-    - GOLD: 0 (esperadas 0) ✓
-    - SILVER: 2 (esperadas 2) ✓
-    - BRONZE: 4 (esperadas 4) ✓
-    - COMMON: 7 (esperadas 7) ✓
-[PASO 10] Actualizando estado del usuario
-  [UPDATE] favorite_team_id asignado a = SF (no existía)
-  [UPDATE] has_completed_onboarding = True
-[COMMIT_SUCCESS] Cambios guardados correctamente
-[ASSIGN_STARTER_PACK] FIN - 13 cartas asignadas exitosamente
-```
+### Step 3: Repeat Events (Critical Test)
+1. Play until you see a BALL event
+2. Let it happen 3-4 times
+3. For each occurrence, verify the EXACT same log pattern appears:
+   ```
+   ⚙️  [EVENT SEQUENCER] Processing event: BALL
+   ...
+   🎬 [SHOW-MODAL] Event: BALL
+   → Setting isModalVisible to TRUE
+   ...
+   🚪 [CLOSE-MODAL] Closing modal
+   → Setting isModalVisible to FALSE
+   ```
 
----
+4. **CRITICAL**: If you see on the 3rd or 4th BALL:
+   - **Missing**: `🎬 [SHOW-MODAL]` → Modal callback not firing
+   - **Missing**: `📍 [STEP] show-modal` → Step not executing
+   - **Missing**: `📊 [STADIUM] isModalVisible STATE CHANGED` → State not updating
+   
+   Then there's still a bug to investigate.
 
-## 🎯 Próximas Validaciones (Opcional)
+### Step 4: Visual Verification
+1. Play the game naturally
+2. After each event (15+ events total), verify:
+   - ✅ Modal appears in center of screen
+   - ✅ Modal shows correct text (e.g., "HOME RUN!", "STRIKE", "BALL")
+   - ✅ Modal color/theme changes per event
+   - ✅ Modal disappears after animation completes
+   - ✅ Game continues with updated state
 
-1. **Crea múltiples usuarios** con diferentes equipos favoritos
-2. **Verifica que cada usuario** respeta su equipo seleccionado
-3. **Abre packs adicionales** (BRONZE, GOLD) - verificar rarity distribution
-4. **Juega una partida** para validar que el resto del juego no se rompió
+3. **FAIL conditions**:
+   - Modal doesn't appear for some events
+   - Modal appears but game is frozen
+   - Modal appears for event #1 but not #2 of same type
+   - Console shows no error but modal doesn't render
 
----
+### Step 5: Edge Cases
+1. **Rapid Clicking**: If possible, trigger multiple actions quickly
+   - Verify queue still processes all events in order
+   - Check console for event IDs: should be sequential
 
-## 📝 Notas
+2. **Same Event Type Repeated**: 
+   - Play until 3x STRIKE happens consecutively
+   - Verify modal appears all 3 times
+   - Look for log: each should have unique `ts` timestamp
 
-- Los datos se obtienen de la API real de MLB (statsapi.mlb.com)
-- Las cartas se crean bajo demanda durante el seed
-- Si el API falla, las cartas que se carguen serán incompletas
-- Para ambiente de producción, guardar datos en caché estático
+3. **Different Events in Sequence**:
+   - HOME_RUN → BALL → STRIKE sequence
+   - Verify queue order is maintained in console:
+     ```
+     ✅ Event completed: HOME_RUN
+     ⚙️  [EVENT SEQUENCER] Processing event: BALL  ← Immediately after
+     ...
+     ✅ Event completed: BALL
+     ⚙️  [EVENT SEQUENCER] Processing event: STRIKE  ← Immediately after
+     ```
 
+## Debugging If Still Broken
+
+### Check 1: No Callbacks Registered
+**Problem**: You see `Total steps registered: 0`
+
+**Solution**: 
+- Check that `useEventSequencerCallbacks` is being called
+- Add log in `onStep`: `console.log('onStep called with:', stepName)`
+- Verify `StadiumShowcaseScreen` line 107 is calling it correctly
+
+### Check 2: Show-Modal Not Firing
+**Problem**: `⚙️ Processing event:` appears but no `🎬 [SHOW-MODAL]`
+
+**Solution**:
+- Check that `step.delay` for show-modal is 0 (line 51 in useEventSequencer.ts)
+- Check if callback is registered: search console for `REGISTER STEP` for `show-modal`
+- Add breakpoint in `showModalCallback` in DevTools
+
+### Check 3: isModalVisible Not Changing
+**Problem**: `🎬 [SHOW-MODAL]` appears but `📊 [STADIUM]` shows `isModalVisible: false`
+
+**Solution**:
+- React state update might be batched weirdly
+- Try adding a `key={modalEventData?.ts}` to PlayResultOverlay component
+- Check if there's another useEffect resetting isModalVisible
+
+### Check 4: Modal Rendering But Not Visible
+**Problem**: PlayResultOverlay renders but doesn't appear on screen
+
+**Solution**:
+- Check browser DevTools Elements: find PlayResultOverlay in DOM
+- Check if z-index is correct (should be 30-40)
+- Check if opacity is 0 or display: none
+- Check if parent container has `overflow: hidden`
+
+## Critical Logs to Monitor
+
+Print these patterns and watch for their frequency:
+
+| Pattern | Healthy | Unhealthy |
+|---------|---------|-----------|
+| `⚙️ [EVENT SEQUENCER] Processing` | 1 per event | Should NOT see 2 in a row (no concurrency) |
+| `🎬 [SHOW-MODAL]` | 1 per event | Should equal number of events processed |
+| `🚪 [CLOSE-MODAL]` | 1 per event | Should equal number of events processed |
+| `✅ [EVENT SEQUENCER] Event completed` | 1 per event | Should follow close-modal |
+| `📊 [STADIUM] isModalVisible STATE CHANGED` | 2 per event (true→false) | Should alternate |
+
+## Report Template
+
+If the bug persists, collect:
+
+1. Screenshot of console showing 15+ consecutive events
+2. Count how many events show `🎬 [SHOW-MODAL]` vs total events
+3. Note the event number where modal stops appearing
+4. Check if it's always the same event type or random
+5. Full console output around the point where modal stops
+
+Then the next iteration can focus on exactly where the sequencer breaks down.
