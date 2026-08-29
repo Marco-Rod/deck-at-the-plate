@@ -11,9 +11,8 @@ Responsabilidades:
     - ``apply_human_pitcher_change``   : valida y ejecuta la sustitución humana.
     - ``acknowledge_pending_pitcher_change`` : confirma el cambio de la CPU y desbloquea.
 """
-from typing import TYPE_CHECKING, List, Tuple
+from typing import List, Tuple
 
-from app.engine.game_actions import perform_pitcher_change
 from app.engine.game_rules import MIN_PITCHES_TO_CHANGE
 from app.repositories import (
     find_pitchers_for_team,
@@ -22,10 +21,6 @@ from app.repositories import (
     get_card_by_id,
 )
 from app.services.card_presenter import build_pitcher_payload
-
-if TYPE_CHECKING:
-    from app.models import GameSession
-
 
 def _available_payloads(cards, pitch_counts: dict) -> List[dict]:
     """Payloads de relevistas marcando si ya lanzaron en esta partida."""
@@ -36,9 +31,7 @@ def _available_payloads(cards, pitch_counts: dict) -> List[dict]:
     ]
 
 
-def list_user_available_pitchers(
-    db, game: "GameSession", state: dict, user_id: str
-) -> List[dict]:
+def list_user_available_pitchers(db, state: dict, user_id: str) -> List[dict]:
     """
     Relevistas del inventario del usuario, excluyendo el pitcher activo.
     """
@@ -52,7 +45,7 @@ def list_user_available_pitchers(
 
 
 def list_rival_available_pitchers(
-    db, game: "GameSession", state: dict
+    db, state: dict, *, user_is_home: bool
 ) -> Tuple[List[dict], str]:
     """
     Relevistas del equipo rival (su team_id se deriva de su pitcher de referencia),
@@ -63,9 +56,8 @@ def list_rival_available_pitchers(
         que no se pudo determinar el equipo rival (payload de error, no excepción).
     """
     active_pitcher_id = state.get("active_pitcher")
-    user_role = state.get("user_role")  # 'HOME' o 'AWAY'
     rival_pitcher_id = (
-        state.get("away_pitcher_id") if user_role == "HOME" else state.get("home_pitcher_id")
+        state.get("away_pitcher_id") if user_is_home else state.get("home_pitcher_id")
     )
 
     ref_pitcher = get_card_by_id(db, rival_pitcher_id)
@@ -80,9 +72,21 @@ def list_rival_available_pitchers(
     return _available_payloads(rival_pitchers, state.get("pitch_counts", {})), ""
 
 
+def perform_pitcher_change(
+    state: dict, new_pitcher_id: str, *, is_home: bool
+) -> str | None:
+    """Aplica la transición de pitcher compartida por humano y CPU."""
+    old_pitcher_id = state.get("active_pitcher")
+    state["active_pitcher"] = new_pitcher_id
+    state["home_pitcher_id" if is_home else "away_pitcher_id"] = new_pitcher_id
+    pitch_counts = state.get("pitch_counts", {})
+    pitch_counts[new_pitcher_id] = 0
+    state["pitch_counts"] = pitch_counts
+    return old_pitcher_id
+
+
 def apply_human_pitcher_change(
     db,
-    game: "GameSession",
     state: dict,
     new_pitcher_id: str,
     is_home_user: bool,
@@ -126,7 +130,7 @@ def apply_human_pitcher_change(
             f"Lleva {current_pitch_count}."
         )
 
-    old_pitcher_id = perform_pitcher_change(game, state, new_pitcher_id, is_home=is_home_user)
+    old_pitcher_id = perform_pitcher_change(state, new_pitcher_id, is_home=is_home_user)
     return old_pitcher_id, None
 
 

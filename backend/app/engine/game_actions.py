@@ -40,6 +40,7 @@ from app.engine.tactic_resolver import (
     new_default_tactic_modifiers,
 )
 from app.engine.tactical_actions import resolve_bunt
+from app.engine.bullpen import perform_pitcher_change
 from app.engine.websocket_manager import manager
 from app.engine.fog_of_war import sanitize_state_for_player
 from app.models import GameSession
@@ -342,28 +343,6 @@ async def resolve_swing(
     return event, description, inning_ended
 
 
-def perform_pitcher_change(
-    game: GameSession, state: dict, new_pitcher_id: str, is_home: bool
-) -> str:
-    """
-    Aplica un cambio de lanzador sobre el state_data (regla compartida por el
-    cambio humano y el de la CPU): registra al nuevo pitcher como activo,
-    actualiza el campo lateral (home/away_pitcher_id) para que la transición
-    de inning lo restaure, y resetea su conteo de lanzamientos.
-
-    Returns:
-        old_pitcher_id (el pitcher que salió del montículo).
-    """
-    old_pitcher_id = state.get("active_pitcher")
-    state["active_pitcher"] = new_pitcher_id
-    side_field = "home_pitcher_id" if is_home else "away_pitcher_id"
-    state[side_field] = new_pitcher_id
-    pitch_counts = state.get("pitch_counts", {})
-    pitch_counts[new_pitcher_id] = 0
-    state["pitch_counts"] = pitch_counts
-    return old_pitcher_id
-
-
 async def execute_cpu_pitcher_change(
     game: GameSession, state: dict, db, game_id: str, difficulty: str
 ) -> bool:
@@ -431,7 +410,7 @@ async def execute_cpu_pitcher_change(
     print(f"   - Position: {new_pitcher.position} | Rarity: {new_pitcher.rarity}")
     
     # Ejecutar el cambio en state (regla compartida humano/CPU)
-    old_pitcher_id = perform_pitcher_change(game, state, new_pitcher.id, is_home=cpu_is_home)
+    old_pitcher_id = perform_pitcher_change(state, new_pitcher.id, is_home=cpu_is_home)
 
     # ⭐ Marcar que se está esperando confirmación del usuario
     state["awaiting_pitcher_change_acknowledgment"] = True
