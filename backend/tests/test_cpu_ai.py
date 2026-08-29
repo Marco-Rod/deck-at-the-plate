@@ -10,11 +10,11 @@ from app.core.enums import Difficulty, PitchType, SwingType
 from app.engine.cpu_ai import (
     _CPU_CHANGE_FATIGUE_THRESHOLD,
     _CPU_CHANGE_PROBABILITY,
-    _CPU_MIN_PITCHES_TO_CHANGE,
     get_cpu_pitch_action,
     get_cpu_pitcher_change_decision,
     get_cpu_swing_action,
 )
+from app.engine.game_rules import MIN_PITCHES_TO_CHANGE
 
 
 def test_repertoire_matches_seed_values():
@@ -63,7 +63,7 @@ def test_change_decision_below_threshold():
 def test_change_decision_over_threshold(monkeypatch):
     monkeypatch.setattr(random, "random", lambda: 0.01)
     assert get_cpu_pitcher_change_decision(
-        _CPU_MIN_PITCHES_TO_CHANGE, 96.0, Difficulty.EASY
+        MIN_PITCHES_TO_CHANGE, 96.0, Difficulty.EASY
     ) is True
 
 

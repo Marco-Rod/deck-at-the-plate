@@ -21,7 +21,6 @@ a ambos clientes conectados vía WebSocket.
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from typing import Dict, Any
 
 from app.auth import get_current_user
 from app.database import get_db
@@ -38,7 +37,10 @@ from app.core.enums import PITCHER_POSITIONS
 from app.engine.deck_manager import discard_used_tactic
 from app.engine.tactical_actions import resolve_steal
 from app.engine.websocket_manager import manager
+from app.engine.fog_of_war import sanitize_state_for_player
+from app.engine.game_rules import MIN_PITCHES_TO_CHANGE
 from app.engine.turn_guard import expected_actor, is_player_turn
+from app.engine.cpu_ai import is_cpu_turn
 from app.engine.attribute_mapper import map_card_to_pitcher_attrs
 from app.engine.game_actions import resolve_swing, trigger_cpu_response
 from app.repositories import (
@@ -92,6 +94,17 @@ def _build_play_result_response(game: GameSession, event: str, description: str)
         current_inning=game.current_inning,
         is_top_inning=game.is_top_inning,
         state_data=game.state_data,
+    )
+
+
+def _player_state_for(game: GameSession, requesting_user_id: str) -> dict:
+    """State_data de la partida sanitizado (Fog of War) para un destinatario concreto."""
+    return sanitize_state_for_player(
+        state_data=game.state_data,
+        requesting_user_id=requesting_user_id,
+        home_user_id=game.home_user_id,
+        away_user_id=game.away_user_id,
+        is_top_inning=game.is_top_inning,
     )
 
 
@@ -383,7 +396,7 @@ async def change_pitcher(
     state = dict(game.state_data or {})
 
     # ── Validar mínimo de lanzamientos antes de permitir el cambio ──────────
-    MIN_PITCHES_TO_CHANGE = 5
+    # (regla compartida con la CPU — ver app/engine/game_rules.py)
     active_pitcher_id = state.get("active_pitcher")
     pitch_counts_check: dict = state.get("pitch_counts", {})
     current_pitch_count = pitch_counts_check.get(active_pitcher_id, 0) if active_pitcher_id else 0
@@ -440,14 +453,14 @@ async def change_pitcher(
 
     print(f"✅ [PITCHER CHANGE] {old_pitcher_id} → {payload.new_pitcher_id} ({new_pitcher.name})")
 
-    # ⭐ NUEVO: Broadcast del cambio vía WebSocket
-    await manager.broadcast_to_game(game_id, {
+    # ⭐ NUEVO: Broadcast del cambio vía WebSocket (state_data sanitizado por destinatario)
+    await manager.broadcast_to_game_view(game_id, lambda u: {
         "type": "PITCHER_CHANGED",
         "message": f"🔄 Cambio de picher. Entra a la loma: {new_pitcher.name}",
         "old_pitcher_id": old_pitcher_id,
         "new_pitcher_id": payload.new_pitcher_id,
         "new_pitcher": new_pitcher_data,
-        "state_data": game.state_data,
+        "state_data": _player_state_for(game, u),
     })
 
     return {
@@ -643,7 +656,7 @@ def get_available_pitchers(
 
 
 @router.post("/{game_id}/acknowledge-pitcher-change", summary="Confirmar cambio de pitcher del rival")
-def acknowledge_pitcher_change(
+async def acknowledge_pitcher_change(
     game_id: str,
     db: Session = Depends(get_db),
     current_user_id: str = Depends(get_current_user),
@@ -682,20 +695,15 @@ def acknowledge_pitcher_change(
     db.commit()
     db.refresh(game)
     
-    # Broadcast para notificar que se desbloqueó
-    import asyncio
-    import logging
-    from app.engine.websocket_manager import manager
+    # Broadcast para notificar que se desbloqueó (state_data sanitizado por destinatario)
     try:
-        asyncio.run(manager.broadcast_to_game(game_id, {
+        await manager.broadcast_to_game_view(game_id, lambda u: {
             "type": "PITCHER_CHANGE_ACKNOWLEDGED",
             "message": "El juego continúa. El nuevo pitcher está listo.",
-            "state_data": game.state_data,
-        }))
+            "state_data": _player_state_for(game, u),
+        })
     except Exception as e:  # noqa: BLE001 - el broadcast no debe romper el flujo
-        logging.getLogger(__name__).warning(
-            "No se pudo emitir el broadcast de ack de cambio de pitcher: %s", e
-        )
+        print(f"⚠️ No se pudo emitir el broadcast de ack de cambio de pitcher: {e}")
     
     return {
         "status": "ok",
@@ -768,7 +776,7 @@ async def steal_base(
     db.commit()
     db.refresh(game)
 
-    await manager.broadcast_to_game(game_id, {
+    await manager.broadcast_to_game_view(game_id, lambda u: {
         "type": "STEAL_RESOLVED",
         "success": success,
         "description": description,
@@ -776,7 +784,7 @@ async def steal_base(
         "runners": runners,
         "current_inning": game.current_inning,
         "is_top_inning": game.is_top_inning,
-        "state_data": game.state_data,
+        "state_data": _player_state_for(game, u),
     })
 
     return {

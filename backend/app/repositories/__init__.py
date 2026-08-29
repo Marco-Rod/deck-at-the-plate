@@ -8,7 +8,7 @@ dominio, no al revés). Los routers reciben la sesión y delegan aquí.
 Pauta: los repos NO lanzan HTTPException (eso queda en el router/handler)
 y solo devuelven entidades o None.
 """
-from app.repositories.game_repository import get_game_by_id, save_game
+from app.repositories.game_repository import get_game_by_id
 from app.repositories.game_stats_repository import (
     get_game_box_score,
     get_player_game_stats,
@@ -39,7 +39,6 @@ from app.repositories.user_repository import (
 
 __all__ = [
     "get_game_by_id",
-    "save_game",
     "get_game_box_score",
     "get_player_game_stats",
     "record_game_event",

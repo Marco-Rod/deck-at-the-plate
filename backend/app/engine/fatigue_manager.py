@@ -1,4 +1,4 @@
-from typing import Dict, Any
+from typing import Dict
 
 # ⭐ MEJORADO: Umbrales más bajos para fatiga MÁS AGRESIVA
 # Estos son los puntos donde comienza la fatiga (threshold)

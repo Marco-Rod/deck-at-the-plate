@@ -37,7 +37,7 @@ async def websocket_endpoint(
         await websocket.close(code=4401)
         return
 
-    await manager.connect(websocket, game_id)
+    await manager.connect(websocket, game_id, user_id)
     db: Session = SessionLocal()
     try:
         # Enviar estado actual sanitizado al conectar

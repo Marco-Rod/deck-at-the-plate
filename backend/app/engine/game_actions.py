@@ -42,6 +42,7 @@ from app.engine.tactic_resolver import (
 )
 from app.engine.tactical_actions import resolve_bunt
 from app.engine.websocket_manager import manager
+from app.engine.fog_of_war import sanitize_state_for_player
 from app.models import GameSession
 from app.repositories import (
     find_pitchers_for_team,
@@ -368,8 +369,23 @@ async def resolve_swing(
     db.refresh(game)
 
     # ⭐ ASEGURAR que los strikeouts están frescos de la BD antes de enviar por WebSocket
-    payload = build_play_resolved_payload(game, event, description, inning_completed=inning_ended, user_id=user_id, db=db)
-    await manager.broadcast_to_game(game_id, payload)
+    base_payload = build_play_resolved_payload(game, event, description, inning_completed=inning_ended, user_id=user_id, db=db)
+
+    def _play_resolved_for(recipient_user_id: str) -> dict:
+        # Fog of War por destinatario: cada jugador recibe su propia vista del state.
+        player_state = sanitize_state_for_player(
+            state_data=game.state_data,
+            requesting_user_id=recipient_user_id,
+            home_user_id=game.home_user_id,
+            away_user_id=game.away_user_id,
+            is_top_inning=game.is_top_inning,
+        )
+        player_state["user_role"] = "HOME" if recipient_user_id == game.home_user_id else "AWAY"
+        payload = dict(base_payload)
+        payload["state_data"] = player_state
+        return payload
+
+    await manager.broadcast_to_game_view(game_id, _play_resolved_for)
     return event, description, inning_ended
 
 
@@ -474,15 +490,21 @@ async def execute_cpu_pitcher_change(
         fatigue_level=0.0,
     )
     
-    # Broadcast del cambio vía WebSocket
-    await manager.broadcast_to_game(game_id, {
+    # Broadcast del cambio vía WebSocket (state_data sanitizado por destinatario)
+    await manager.broadcast_to_game_view(game_id, lambda u: {
         "type": "PITCHER_CHANGED",
         "message": f"🔄 La CPU ha hecho un cambio de pitcher. Entra: {new_pitcher.name}",
         "old_pitcher_id": old_pitcher_id,
         "old_pitcher_data": old_pitcher_data,
         "new_pitcher_id": new_pitcher.id,
         "new_pitcher": new_pitcher_data,
-        "state_data": game.state_data,
+        "state_data": sanitize_state_for_player(
+            state_data=game.state_data,
+            requesting_user_id=u,
+            home_user_id=game.home_user_id,
+            away_user_id=game.away_user_id,
+            is_top_inning=game.is_top_inning,
+        ),
     })
     
     # ⭐ NUEVO: Marcar que se está esperando confirmación del usuario

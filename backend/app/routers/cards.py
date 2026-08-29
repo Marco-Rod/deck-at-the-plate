@@ -7,7 +7,7 @@ from app.database import get_db
 from app.repositories.card_repository import get_card_by_id as repo_get_card_by_id
 from app.repositories.team_repository import (
     find_cards_by_team,
-    get_all_teams,
+    get_all_teams as repo_get_all_teams,
     get_team_by_id,
 )
 
@@ -16,7 +16,7 @@ router = APIRouter(prefix="/api/v1/cards", tags=["Cards & Rosters"])
 
 @router.get("/teams", response_model=List[TeamBaseSchema])
 def get_all_teams(db: Session = Depends(get_db)):
-    return get_all_teams(db)
+    return repo_get_all_teams(db)
 
 
 @router.get("/teams/{team_id}", response_model=TeamRosterResponseSchema)

@@ -14,7 +14,7 @@ Para LANZADORES:
   - MCA (Movimiento): best movement from repertoire
 """
 
-from typing import List, Optional, TYPE_CHECKING
+from typing import List, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from app.models.card import PlayerCardModel

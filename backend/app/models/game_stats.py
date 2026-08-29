@@ -8,7 +8,7 @@ Se usa para:
   - Mostrar en tiempo real en el frontend (box score)
 """
 
-from sqlalchemy import Column, String, Integer, Float, DateTime, JSON, Boolean
+from sqlalchemy import Column, String, Integer, DateTime, JSON, Boolean
 from datetime import datetime
 from app.database import Base
 

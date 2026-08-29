@@ -1,6 +1,6 @@
 import random
 import logging
-from typing import List, Dict, Set
+from typing import List, Dict
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
 
@@ -50,26 +50,6 @@ class PackService:
             "rates": {CardRarity.SILVER: 0.10, CardRarity.GOLD: 0.60, CardRarity.DIAMOND: 0.30}
         }
     }
-
-    @staticmethod
-    def _group_cards_by_rarity(cards: List[PlayerCardModel]) -> Dict[str, List[PlayerCardModel]]:
-        """
-        Agrupa cartas por rareza.
-        
-        Args:
-            cards: Lista de cartas
-            
-        Returns:
-            Diccionario con cartas agrupadas por rareza
-            Ej: {"DIAMOND": [...], "GOLD": [...], ...}
-        """
-        by_rarity = {}
-        for card in cards:
-            rarity = card.rarity.name if card.rarity else "COMMON"
-            if rarity not in by_rarity:
-                by_rarity[rarity] = []
-            by_rarity[rarity].append(card)
-        return by_rarity
 
     @staticmethod
     def _get_missing_positions(selected_cards: List[PlayerCardModel]) -> List[str]:

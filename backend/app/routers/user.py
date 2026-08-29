@@ -11,7 +11,7 @@ from app.repositories import (
     get_card_by_id,
     get_or_create_wallet,
     get_user_by_id,
-    get_user_team,
+    get_user_team as repo_get_user_team,
 )
 from app.auth import get_current_user
 
@@ -122,7 +122,7 @@ def create_user_team(
     """Crea el club personalizado para el usuario autenticado."""
     _get_current_user_or_404(current_user_id, db)
 
-    existing_team = get_user_team(db, current_user_id)
+    existing_team = repo_get_user_team(db, current_user_id)
     if existing_team:
         raise HTTPException(status_code=400, detail="El usuario ya tiene un club registrado")
 
@@ -148,7 +148,7 @@ def get_user_team(
     current_user_id: str = Depends(get_current_user),
 ):
     """Obtiene los datos del club personalizado del usuario autenticado."""
-    team = get_user_team(db, current_user_id)
+    team = repo_get_user_team(db, current_user_id)
     if not team:
         raise HTTPException(status_code=404, detail="El usuario no ha fundado ningún club")
     return team

@@ -3,6 +3,7 @@ from typing import Any, Dict
 
 from app.core.enums import Difficulty, PitchType, SwingType
 from app.core.engine_types import PitchSelection, SwingSelection
+from app.engine.game_rules import MIN_PITCHES_TO_CHANGE
 
 # Tipos de picheo que deben coincidir con los usados en el repertorio de las cartas (seed data)
 # Orden de definición de PitchType: 4-SEAM, SLIDER, CHANGE, CURVE, SINKER, CUTTER, IBB
@@ -47,7 +48,7 @@ def get_cpu_swing_action(difficulty: str = "MEDIUM") -> SwingSelection:
 # ---------------------------------------------------------------------------
 
 # Mínimo de lanzamientos antes de que la CPU pueda considerar un cambio
-_CPU_MIN_PITCHES_TO_CHANGE = 5
+# (regla compartida con el motor — ver app/engine/game_rules.py)
 
 # Umbrales de fatiga (%) por dificultad a partir de los cuales la CPU decide cambiar
 _CPU_CHANGE_FATIGUE_THRESHOLD: Dict[Difficulty, float] = {
@@ -73,7 +74,7 @@ def get_cpu_pitcher_change_decision(
     Decide si la CPU debe cambiar a su pitcher en este momento.
 
     Lógica:
-      1. El pitcher debe haber lanzado al menos _CPU_MIN_PITCHES_TO_CHANGE.
+      1. El pitcher debe haber lanzado al menos MIN_PITCHES_TO_CHANGE.
       2. La fatiga debe superar el umbral configurado por dificultad.
       3. Aplica probabilidad aleatoria para añadir variabilidad (la CPU no es perfecta).
 
@@ -85,7 +86,7 @@ def get_cpu_pitcher_change_decision(
     Returns:
         True si la CPU debe ejecutar un cambio de pitcher, False en caso contrario.
     """
-    if pitch_count < _CPU_MIN_PITCHES_TO_CHANGE:
+    if pitch_count < MIN_PITCHES_TO_CHANGE:
         return False
 
     threshold = _CPU_CHANGE_FATIGUE_THRESHOLD.get(difficulty, 65.0)
