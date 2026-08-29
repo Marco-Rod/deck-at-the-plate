@@ -1,18 +1,18 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.models import Team, PlayerCardModel
+from app.repositories import find_cards_by_team, get_all_teams
 
 router = APIRouter(prefix="/api/v1/teams", tags=["Teams"])
 
 @router.get("/cpu")
 def get_cpu_teams(db: Session = Depends(get_db)):
     """Devuelve todos los equipos disponibles como rivales CPU con sus medias globales calculadas."""
-    teams = db.query(Team).all()
+    teams = get_all_teams(db)
     result = []
 
     for team in teams:
-        cards = db.query(PlayerCardModel).filter(PlayerCardModel.team_id == team.id).all()
+        cards = find_cards_by_team(db, team.id)
         if not cards:
             continue
 

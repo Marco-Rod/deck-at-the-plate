@@ -11,12 +11,20 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import GameSession, PlayerCardModel, UserLineup
+from app.models import GameSession
 from app.schemas import CreateGameRequest, GameSessionResponse
 from app.auth import get_current_user
 
 from app.engine.deck_manager import initialize_tactics_state
 from app.engine.fog_of_war import sanitize_state_for_player
+from app.repositories import (
+    find_all_cards,
+    find_cards_by_team,
+    get_active_lineup,
+    get_card_by_id,
+    get_game_by_id,
+    get_team_by_id,
+)
 
 router = APIRouter(prefix="/api/v1/games", tags=["Gestión de Sesión 1v1"])
 
@@ -89,10 +97,7 @@ def create_game_session(
     # Si no viene provisto, buscar del usuario
     if (human_is_home and (not home_lineup_ids or len(home_lineup_ids) < 9)) or \
        (not human_is_home and (not away_lineup_ids or len(away_lineup_ids) < 9)):
-        user_lineup = db.query(UserLineup).filter(
-            UserLineup.user_id == human_user_id,
-            UserLineup.is_active == True
-        ).first()
+        user_lineup = get_active_lineup(db, human_user_id)
         if user_lineup and user_lineup.slots:
             # Normalizar slots: se acepta tanto el objeto completo de la carta
             # ({"id": "card_xxx", ...}) como un id plano ("card_xxx"). Esto hace
@@ -121,17 +126,16 @@ def create_game_session(
                 away_pitcher_id = pitcher_card
 
     # 2. Obtener datos de CPU (equipo rival)
-    cpu_cards = db.query(PlayerCardModel).filter(PlayerCardModel.team_id == rival_team_id).all()
+    cpu_cards = find_cards_by_team(db, rival_team_id)
     
     # ⭐ Cargar nombre completo del equipo rival desde la tabla Team
-    from app.models import Team
-    rival_team_obj = db.query(Team).filter(Team.id == rival_team_id).first()
+    rival_team_obj = get_team_by_id(db, rival_team_id)
     rival_team_name = rival_team_obj.name if rival_team_obj else rival_team_id
     
     # ⭐ FALLBACK: Si no hay cartas del equipo rival, usar cartas de cualquier equipo
     if not cpu_cards:
         logger.warning("No hay cartas para equipo %s; usando cartas de cualquier equipo.", rival_team_id)
-        cpu_cards = db.query(PlayerCardModel).all()
+        cpu_cards = find_all_cards(db)
     
     if not cpu_cards:
         raise HTTPException(
@@ -227,7 +231,7 @@ def get_game_session(
     Seguridad: la identidad del usuario se deriva del JWT (no del query param),
     y solo un usuario perteneciente a la partida puede consultarla.
     """
-    game = db.query(GameSession).filter(GameSession.id == game_id).first()
+    game = get_game_by_id(db, game_id)
     if not game:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -243,7 +247,7 @@ def get_game_session(
 
     state = dict(game.state_data or {})
     active_pitcher_id = state.get("active_pitcher")
-    active_pitcher = db.query(PlayerCardModel).filter(PlayerCardModel.id == active_pitcher_id).first() if active_pitcher_id else None
+    active_pitcher = get_card_by_id(db, active_pitcher_id)
 
     sanitized_state = sanitize_state_for_player(
         state_data=game.state_data,
@@ -288,7 +292,7 @@ def get_box_score(
     """
     from app.engine.stats_recorder import get_game_box_score
     
-    game = db.query(GameSession).filter(GameSession.id == game_id).first()
+    game = get_game_by_id(db, game_id)
     if not game:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -328,7 +332,7 @@ def get_player_game_stats(
     """
     from app.engine.stats_recorder import get_player_game_stats as calc_player_stats
     
-    game = db.query(GameSession).filter(GameSession.id == game_id).first()
+    game = get_game_by_id(db, game_id)
     if not game:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

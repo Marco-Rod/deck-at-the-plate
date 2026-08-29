@@ -1,11 +1,24 @@
-from typing import Dict, Any, Tuple
+"""
+Módulo: runner_manager
+========================
+Función pura de base running: dados los corredores actuales y el evento de la
+jugada, calcula el nuevo mapa de bases y las carreras anotadas.
+
+Retorna: (new_runners, runs_scored, event_adjusted)
+    - event_adjusted puede ser ``Event.DOUBLE_PLAY`` si se logró un doble play.
+"""
+from typing import Tuple
 import random
 
+from app.core.enums import Event, RunnerBase
+from app.core.engine_types import Runners
+
+
 def advance_runners(
-    runners: Dict[str, Any], 
-    event: str, 
-    current_batter_id: str = "BATTER"
-) -> Tuple[Dict[str, Any], int, str]:
+    runners: Runners,
+    event: str,
+    current_batter_id: str = "BATTER",
+) -> Tuple[Runners, int, str]:
     """
     Calcula el nuevo estado de las bases y el número de carreras anotadas.
     
@@ -13,16 +26,16 @@ def advance_runners(
     Retorna: (new_runners_dict, runs_scored, event_adjusted)
              - event_adjusted puede ser "DOUBLE_PLAY" si se logró un doble play
     """
-    new_runners = {"1b": None, "2b": None, "3b": None}
+    new_runners: Runners = {"1b": None, "2b": None, "3b": None}
     runs = 0
     event_adjusted = event
 
-    r1 = runners.get("1b")
-    r2 = runners.get("2b")
-    r3 = runners.get("3b")
+    r1 = runners.get(RunnerBase.FIRST)
+    r2 = runners.get(RunnerBase.SECOND)
+    r3 = runners.get(RunnerBase.THIRD)
 
     # --- BASE POR BOLAS (WALK) ---
-    if event == "WALK":
+    if event == Event.WALK:
         if r1:
             new_runners["1b"] = current_batter_id
             if r2:
@@ -41,7 +54,7 @@ def advance_runners(
             new_runners["3b"] = r3
 
     # --- HIT SENCILLO (HIT_1B) ---
-    elif event == "HIT_1B":
+    elif event == Event.HIT_1B:
         if r3: 
             runs += 1
         if r2: 
@@ -50,21 +63,21 @@ def advance_runners(
             new_runners["2b"] = r1
         new_runners["1b"] = current_batter_id
     # --- HIT DOBLE (HIT_2B) ---
-    elif event == "HIT_2B":
+    elif event == Event.HIT_2B:
         if r3: runs += 1
         if r2: runs += 1
         if r1: new_runners["3b"] = r1
         new_runners["2b"] = current_batter_id
 
     # --- HIT TRIPLE (HIT_3B) ---
-    elif event == "HIT_3B":
+    elif event == Event.HIT_3B:
         if r3: runs += 1
         if r2: runs += 1
         if r1: runs += 1
         new_runners["3b"] = current_batter_id
 
     # --- HOME RUN ---
-    elif event == "HOME_RUN":
+    elif event == Event.HOME_RUN:
         runs += 1  # El bateador
         if r1: runs += 1
         if r2: runs += 1
@@ -73,9 +86,9 @@ def advance_runners(
 
     # --- OUTS EN JUEGO (OUT_GROUND, OUT_FLY) ---
     # Posible DOUBLE PLAY si hay corredor en 1B y es roletazo al cuadro
-    elif event in ("OUT_GROUND", "OUT_FLY"):
+    elif event in (Event.OUT_GROUND, Event.OUT_FLY):
         # Detectar doble play: corredor en 1B + roletazo al cuadro (OUT_GROUND)
-        if event == "OUT_GROUND" and r1 is not None:
+        if event == Event.OUT_GROUND and r1 is not None:
             # Hay corredor en primera → intentar doble play
             # ⭐ ESPECIAL: Si hay bases llenas, el doble play es automático (100%)
             if r1 is not None and r2 is not None and r3 is not None:
@@ -96,7 +109,7 @@ def advance_runners(
                 # - Corredor en 2B → Avanza a 3B (fuerza de 1B out)
                 # - Corredor en 3B → Anota (fuerza por out en 1B y 2B)
                 print(f"⚾ [DOUBLE PLAY] ¡Doble play! Corredor en 1B ({r1}) out en 2B + bateador out en 1B")
-                event_adjusted = "DOUBLE_PLAY"
+                event_adjusted = Event.DOUBLE_PLAY
                 
                 # Aplicar fuerza y anotación:
                 # r3 anota siempre en DP (fuerza de dos outs)

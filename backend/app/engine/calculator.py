@@ -20,24 +20,37 @@ Rangos de los eventos en bolas en juego (power_score 0–115 aprox.):
     63–85 → HIT_1B    (~22%)
     25–63 → OUT_GROUND (~42%)
     < 25  → OUT_FLY    (~23%)
+
+Este módulo es PURAMENTE FUNCIONAL: recibe DTOs tipados de ``app.core`` y
+retorna un ``PlayResult`` (NamedTuple), sin dependencias de la infraestructura
+(no importa SQLAlchemy ni FastAPI) → cumple DIP (D de SOLID).
 """
 import random
-from typing import Dict, Any, Tuple
+
+from app.core.enums import Event, PitchType, SwingType
+from app.core.engine_types import (
+    BatterAttrs,
+    PitchSelection,
+    PitcherAttrs,
+    PlayResult,
+    SwingSelection,
+    TacticsModifiers,
+)
 
 
 def calculate_play_outcome(
-    pitcher_attrs: Dict[str, int],
-    batter_attrs: Dict[str, int],
-    pitch_selected: Dict[str, Any],
-    swing_selected: Dict[str, Any],
-    tactics_modifiers: Dict[str, float] = None
-) -> Tuple[str, str]:
+    pitcher_attrs: PitcherAttrs,
+    batter_attrs: BatterAttrs,
+    pitch_selected: PitchSelection,
+    swing_selected: SwingSelection,
+    tactics_modifiers: TacticsModifiers = None,
+) -> PlayResult:
     """
     Calcula el resultado de la jugada aplicando RNG ponderado basado en atributos de Statcast.
     
     Args:
-        pitcher_attrs: Atributos globales de la carta del pícher.
-        batter_attrs: Atributos globales de la carta del bateador.
+        pitcher_attrs: Atributos globales de la carta del pícher (claves en español).
+        batter_attrs: Atributos globales de la carta del bateador (claves en español).
         pitch_selected: Diccionario con la zona y picheo lanzado.
                         Ejemplo: {
                             "zone": 5, 
@@ -49,10 +62,10 @@ def calculate_play_outcome(
         swing_selected: Diccionario con el tipo de swing y predicción.
         tactics_modifiers: Modificadores aplicados por cartas tácticas.
 
-    Retorna: (event_code, description)
+    Retorna: PlayResult(event, description)
     """
 
-    tactics = tactics_modifiers or {
+    tactics: TacticsModifiers = tactics_modifiers or {
         "batter_con": 1.0, 
         "batter_pwr": 1.0, 
         "batter_vis": 1.0, 
@@ -79,23 +92,23 @@ def calculate_play_outcome(
     actual_pitch = pitch_selected["pitch_type"]
 
     # Manejo especial de Base por Bolas Intencional
-    if actual_pitch == "IBB":
-        return "BALL", "Base por bolas intencional."
+    if actual_pitch == PitchType.IBB:
+        return PlayResult(Event.BALL, "Base por bolas intencional.")
 
     zone_matched = (guessed_zone == actual_zone)
     pitch_matched = (guessed_pitch == actual_pitch)
 
     # --- FASE 1: BATEADOR NO HACE SWING (TAKE) ---
-    if swing_type == "TAKE":
+    if swing_type == SwingType.TAKE:
         # Base MLB: ~65% de picheos sin swing son strikes
         strike_chance = 0.65 + (ctl - 50) * 0.003 - (vis - 50) * 0.002
         if zone_matched:
             strike_chance -= 0.12  # Bono por anticipar la zona correcta
 
         if random.random() < max(0.25, min(0.85, strike_chance)):
-            return "STRIKE_LOOKING", "Lanzamiento en la zona. ¡Strike cantado!"
+            return PlayResult(Event.STRIKE_LOOKING, "Lanzamiento en la zona. ¡Strike cantado!")
         else:
-            return "BALL", "Lanzamiento fuera de la zona. ¡Bola!"
+            return PlayResult(Event.BALL, "Lanzamiento fuera de la zona. ¡Bola!")
 
     # --- FASE 2: BATEADOR HACE SWING ---
     # Base Whiff%: ~24.5% en MLB para un duelo neutro (50 vs 50)
@@ -107,7 +120,7 @@ def calculate_play_outcome(
     if pitch_matched:
         whiff_base -= 8.0
 
-    if swing_type == "POWER":
+    if swing_type == SwingType.POWER:
         whiff_base += 8.0  # El swing de poder aumenta la tasa de abanicado
         pwr *= 1.20
 
@@ -115,11 +128,11 @@ def calculate_play_outcome(
 
     # Evaluación de contacto
     if random.uniform(0, 100) < whiff_chance:
-        return "STRIKE_SWINGING", "Swing abanicado. ¡Strike!"
+        return PlayResult(Event.STRIKE_SWINGING, "Swing abanicado. ¡Strike!")
 
     # De los contactos que no abanican, ~35% son Fouls en MLB
     if random.uniform(0, 100) < 35.0 and not (zone_matched and pitch_matched):
-        return "FOUL", "Batazo de foul."
+        return PlayResult(Event.FOUL, "Batazo de foul.")
 
     # --- FASE 3: BOLA PUESTA EN JUEGO (BABIP MLB REAL) ---
     power_score = (pwr - 50) * 0.4 + random.uniform(0, 100)
@@ -128,14 +141,14 @@ def calculate_play_outcome(
         power_score += 15.0
 
     if power_score > 96.0:
-        return "HOME_RUN", "¡Enorme batazo por todo el jardín central! ¡HOME RUN!"
+        return PlayResult(Event.HOME_RUN, "¡Enorme batazo por todo el jardín central! ¡HOME RUN!")
     elif power_score > 93.0:
-        return "HIT_3B", "¡Batazo pegado a la barda! El corredor llega a tercera base. ¡Triple!"
+        return PlayResult(Event.HIT_3B, "¡Batazo pegado a la barda! El corredor llega a tercera base. ¡Triple!")
     elif power_score > 85.0:
-        return "HIT_2B", "Batazo profundo contra la barda. Doble base."
+        return PlayResult(Event.HIT_2B, "Batazo profundo contra la barda. Doble base.")
     elif power_score > 63.0:
-        return "HIT_1B", "Contacto limpio sobre el cuadro. Hit sencillo."
+        return PlayResult(Event.HIT_1B, "Contacto limpio sobre el cuadro. Hit sencillo.")
     elif power_score > 25.0:
-        return "OUT_GROUND", "Roletazo suave al cuadro para out."
+        return PlayResult(Event.OUT_GROUND, "Roletazo suave al cuadro para out.")
     else:
-        return "OUT_FLY", "Elevado de rutina atrapado en el jardín."
+        return PlayResult(Event.OUT_FLY, "Elevado de rutina atrapado en el jardín.")

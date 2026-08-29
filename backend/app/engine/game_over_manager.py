@@ -1,7 +1,11 @@
-from typing import Tuple, Dict, Any
-from app.models import GameSession
+from __future__ import annotations
+from typing import TYPE_CHECKING, Any, Dict, Tuple
 
-def check_game_over(game: GameSession, state: Dict[str, Any]) -> Tuple[bool, str]:
+if TYPE_CHECKING:
+    from app.models import GameSession
+
+
+def check_game_over(game: "GameSession", state: Dict[str, Any]) -> Tuple[bool, str]:
     """
     Verifica las condiciones de fin de juego según total_innings configurado:
     1. Walk-off: El local toma la delantera en la parte baja del último inning o posterior.

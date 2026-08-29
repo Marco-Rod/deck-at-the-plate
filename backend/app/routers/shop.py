@@ -5,7 +5,7 @@ import logging
 from app.schemas import StarterPackResponseSchema, OpenPackResponseSchema
 from app.database import get_db
 from app.services.pack_service import PackService
-from app.models import User, UserCardInventory, UserTeam
+from app.repositories import get_user_by_id, get_user_team
 from app.auth import get_current_user
 
 router = APIRouter(prefix="/api/v1/shop", tags=["Shop & Packs"])
@@ -27,7 +27,7 @@ def claim_starter_pack(
 
     Solo puede reclamarse una vez por cuenta.
     """
-    user = db.query(User).filter(User.id == user_id).first()
+    user = get_user_by_id(db, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
 
@@ -38,7 +38,7 @@ def claim_starter_pack(
             detail="Ya has reclamado tu sobre inicial anteriormente.",
         )
 
-    user_team = db.query(UserTeam).filter(UserTeam.user_id == user_id).first()
+    user_team = get_user_team(db, user_id)
 
     # Si no ha creado un club, requerimos que cree su franquicia primero
     if not user_team:

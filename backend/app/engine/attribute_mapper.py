@@ -22,13 +22,15 @@ Mapeo de atributos:
         (vision no existe como columna; se deriva del overall del bateador)
 """
 
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
+
+from app.core.engine_types import BatterAttrs, PitcherAttrs
 
 if TYPE_CHECKING:
     from app.models.card import PlayerCardModel
 
 
-def map_card_to_pitcher_attrs(card: "PlayerCardModel") -> dict:
+def map_card_to_pitcher_attrs(card: "PlayerCardModel") -> PitcherAttrs:
     """
     Convierte un PlayerCardModel a un diccionario de atributos de pitcheo
     listo para ser consumido por el engine (calculator.py, fatigue_manager.py).
@@ -37,7 +39,7 @@ def map_card_to_pitcher_attrs(card: "PlayerCardModel") -> dict:
         card: Instancia de PlayerCardModel obtenida de la base de datos.
 
     Returns:
-        dict con claves: "velocidad", "control", "movimiento"
+        PitcherAttrs con claves: "velocidad", "control", "movimiento"
     """
     return {
         "velocidad": card.velocity,
@@ -46,7 +48,7 @@ def map_card_to_pitcher_attrs(card: "PlayerCardModel") -> dict:
     }
 
 
-def map_card_to_batter_attrs(card: "PlayerCardModel") -> dict:
+def map_card_to_batter_attrs(card: "PlayerCardModel") -> BatterAttrs:
     """
     Convierte un PlayerCardModel a un diccionario de atributos de bateo
     listo para ser consumido por el engine (calculator.py).
@@ -58,7 +60,7 @@ def map_card_to_batter_attrs(card: "PlayerCardModel") -> dict:
         card: Instancia de PlayerCardModel obtenida de la base de datos.
 
     Returns:
-        dict con claves: "contacto", "poder", "vision"
+        BatterAttrs con claves: "contacto", "poder", "vision"
     """
     # Vision: capacidad de leer lanzamientos. Se aproxima como promedio
     # ponderado de contacto (70%) y overall (30%).

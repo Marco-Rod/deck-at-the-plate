@@ -1,11 +1,22 @@
+"""
+Tácticas de juego (funciones puras)
+====================================
+- resolve_bunt: Resuelve el intento de toque de bola (sacrificio).
+- resolve_steal: Resuelve un intento de robo de base según control/velocidad
+  del pitcher contra la probabilidad base de robo en MLB (~68%).
+"""
+from typing import Tuple
 import random
-from typing import Dict, Any, Tuple
+
+from app.core.enums import Event, RunnerBase
+from app.core.engine_types import BatterAttrs, PitcherAttrs, Runners
+
 
 def resolve_bunt(
-    pitcher_attrs: Dict[str, int],
-    batter_attrs: Dict[str, int],
-    runners: Dict[str, Any]
-) -> Tuple[str, str, bool]:
+    pitcher_attrs: PitcherAttrs,
+    batter_attrs: BatterAttrs,
+    runners: Runners,
+) -> Tuple[Event, str, bool]:
     """
     Resuelve el toque de bola (Bunt).
     Ofrece una alta probabilidad de Out para el bateador (Sacrificio),
@@ -21,16 +32,16 @@ def resolve_bunt(
     bunt_success_chance = max(0.40, min(0.90, bunt_success_chance))
 
     if random.random() < bunt_success_chance:
-        return "OUT_GROUND", "Toque de bola perfecto para toque de sacrificio. El bateador cae fuera en 1B pero los corredores avanzan.", True
+        return Event.OUT_GROUND, "Toque de bola perfecto para toque de sacrificio. El bateador cae fuera en 1B pero los corredores avanzan.", True
     else:
         # Falló el toque: atrapado rápido en foul o ponche de toque
-        return "STRIKE_LOOKING", "Toque defectuoso de foul.", False
+        return Event.STRIKE_LOOKING, "Toque defectuoso de foul.", False
 
 
 def resolve_steal(
-    pitcher_attrs: Dict[str, int],
-    runners: Dict[str, Any],
-    target_base: str
+    pitcher_attrs: PitcherAttrs,
+    runners: Runners,
+    target_base: str,
 ) -> Tuple[bool, str]:
     """
     Resuelve el intento de robo de base (1B -> 2B o 2B -> 3B).
@@ -38,10 +49,10 @@ def resolve_steal(
     
     Retorna: (success, description)
     """
-    if target_base not in ["2b", "3b"]:
+    if target_base not in (RunnerBase.SECOND, RunnerBase.THIRD):
         return False, "Base de destino no válida para robo."
 
-    from_base = "1b" if target_base == "2b" else "2b"
+    from_base = RunnerBase.FIRST if target_base == RunnerBase.SECOND else RunnerBase.SECOND
     if not runners.get(from_base):
         return False, f"No hay corredor en {from_base.upper()} para intentar el robo."
 

@@ -26,6 +26,7 @@ import threading
 
 from app.database import get_db
 from app.models import User, UserWallet
+from app.repositories import get_user_by_username
 from app.auth import create_access_token
 from app.schemas.user import RegisterRequest, LoginResponse
 
@@ -125,7 +126,7 @@ def register(payload: RegisterRequest, request: Request, db: Session = Depends(g
     """
     enforce_login_rate_limit(request)
 
-    existing = db.query(User).filter(User.username == payload.username).first()
+    existing = get_user_by_username(db, payload.username)
     if existing:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -174,7 +175,7 @@ def login(
     """
     enforce_login_rate_limit(request)
 
-    user = db.query(User).filter(User.username == form_data.username).first()
+    user = get_user_by_username(db, form_data.username)
 
     if not user or not _verify_password(form_data.password, user.hashed_password):
         raise HTTPException(

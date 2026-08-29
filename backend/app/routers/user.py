@@ -3,15 +3,23 @@ from sqlalchemy.orm import Session
 
 from app.schemas import UserProfileResponseSchema, UserInventoryResponseSchema, CreateTeamRequestSchema, UserTeamResponseSchema
 from app.database import get_db
-from app.models import User, UserWallet, UserCardInventory, PlayerCardModel, UserLineup, UserTeam
+from app.models import UserLineup, UserTeam
+from app.repositories import (
+    find_user_inventory_cards,
+    get_active_lineup,
+    get_card_by_id,
+    get_or_create_wallet,
+    get_user_by_id,
+    get_user_team,
+)
 from app.auth import get_current_user
 
 router = APIRouter(prefix="/api/v1/user", tags=["User & Inventory"])
 
 
-def _get_current_user_or_404(user_id: str, db: Session) -> User:
+def _get_current_user_or_404(user_id: str, db: Session):
     """Resuelve el usuario autenticado o lanza 404."""
-    user = db.query(User).filter(User.id == user_id).first()
+    user = get_user_by_id(db, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
     return user
@@ -25,14 +33,7 @@ def get_user_profile(
     """Obtiene la información general del usuario autenticado y su saldo de monedas."""
     user = _get_current_user_or_404(current_user_id, db)
 
-    wallet = db.query(UserWallet).filter(UserWallet.user_id == current_user_id).first()
-
-    # Si por alguna razón el usuario no tiene wallet creada, se inicializa con valores base
-    if not wallet:
-        wallet = UserWallet(user_id=current_user_id, stamps=1000, gems=0)
-        db.add(wallet)
-        db.commit()
-        db.refresh(wallet)
+    wallet = get_or_create_wallet(db, current_user_id)
 
     return {
         "user_id": user.id,
@@ -53,15 +54,11 @@ def get_user_inventory(
     """Devuelve la lista completa de cartas del usuario autenticado en su colección."""
     _get_current_user_or_404(current_user_id, db)
 
-    inventory_items = (
-        db.query(UserCardInventory)
-        .filter(UserCardInventory.user_id == current_user_id)
-        .all()
-    )
+    inventory_items = find_user_inventory_cards(db, current_user_id)
 
     cards_list = []
     for item in inventory_items:
-        card = db.query(PlayerCardModel).filter(PlayerCardModel.id == item.card_id).first()
+        card = get_card_by_id(db, item.card_id)
         if card:
             cards_list.append({
                 "inventory_id": item.id,
@@ -82,11 +79,7 @@ def get_user_active_lineup(
     current_user_id: str = Depends(get_current_user),
 ):
     """Recupera la alineación activa del usuario autenticado desde la base de datos."""
-    lineup = (
-        db.query(UserLineup)
-        .filter(UserLineup.user_id == current_user_id, UserLineup.is_active == True)
-        .first()
-    )
+    lineup = get_active_lineup(db, current_user_id)
     if not lineup:
         return {"user_id": current_user_id, "name": "Lineup Principal", "slots": {}}
     return lineup
@@ -101,11 +94,7 @@ def save_user_lineup(
     """Crea o actualiza el lineup activo del usuario autenticado en PostgreSQL."""
     _get_current_user_or_404(current_user_id, db)
 
-    lineup = (
-        db.query(UserLineup)
-        .filter(UserLineup.user_id == current_user_id, UserLineup.is_active == True)
-        .first()
-    )
+    lineup = get_active_lineup(db, current_user_id)
 
     if not lineup:
         lineup = UserLineup(
@@ -132,7 +121,7 @@ def create_user_team(
     """Crea el club personalizado para el usuario autenticado."""
     _get_current_user_or_404(current_user_id, db)
 
-    existing_team = db.query(UserTeam).filter(UserTeam.user_id == current_user_id).first()
+    existing_team = get_user_team(db, current_user_id)
     if existing_team:
         raise HTTPException(status_code=400, detail="El usuario ya tiene un club registrado")
 
@@ -158,7 +147,7 @@ def get_user_team(
     current_user_id: str = Depends(get_current_user),
 ):
     """Obtiene los datos del club personalizado del usuario autenticado."""
-    team = db.query(UserTeam).filter(UserTeam.user_id == current_user_id).first()
+    team = get_user_team(db, current_user_id)
     if not team:
         raise HTTPException(status_code=404, detail="El usuario no ha fundado ningún club")
     return team
@@ -173,10 +162,7 @@ def get_user_team_stats(
     Calcula dinámicamente el OVR General, Bateo (BAT) y Pitcheo (PIT)
     basado en las cartas de la alineación activa guardada en la BD.
     """
-    lineup = db.query(UserLineup).filter(
-        UserLineup.user_id == current_user_id,
-        UserLineup.is_active == True
-    ).first()
+    lineup = get_active_lineup(db, current_user_id)
 
     if not lineup or not lineup.slots:
         return {"overall": 70, "batOvr": 70, "pitOvr": 70}

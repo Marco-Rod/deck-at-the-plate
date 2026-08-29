@@ -19,15 +19,13 @@ Cada acción valida el turno del jugador autenticado (JWT) y emite actualizacion
 a ambos clientes conectados vía WebSocket.
 """
 
-import random
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import Dict, Any
 
 from app.auth import get_current_user
 from app.database import get_db
-from app.models import GameSession, PlayerCardModel, TacticCard, Team, GameEventLog
-from app.models.user_data import UserCardInventory
+from app.models import GameSession
 from app.schemas import (
     PlayTacticRequest,
     PitchActionRequest,
@@ -38,14 +36,30 @@ from app.schemas import (
 )
 from app.engine.calculator import calculate_play_outcome
 from app.engine.state_manager import process_at_bat_transition
-from app.engine.fatigue_manager import apply_pitcher_fatigue, get_pitch_threshold
+from app.engine.fatigue_manager import apply_pitcher_fatigue, get_pitch_threshold, compute_fatigue_level
 from app.engine.deck_manager import discard_used_tactic
 from app.engine.tactical_actions import resolve_bunt, resolve_steal
+from app.engine.tactic_resolver import accumulate_tactic_effects, new_default_tactic_modifiers
 from app.engine.websocket_manager import manager
 from app.engine.turn_guard import verify_player_turn
-from app.engine.cpu_ai import get_cpu_pitch_action, get_cpu_swing_action, get_cpu_pitcher_change_decision
+from app.engine.cpu_ai import (
+    choose_pitch_from_repertoire,
+    get_cpu_pitch_action,
+    get_cpu_pitcher_change_decision,
+    get_cpu_swing_action,
+    is_cpu_turn,
+)
 from app.engine.attribute_mapper import map_card_to_pitcher_attrs, map_card_to_batter_attrs
-from app.engine.player_stats_formatter import format_player_stats
+from app.repositories import (
+    count_user_inventory,
+    find_pitchers_for_team,
+    find_user_inventory_cards,
+    find_user_inventory_pitchers,
+    get_card_by_id,
+    get_game_by_id,
+    get_tactic_card_by_id,
+)
+from app.services.card_presenter import build_batter_payload, build_pitcher_payload
 
 router = APIRouter(prefix="/api/v1/games", tags=["Motor de Jugabilidad 1v1"])
 
@@ -145,36 +159,26 @@ def _build_play_resolved_payload(game: GameSession, event: str, description: str
         
         # Obtener datos del pitcher
         if active_pitcher_id:
-            pitcher_card = db.query(PlayerCardModel).filter(PlayerCardModel.id == active_pitcher_id).first()
+            pitcher_card = get_card_by_id(db, active_pitcher_id)
             if pitcher_card:
                 # ⭐ MEJORADO: Calcular pitch count y fatigue level con umbral dinámico por innings
-                from app.engine.fatigue_manager import get_pitch_threshold
-                
                 pitch_counts = state_with_role.get("pitch_counts", {})
                 current_pitch_count = pitch_counts.get(active_pitcher_id, 0)
-                
+
                 # Obtener umbral dinámico basado en total_innings
                 total_innings = state_with_role.get("total_innings", 9)
                 pitch_threshold = get_pitch_threshold(total_innings)
-                
+
                 # Calcular fatigue level (0-100%) - usar la misma lógica que apply_pitcher_fatigue
-                if current_pitch_count > pitch_threshold:
-                    extra_pitches = current_pitch_count - pitch_threshold
-                    # ⭐ AGRESIVO: -10% por cada lanzamiento extra
-                    # SIN cap en penalty_factor - permite fatiga 100%
-                    penalty_factor = 1.0 - (0.10 * extra_pitches)
-                    # Convertir a porcentaje de fatiga (capped a 100%)
-                    fatigue_level = min(100, max(0, (1.0 - penalty_factor) * 100))
-                else:
-                    fatigue_level = 0.0
-                
+                fatigue_level = compute_fatigue_level(current_pitch_count, total_innings)
+
                 # ⭐ DEBUG: Logging de fatiga AGRESIVA (sin cap)
                 print(f"🔍 [PITCHER STAMINA DEBUG - AGGRESSIVE]")
                 print(f"   Pitcher ID: {active_pitcher_id}")
                 print(f"   Current Pitch Count: {current_pitch_count}")
                 print(f"   Total Innings: {total_innings}")
                 print(f"   Dynamic Pitch Threshold: {pitch_threshold}")
-                
+
                 if current_pitch_count > pitch_threshold:
                     extra_pitches = current_pitch_count - pitch_threshold
                     penalty_factor = 1.0 - (0.10 * extra_pitches)
@@ -184,39 +188,22 @@ def _build_play_resolved_payload(game: GameSession, event: str, description: str
                     print(f"      Degradation: {max(0, (1.0-penalty_factor)*100):.1f}%")
                 else:
                     print(f"   ✅ No fatigue yet (under threshold)")
-                
+
                 print(f"   Final Fatigue Level (%): {fatigue_level:.2f}")
                 print(f"   Status: {'🟢 FRESH' if fatigue_level < 40 else '🟡 MODERATE' if fatigue_level < 70 else '🟠 TIRED' if fatigue_level < 85 else '🔴 CRITICAL'}")
-                
-                active_pitcher_data = {
-                    "id": pitcher_card.id,
-                    "name": pitcher_card.name,
-                    "number": pitcher_card.number,
-                    "overall": pitcher_card.overall,
-                    "position": pitcher_card.position,
-                    "rarity": pitcher_card.rarity.value if pitcher_card.rarity else "COMMON",
-                    "team": pitcher_card.team.name if pitcher_card.team else "UNKNOWN",
-                    "stats": format_player_stats(pitcher_card, "PITCHER"),
-                    "role": "PITCHER",
-                    "pitch_count": current_pitch_count,  # ⭐ Número de lanzamientos
-                    "fatigue_level": fatigue_level,  # ⭐ Porcentaje de fatiga (0-100)
-                }
-        
+
+                active_pitcher_data = build_pitcher_payload(
+                    pitcher_card,
+                    with_stamina=True,
+                    pitch_count=current_pitch_count,
+                    fatigue_level=fatigue_level,
+                )
+
         # Obtener datos del bateador
         if active_batter_id:
-            batter_card = db.query(PlayerCardModel).filter(PlayerCardModel.id == active_batter_id).first()
+            batter_card = get_card_by_id(db, active_batter_id)
             if batter_card:
-                active_batter_data = {
-                    "id": batter_card.id,
-                    "name": batter_card.name,
-                    "number": batter_card.number,
-                    "overall": batter_card.overall,
-                    "position": batter_card.position,
-                    "rarity": batter_card.rarity.value if batter_card.rarity else "COMMON",
-                    "team": batter_card.team.name if batter_card.team else "UNKNOWN",
-                    "stats": format_player_stats(batter_card, "BATTER"),
-                    "role": "BATTER",
-                }
+                active_batter_data = build_batter_payload(batter_card)
     
     # ⭐ DEBUG
     print(f"📊 [PLAY_RESOLVED PAYLOAD] event={event}, pitchers={len(pitcher_strikeouts)}, batters={len(batter_stats)}, home_hits={home_hits_total}, away_hits={away_hits_total}")
@@ -266,29 +253,17 @@ def _apply_tactic_modifiers(active_tactics: dict, db: Session) -> dict:
     Lee las cartas tácticas activas desde la DB y acumula sus modificadores.
     Retorna un dict listo para pasar a calculate_play_outcome().
     """
-    mods = {"batter_con": 1.0, "batter_pwr": 1.0, "batter_vis": 1.0, "pitcher_mov": 1.0}
+    mods = new_default_tactic_modifiers()
 
     if active_tactics.get("batter"):
-        tac = db.query(TacticCard).filter(TacticCard.id == active_tactics["batter"]).first()
+        tac = get_tactic_card_by_id(db, active_tactics["batter"])
         if tac:
-            for eff in tac.effects:
-                attr = eff.get("attribute")
-                val = eff.get("value", 0) / 100.0
-                if attr == "vision":
-                    mods["batter_vis"] += val
-                elif attr == "contacto":
-                    mods["batter_con"] += val
-                elif attr == "poder":
-                    mods["batter_pwr"] += val
+            mods = accumulate_tactic_effects(tac.effects, mods, is_pitcher_tactic=False)
 
     if active_tactics.get("pitcher"):
-        tac = db.query(TacticCard).filter(TacticCard.id == active_tactics["pitcher"]).first()
+        tac = get_tactic_card_by_id(db, active_tactics["pitcher"])
         if tac:
-            for eff in tac.effects:
-                attr = eff.get("attribute")
-                val = eff.get("value", 0) / 100.0
-                if attr == "movimiento":
-                    mods["pitcher_mov"] += val
+            mods = accumulate_tactic_effects(tac.effects, mods, is_pitcher_tactic=True)
 
     return mods
 
@@ -330,8 +305,8 @@ async def _resolve_swing(
     state["pitch_counts"] = pitch_counts
 
     # --- 2. Obtener atributos reales desde la DB ---
-    pitcher_card = db.query(PlayerCardModel).filter(PlayerCardModel.id == active_pitcher_id).first() if active_pitcher_id else None
-    batter_card = db.query(PlayerCardModel).filter(PlayerCardModel.id == active_batter_id).first() if active_batter_id else None
+    pitcher_card = get_card_by_id(db, active_pitcher_id)
+    batter_card = get_card_by_id(db, active_batter_id)
 
     raw_pitcher_attrs = map_card_to_pitcher_attrs(pitcher_card) if pitcher_card else {"velocidad": 75, "control": 70, "movimiento": 70}
     batter_attrs = map_card_to_batter_attrs(batter_card) if batter_card else {"contacto": 70, "poder": 70, "vision": 70}
@@ -432,59 +407,6 @@ async def _resolve_swing(
     return event, description, inning_ended
 
 
-def _is_cpu_turn(game: GameSession, state: dict, required_role: str) -> bool:
-    """
-    Determina si en este momento le toca actuar a la CPU.
-
-    En modo PvE:
-      - Si CPU es AWAY: Alta → CPU pichea, humano batea. Baja → humano pichea, CPU batea.
-      - Si CPU es HOME: Alta → CPU pichea, humano batea. Baja → humano pichea, CPU batea.
-
-    Args:
-        required_role: 'PITCHER' o 'BATTER' — el rol que se está evaluando.
-    """
-    mode_check = state.get("mode") != "PVE"
-    game_over_check = state.get("is_game_over")
-    
-    if mode_check or game_over_check:
-        print(f"🤖 _is_cpu_turn({required_role}): EARLY EXIT - mode={state.get('mode')}, is_game_over={game_over_check}")
-        return False
-    
-    # ⭐ ARREGLADO: Identificar dónde está la CPU
-    is_cpu_home = game.home_user_id == "CPU_BOT"
-    is_cpu_away = game.away_user_id == "CPU_BOT"
-    
-    print(f"🤖 _is_cpu_turn({required_role}): is_cpu_home={is_cpu_home}, is_cpu_away={is_cpu_away}, is_top={game.is_top_inning}")
-    
-    if not (is_cpu_home or is_cpu_away):
-        print(f"🤖 _is_cpu_turn({required_role}): No CPU found")
-        return False  # No hay CPU en este juego
-
-    if required_role == "PITCHER":
-        # CPU pichea en la Alta si es local, o en la Baja si es visitante
-        if is_cpu_home:
-            result = game.is_top_inning      # CPU local pichea en Alta
-            print(f"🤖 _is_cpu_turn(PITCHER): CPU es HOME, returning {result}")
-            return result
-        else:
-            result = not game.is_top_inning  # CPU visitante pichea en Baja
-            print(f"🤖 _is_cpu_turn(PITCHER): CPU es AWAY, returning {result}")
-            return result
-    
-    if required_role == "BATTER":
-        # CPU batea en la Alta si es visitante, o en la Baja si es local
-        if is_cpu_away:
-            result = game.is_top_inning      # CPU visitante batea en Alta
-            print(f"🤖 _is_cpu_turn(BATTER): CPU es AWAY, returning {result}")
-            return result
-        else:
-            result = not game.is_top_inning  # CPU local batea en Baja
-            print(f"🤖 _is_cpu_turn(BATTER): CPU es HOME, returning {result}")
-            return result
-
-    return False
-
-
 async def _execute_cpu_pitcher_change(
     game: GameSession, state: dict, db: Session, game_id: str, difficulty: str
 ) -> bool:
@@ -517,7 +439,7 @@ async def _execute_cpu_pitcher_change(
         print(f"🤖 [CPU PITCHER CHANGE] ❌ No reference pitcher found (field={cpu_pitcher_field})")
         return False
     
-    ref_pitcher = db.query(PlayerCardModel).filter(PlayerCardModel.id == ref_pitcher_id).first()
+    ref_pitcher = get_card_by_id(db, ref_pitcher_id)
     if not ref_pitcher:
         print(f"🤖 [CPU PITCHER CHANGE] ❌ Reference pitcher not found in DB: {ref_pitcher_id}")
         return False
@@ -531,12 +453,12 @@ async def _execute_cpu_pitcher_change(
     print(f"   - Already Used Pitchers: {used_pitcher_ids}")
     
     # Buscar pitchers disponibles en el equipo de la CPU (no usados, no el activo)
-    available = db.query(PlayerCardModel).filter(
-        PlayerCardModel.team_id == cpu_team_id,
-        PlayerCardModel.position.in_(["SP", "RP", "CP", "TWP"]),
-        PlayerCardModel.id.notin_(used_pitcher_ids),
-        PlayerCardModel.id != active_pitcher_id,
-    ).all()
+    available = find_pitchers_for_team(
+        db,
+        team_id=cpu_team_id,
+        exclude_ids=used_pitcher_ids,
+        excluded_id=active_pitcher_id,
+    )
     
     print(f"   - Available Pitchers: {len(available)}")
     for pitcher in available:
@@ -573,36 +495,18 @@ async def _execute_cpu_pitcher_change(
     old_pitcher = None
     old_pitcher_data = None
     if old_pitcher_id:
-        old_pitcher = db.query(PlayerCardModel).filter(PlayerCardModel.id == old_pitcher_id).first()
+        old_pitcher = get_card_by_id(db, old_pitcher_id)
         if old_pitcher:
-            old_pitcher_data = {
-                "id": old_pitcher.id,
-                "name": old_pitcher.name,
-                "number": old_pitcher.number,
-                "overall": old_pitcher.overall,
-                "position": old_pitcher.position,
-                "rarity": old_pitcher.rarity.value if old_pitcher.rarity else "COMMON",
-                "team": old_pitcher.team.name if old_pitcher.team else "UNKNOWN",
-                "stats": format_player_stats(old_pitcher, "PITCHER"),
-                "repertoire": old_pitcher.repertoire or [],
-                "role": "PITCHER",
-            }
+            old_pitcher_data = build_pitcher_payload(old_pitcher, with_repertoire=True)
     
     # Construir datos del nuevo pitcher para broadcast
-    new_pitcher_data = {
-        "id": new_pitcher.id,
-        "name": new_pitcher.name,
-        "number": new_pitcher.number,
-        "overall": new_pitcher.overall,
-        "position": new_pitcher.position,
-        "rarity": new_pitcher.rarity.value if new_pitcher.rarity else "COMMON",
-        "team": new_pitcher.team.name if new_pitcher.team else "UNKNOWN",
-        "stats": format_player_stats(new_pitcher, "PITCHER"),
-        "repertoire": new_pitcher.repertoire or [],
-        "role": "PITCHER",
-        "pitch_count": 0,
-        "fatigue_level": 0.0,
-    }
+    new_pitcher_data = build_pitcher_payload(
+        new_pitcher,
+        with_repertoire=True,
+        with_stamina=True,
+        pitch_count=0,
+        fatigue_level=0.0,
+    )
     
     # Broadcast del cambio vía WebSocket
     await manager.broadcast_to_game(game_id, {
@@ -639,8 +543,8 @@ async def trigger_cpu_response_if_needed(game: GameSession, state: dict, db: Ses
     
     print(f"🤖 DEBUG trigger_cpu_response_if_needed:")
     print(f"   is_top_inning={game.is_top_inning}, home_user={game.home_user_id}, away_user={game.away_user_id}")
-    cpu_pitcher_turn = _is_cpu_turn(game, state, 'PITCHER')
-    cpu_batter_turn = _is_cpu_turn(game, state, 'BATTER')
+    cpu_pitcher_turn = is_cpu_turn(game, state, 'PITCHER')
+    cpu_batter_turn = is_cpu_turn(game, state, 'BATTER')
     print(f"   cpu_turn_pitcher={cpu_pitcher_turn}, cpu_turn_batter={cpu_batter_turn}")
     print(f"   current_pitch={state.get('current_pitch')}")
     
@@ -672,19 +576,13 @@ async def trigger_cpu_response_if_needed(game: GameSession, state: dict, db: Ses
         active_pitcher_id = state.get("active_pitcher")
         if active_pitcher_id:
             pitch_count = state.get("pitch_counts", {}).get(active_pitcher_id, 0)
-            pitcher_card = db.query(PlayerCardModel).filter(PlayerCardModel.id == active_pitcher_id).first()
+            pitcher_card = get_card_by_id(db, active_pitcher_id)
             
             if pitcher_card:
                 # ← CORRECCIÓN: Calcular fatiga_level correctamente (no era None/0.0)
                 total_innings = state.get("total_innings", 9)
                 pitch_threshold = get_pitch_threshold(total_innings)
-                
-                if pitch_count > pitch_threshold:
-                    extra_pitches = pitch_count - pitch_threshold
-                    penalty_factor = 1.0 - (0.10 * extra_pitches)
-                    fatigue_level = min(100, max(0, (1.0 - penalty_factor) * 100))
-                else:
-                    fatigue_level = 0.0
+                fatigue_level = compute_fatigue_level(pitch_count, total_innings)
                 
                 print(f"🤖 [CPU FATIGUE CHECK] pitcher={active_pitcher_id}, pitch_count={pitch_count}, threshold={pitch_threshold}, fatigue={fatigue_level:.1f}%")
                 
@@ -707,14 +605,10 @@ async def trigger_cpu_response_if_needed(game: GameSession, state: dict, db: Ses
         cpu_pitch = get_cpu_pitch_action(difficulty)
 
         if active_pitcher_id:
-            pitcher_card = db.query(PlayerCardModel).filter(
-                PlayerCardModel.id == active_pitcher_id
-            ).first()
-            if pitcher_card and pitcher_card.repertoire:
-                available_types = [p["pitch_type"] for p in pitcher_card.repertoire]
-                if available_types:
-                    import random as _random
-                    cpu_pitch["pitch_type"] = _random.choice(available_types)
+            pitcher_card = get_card_by_id(db, active_pitcher_id)
+            pitch_type = choose_pitch_from_repertoire(pitcher_card.repertoire if pitcher_card else None)
+            if pitch_type:
+                cpu_pitch["pitch_type"] = pitch_type
 
         state["current_pitch"] = cpu_pitch
         game.state_data = state
@@ -753,7 +647,7 @@ def play_tactic(
     - La carta debe estar en la mano del jugador.
     - Las cartas de categoría EXTRA_INNINGS solo son válidas a partir del inning 10.
     """
-    game = db.query(GameSession).filter(GameSession.id == game_id).first()
+    game = get_game_by_id(db, game_id)
     if not game:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sesión de juego no encontrada.")
 
@@ -761,7 +655,7 @@ def play_tactic(
     if current_user_id not in (game.home_user_id, game.away_user_id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No tienes acceso a esta partida.")
 
-    tactic = db.query(TacticCard).filter(TacticCard.id == payload.tactic_id).first()
+    tactic = get_tactic_card_by_id(db, payload.tactic_id)
     if not tactic:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Carta táctica no encontrada.")
 
@@ -822,7 +716,7 @@ async def select_pitch(
     print(f"   payload.zone: {payload.zone}")
     print(f"   current_user_id: {current_user_id}")
     
-    game = db.query(GameSession).filter(GameSession.id == game_id).first()
+    game = get_game_by_id(db, game_id)
     if not game:
         raise HTTPException(status_code=404, detail="Sesión de juego no encontrada.")
 
@@ -841,7 +735,7 @@ async def select_pitch(
     print(f"🎯 [DEBUG] active_pitcher_id: {active_pitcher_id}")
     
     if active_pitcher_id:
-        pitcher_card = db.query(PlayerCardModel).filter(PlayerCardModel.id == active_pitcher_id).first()
+        pitcher_card = get_card_by_id(db, active_pitcher_id)
         print(f"🎯 [DEBUG] pitcher_card: {pitcher_card.name if pitcher_card else 'NOT FOUND'}")
         
         if pitcher_card and payload.pitch_type != "IBB":
@@ -908,7 +802,7 @@ async def execute_swing(
     """
     print(f"🎯 DEBUG swing: game_id={game_id}, user_id={current_user_id}")
     
-    game = db.query(GameSession).filter(GameSession.id == game_id).first()
+    game = get_game_by_id(db, game_id)
     if not game:
         print(f"❌ ERROR: Juego no encontrado: {game_id}")
         raise HTTPException(status_code=404, detail="Sesión de juego no encontrada.")
@@ -923,7 +817,7 @@ async def execute_swing(
 
     # ⭐ NUEVO: Expulsar todas las sesiones cacheadas y obtener una fresca de la BD
     db.expunge_all()
-    game = db.query(GameSession).filter(GameSession.id == game_id).first()
+    game = get_game_by_id(db, game_id)
     db.refresh(game)
     state = dict(game.state_data or {})
     
@@ -941,12 +835,12 @@ async def execute_swing(
     if not current_pitch:
         print(f"   ⚠️ No hay pitch. Verificando si CPU debería haber lanzado...")
         
-        if _is_cpu_turn(game, state, "PITCHER"):
+        if is_cpu_turn(game, state, "PITCHER"):
             print(f"   🤖 CPU debería haber lanzado! Ejecutando trigger ahora...")
             await trigger_cpu_response_if_needed(game, state, db, game_id)
             # Recargar state después de que CPU lance
             db.expunge_all()
-            game = db.query(GameSession).filter(GameSession.id == game_id).first()
+            game = get_game_by_id(db, game_id)
             db.refresh(game)
             state = dict(game.state_data or {})
             current_pitch = state.get("current_pitch")
@@ -998,7 +892,7 @@ async def change_pitcher(
     print(f"🔍 game_id: {game_id}")
     print(f"🔍 new_pitcher_id: {payload.new_pitcher_id}")
 
-    game = db.query(GameSession).filter(GameSession.id == game_id).first()
+    game = get_game_by_id(db, game_id)
     if not game:
         print(f"❌ Juego NO encontrado: {game_id}")
         raise HTTPException(status_code=404, detail="Sesión de juego no encontrada.")
@@ -1007,8 +901,9 @@ async def change_pitcher(
     if current_user_id not in (game.home_user_id, game.away_user_id):
         raise HTTPException(status_code=403, detail="No tienes acceso a esta partida.")
 
-    new_pitcher = db.query(PlayerCardModel).filter(PlayerCardModel.id == payload.new_pitcher_id).first()
-    old_pitcher = db.query(PlayerCardModel).filter(PlayerCardModel.id == (dict(game.state_data or {}).get("active_pitcher"))).first()
+    active_state_pre = dict(game.state_data or {})
+    new_pitcher = get_card_by_id(db, payload.new_pitcher_id)
+    old_pitcher = get_card_by_id(db, active_state_pre.get("active_pitcher"))
     
     print(f"🔍 Pitcher anterior: {old_pitcher.name if old_pitcher else 'UNKNOWN'} ({old_pitcher.id if old_pitcher else 'N/A'})")
     print(f"🔍 Pitcher nuevo: {new_pitcher.name if new_pitcher else 'UNKNOWN'} ({payload.new_pitcher_id})")
@@ -1055,11 +950,11 @@ async def change_pitcher(
     
     # Log remaining available pitchers
     print(f"\n📊 [PITCHERS REMAINING AFTER CHANGE]")
-    remaining_pitchers = [p for p in db.query(PlayerCardModel).filter(
-        PlayerCardModel.team_id == new_pitcher.team_id,
-        PlayerCardModel.position.in_(["SP", "RP", "CP", "TWP"]),
-        PlayerCardModel.id.notin_([payload.new_pitcher_id])
-    ).all()]
+    remaining_pitchers = find_pitchers_for_team(
+        db,
+        team_id=new_pitcher.team_id,
+        exclude_ids={payload.new_pitcher_id},
+    )
     print(f"   Available backups: {len(remaining_pitchers)}")
     for p in remaining_pitchers[:5]:
         print(f"      - {p.name} ({p.id}) | OVR: {p.overall}")
@@ -1070,20 +965,13 @@ async def change_pitcher(
     db.refresh(game)
 
     # ⭐ Construir datos del nuevo pitcher para el cliente
-    new_pitcher_data = {
-        "id": new_pitcher.id,
-        "name": new_pitcher.name,
-        "number": new_pitcher.number,
-        "overall": new_pitcher.overall,
-        "position": new_pitcher.position,
-        "rarity": new_pitcher.rarity.value if new_pitcher.rarity else "COMMON",
-        "team": new_pitcher.team.name if new_pitcher.team else "UNKNOWN",
-        "stats": format_player_stats(new_pitcher, "PITCHER"),
-        "repertoire": new_pitcher.repertoire or [],   # ← necesario para el pitch selector
-        "role": "PITCHER",
-        "pitch_count": 0,
-        "fatigue_level": 0.0,
-    }
+    new_pitcher_data = build_pitcher_payload(
+        new_pitcher,
+        with_repertoire=True,
+        with_stamina=True,
+        pitch_count=0,
+        fatigue_level=0.0,
+    )
 
     print(f"✅ [PITCHER CHANGE] {old_pitcher_id} → {payload.new_pitcher_id} ({new_pitcher.name})")
 
@@ -1124,7 +1012,7 @@ def get_rival_available_pitchers(
     """
     print(f"🔍 [GET_RIVAL_AVAILABLE_PITCHERS] game_id={game_id}")
 
-    game = db.query(GameSession).filter(GameSession.id == game_id).first()
+    game = get_game_by_id(db, game_id)
     if not game:
         raise HTTPException(status_code=404, detail="Sesión de juego no encontrada.")
 
@@ -1146,7 +1034,7 @@ def get_rival_available_pitchers(
         rival_pitcher_id = state.get("home_pitcher_id")
     
     # Obtener el pitcher actual del rival para extraer su team_id
-    ref_pitcher = db.query(PlayerCardModel).filter(PlayerCardModel.id == rival_pitcher_id).first()
+    ref_pitcher = get_card_by_id(db, rival_pitcher_id)
     if not ref_pitcher or not ref_pitcher.team_id:
         print(f"❌ No rival pitcher found or team_id missing: {rival_pitcher_id}")
         return {
@@ -1160,14 +1048,10 @@ def get_rival_available_pitchers(
     print(f"🔍 Rival team_id: {rival_team_id}, active_pitcher={active_pitcher_id}")
 
     # ── Buscar todos los pitchers del equipo rival ──────────────────────────
-    rival_pitchers = (
-        db.query(PlayerCardModel)
-        .filter(
-            PlayerCardModel.team_id == rival_team_id,
-            PlayerCardModel.position.in_(["SP", "RP", "CP", "TWP"]),
-            PlayerCardModel.id != active_pitcher_id,
-        )
-        .all()
+    rival_pitchers = find_pitchers_for_team(
+        db,
+        team_id=rival_team_id,
+        excluded_id=active_pitcher_id,
     )
 
     print(f"🔍 Total pitchers del equipo rival: {len(rival_pitchers)}")
@@ -1181,23 +1065,12 @@ def get_rival_available_pitchers(
     print(f"🔍 Pitchers ya usados en el partido: {len(used_pitcher_ids)}")
     if used_pitcher_ids:
         for pid in list(used_pitcher_ids)[:5]:
-            used_pitcher = db.query(PlayerCardModel).filter(PlayerCardModel.id == pid).first()
+            used_pitcher = get_card_by_id(db, pid)
             if used_pitcher:
                 print(f"   - {used_pitcher.name} ({pid}) | Pitches: {pitch_counts[pid]}")
 
     available_pitchers = [
-        {
-            "id": card.id,
-            "name": card.name,
-            "number": card.number,
-            "overall": card.overall,
-            "position": card.position,
-            "rarity": card.rarity.value if card.rarity else "COMMON",
-            "team": card.team.name if card.team else "UNKNOWN",
-            "stats": format_player_stats(card, "PITCHER"),
-            "role": "PITCHER",
-            "already_used": card.id in used_pitcher_ids,
-        }
+        build_pitcher_payload(card, already_used=card.id in used_pitcher_ids)
         for card in rival_pitchers
     ]
 
@@ -1226,7 +1099,7 @@ def get_available_pitchers(
     """
     print(f"\n🔍 [GET_AVAILABLE_PITCHERS] game_id={game_id}, user_id={current_user_id}")
 
-    game = db.query(GameSession).filter(GameSession.id == game_id).first()
+    game = get_game_by_id(db, game_id)
     if not game:
         print(f"❌ Game not found: {game_id}")
         raise HTTPException(status_code=404, detail="Sesión de juego no encontrada.")
@@ -1250,28 +1123,23 @@ def get_available_pitchers(
     print(f"   active_pitcher_id={active_pitcher_id}")
 
     # ── DEBUG: Contar total de cards en UserCardInventory del usuario ────
-    total_inventory = db.query(UserCardInventory).filter(UserCardInventory.user_id == user_id).count()
+    total_inventory = count_user_inventory(db, user_id)
     print(f"\n📦 [INVENTORY DEBUG]")
     print(f"   Total cards en inventario del usuario: {total_inventory}")
 
     # ── DEBUG: Mostrar primeras 10 cartas del usuario ────
-    all_user_cards = db.query(UserCardInventory).filter(UserCardInventory.user_id == user_id).limit(10).all()
+    all_user_cards = find_user_inventory_cards(db, user_id, limit=10)
     print(f"   Primeras 10 cartas del usuario:")
     for inv_card in all_user_cards:
-        card = db.query(PlayerCardModel).filter(PlayerCardModel.id == inv_card.card_id).first()
+        card = get_card_by_id(db, inv_card.card_id)
         if card:
             print(f"      - {card.name} ({card.id}) | Pos: {card.position}")
 
     # ── Buscar pitchers en el inventario del usuario ─────────────────────────
-    inventory_pitchers = (
-        db.query(PlayerCardModel)
-        .join(UserCardInventory, UserCardInventory.card_id == PlayerCardModel.id)
-        .filter(
-            UserCardInventory.user_id == user_id,
-            PlayerCardModel.position.in_(["SP", "RP", "CP", "TWP"]),
-            PlayerCardModel.id != active_pitcher_id,
-        )
-        .all()
+    inventory_pitchers = find_user_inventory_pitchers(
+        db,
+        user_id=user_id,
+        excluded_id=active_pitcher_id,
     )
 
     print(f"\n🎯 [PITCHERS QUERY]")
@@ -1287,23 +1155,12 @@ def get_available_pitchers(
     print(f"   Pitchers ya usados en el partido: {len(used_pitcher_ids)}")
     if used_pitcher_ids:
         for pid in list(used_pitcher_ids)[:10]:
-            used_pitcher = db.query(PlayerCardModel).filter(PlayerCardModel.id == pid).first()
+            used_pitcher = get_card_by_id(db, pid)
             if used_pitcher:
                 print(f"      - {used_pitcher.name} ({pid}) | Pitches: {pitch_counts[pid]}")
 
     available_pitchers = [
-        {
-            "id": card.id,
-            "name": card.name,
-            "number": card.number,
-            "overall": card.overall,
-            "position": card.position,
-            "rarity": card.rarity.value if card.rarity else "COMMON",
-            "team": card.team.name if card.team else "UNKNOWN",
-            "stats": format_player_stats(card, "PITCHER"),
-            "role": "PITCHER",
-            "already_used": card.id in used_pitcher_ids,
-        }
+        build_pitcher_payload(card, already_used=card.id in used_pitcher_ids)
         for card in inventory_pitchers
     ]
 
@@ -1332,7 +1189,7 @@ def acknowledge_pitcher_change(
     Esto desbloqueará el juego para que continúe. Si se llama sin que haya
     un cambio pendiente, retorna un error.
     """
-    game = db.query(GameSession).filter(GameSession.id == game_id).first()
+    game = get_game_by_id(db, game_id)
     if not game:
         raise HTTPException(status_code=404, detail="Sesión de juego no encontrada.")
 
@@ -1394,7 +1251,7 @@ async def steal_base(
     Si el corredor es out, se registra el out, se evalúa cambio de entrada
     y se verifica la condición de fin de juego.
     """
-    game = db.query(GameSession).filter(GameSession.id == game_id).first()
+    game = get_game_by_id(db, game_id)
     if not game:
         raise HTTPException(status_code=404, detail="Sesión de juego no encontrada.")
 
@@ -1404,7 +1261,7 @@ async def steal_base(
     state = dict(game.state_data or {})
     active_pitcher_id = state.get("active_pitcher")
 
-    pitcher_card = db.query(PlayerCardModel).filter(PlayerCardModel.id == active_pitcher_id).first() if active_pitcher_id else None
+    pitcher_card = get_card_by_id(db, active_pitcher_id)
     pitcher_attrs = map_card_to_pitcher_attrs(pitcher_card) if pitcher_card else {"velocidad": 75, "control": 70, "movimiento": 70}
 
     runners = state.get("runners", {"1b": None, "2b": None, "3b": None})

@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 import asyncio
 
 from app.database import SessionLocal
-from app.models import GameSession
+from app.repositories import get_game_by_id
 from app.engine.websocket_manager import manager
 from app.engine.fog_of_war import sanitize_state_for_player
 from app.auth import authenticate_ws_token
@@ -41,7 +41,7 @@ async def websocket_endpoint(
     db: Session = SessionLocal()
     try:
         # Enviar estado actual sanitizado al conectar
-        game = db.query(GameSession).filter(GameSession.id == game_id).first()
+        game = get_game_by_id(db, game_id)
         if game:
             # Verificar que el usuario autenticado pertenezca a la partida.
             if user_id not in (game.home_user_id, game.away_user_id):

@@ -30,6 +30,32 @@ def get_pitch_threshold(total_innings: int = 9) -> int:
     return max(6, int((60.0 / 9.0) * total_innings))
 
 
+def compute_fatigue_level(pitch_count: int, total_innings: int = 9) -> float:
+    """
+    Nivel de fatiga (0-100%) de un pitcher según su conteo de lanzamientos.
+
+    Fórmula (idéntica a la usada en gameplay.py y payloads):
+        extra = pitch_count - threshold
+        penalty_factor = 1.0 - (0.10 * extra)
+        fatigue = (1.0 - penalty_factor) * 100   (cap 0-100)
+
+    Args:
+        pitch_count:   Número de lanzamientos realizados.
+        total_innings: Duración configurada (3, 6 o 9).
+
+    Returns:
+        Porcentaje de fatiga entre 0.0 y 100.0.
+    """
+    pitch_threshold = get_pitch_threshold(total_innings)
+
+    if pitch_count > pitch_threshold:
+        extra_pitches = pitch_count - pitch_threshold
+        penalty_factor = 1.0 - (0.10 * extra_pitches)
+        return min(100.0, max(0.0, (1.0 - penalty_factor) * 100.0))
+
+    return 0.0
+
+
 def apply_pitcher_fatigue(
     pitcher_attrs: Dict[str, int], 
     pitch_count: int,
