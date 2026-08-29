@@ -99,15 +99,26 @@ export const CentralField: React.FC<CentralFieldProps & {
     }
     try {
       setIsLoadingPitchers(true);
-      console.log(`🔄 Cargando pitchers: gameId=${gameId}, userId=${userId}`);
+      console.log(`🔄 [LOAD PITCHERS] Cargando pitchers: gameId=${gameId}, userId=${userId}`);
       const response = await gamesApi.getAvailablePitchers(gameId, userId);
 
-      console.log('📋 Response completa:', response);
+      console.log(`📋 [PITCHERS RESPONSE] Response completa:`, response);
       const pitchers = response?.available_pitchers || [];
-      console.log(`✅ ${pitchers.length} pitchers cargados`);
+      console.log(`✅ [PITCHERS LOADED] ${pitchers.length} pitchers cargados`);
+      
+      if (pitchers.length === 0) {
+        console.warn(`⚠️  [NO PITCHERS] Lista vacía de pitchers disponibles`);
+      } else {
+        console.log(`📊 [PITCHERS DETAILS]:`);
+        pitchers.forEach((p, idx) => {
+          console.log(`   ${idx + 1}. ${p.name} (${p.id}) | OVR: ${p.overall} | POS: ${p.position} | Rareza: ${p.rarity} | YaUsado: ${p.already_used}`);
+        });
+      }
+      
       setAvailablePitchers(pitchers);
     } catch (error) {
       console.error('❌ Error cargando pitchers:', error instanceof Error ? error.message : String(error));
+      console.error('Full error:', error);
       setAvailablePitchers([]);
     } finally {
       setIsLoadingPitchers(false);

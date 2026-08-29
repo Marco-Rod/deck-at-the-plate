@@ -197,6 +197,21 @@ def create_game_session(payload: CreateGameRequest, db: Session = Depends(get_db
     db.add(game)
     db.commit()
     db.refresh(game)
+    
+    # ⭐ NUEVO: Log de lanzadores disponibles para cada equipo
+    print(f"\n🎮 [GAME CREATED] {game.id}")
+    print(f"   HOME pitcher: {home_pitcher_id}")
+    print(f"   HOME lineup pitchers: ", end="")
+    home_pitchers = [c for c in db.query(PlayerCardModel).filter(PlayerCardModel.id.in_(home_lineup_ids)).all() 
+                      if c.position in ["SP", "RP", "CP", "TWP"] or c.is_two_way]
+    print(f"{len(home_pitchers)} → {[p.name for p in home_pitchers]}")
+    
+    print(f"   AWAY pitcher: {away_pitcher_id}")
+    print(f"   AWAY lineup pitchers: ", end="")
+    away_pitchers = [c for c in db.query(PlayerCardModel).filter(PlayerCardModel.id.in_(away_lineup_ids)).all() 
+                      if c.position in ["SP", "RP", "CP", "TWP"] or c.is_two_way]
+    print(f"{len(away_pitchers)} → {[p.name for p in away_pitchers]}")
+    print()
 
     return game
 
@@ -241,6 +256,95 @@ def get_game_session(
             "user_role": "HOME" if user_id == game.home_user_id else "AWAY",  # ⭐ NUEVO
         }
     )
+
+
+@router.get("/{game_id}/available-pitchers", summary="Obtener lanzadores disponibles del equipo del usuario")
+def get_available_pitchers(
+    game_id: str,
+    user_id: str = Query(..., description="ID del usuario"),
+    db: Session = Depends(get_db)
+):
+    """
+    Obtiene los lanzadores disponibles en el bullpen del equipo del usuario.
+    Filtra por:
+    - Si es jugador humano: lanzadores del inventario (UserLineup)
+    - Si es CPU: todos los lanzadores del equipo CPU
+    """
+    game = db.query(GameSession).filter(GameSession.id == game_id).first()
+    if not game:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Juego no encontrado: {game_id}"
+        )
+
+    # Determinar si el usuario es local o visitante
+    is_home = (user_id == game.home_user_id)
+    state = game.state_data or {}
+    
+    # Obtener IDs del roster del equipo del usuario
+    if is_home:
+        lineup_ids = state.get("home_lineup", [])
+        active_pitcher_id = state.get("active_pitcher")
+    else:
+        lineup_ids = state.get("away_lineup", [])
+        active_pitcher_id = state.get("away_pitcher_id")
+    
+    print(f"\n🔍 [GET AVAILABLE PITCHERS] user_id={user_id}, is_home={is_home}")
+    print(f"   active_pitcher_id: {active_pitcher_id}")
+    print(f"   lineup_ids: {lineup_ids}")
+    
+    # Obtener todas las cartas del roster
+    all_cards = db.query(PlayerCardModel).filter(
+        PlayerCardModel.id.in_(lineup_ids)
+    ).all()
+    
+    print(f"   Total cards en roster: {len(all_cards)}")
+    
+    # Filtrar solo lanzadores (excluyendo el lanzador actual)
+    available_pitchers = [
+        c for c in all_cards 
+        if c.position in ["SP", "RP", "CP", "TWP"] or c.is_two_way
+        and c.id != active_pitcher_id
+    ]
+    
+    print(f"   ✅ Pitchers disponibles (excluyendo activo): {len(available_pitchers)}")
+    for p in available_pitchers:
+        print(f"      - {p.name} ({p.id}) | OVR: {p.overall} | POS: {p.position}")
+    
+    # Obtener pitch counts para marcar pitchers ya usados
+    pitch_counts = state.get("pitch_counts", {})
+    used_pitcher_ids = set(pitch_counts.keys())
+    
+    print(f"   Used pitchers in this game: {len(used_pitcher_ids)}")
+    for pid in used_pitcher_ids:
+        if pid != active_pitcher_id:
+            used_pitcher = db.query(PlayerCardModel).filter(PlayerCardModel.id == pid).first()
+            if used_pitcher:
+                print(f"      - {used_pitcher.name} ({pid})")
+    
+    # Mapear a formato de respuesta
+    pitchers_data = []
+    for pitcher in available_pitchers:
+        from app.engine.player_stats_formatter import format_player_stats
+        pitchers_data.append({
+            "id": pitcher.id,
+            "name": pitcher.name,
+            "number": pitcher.number,
+            "overall": pitcher.overall,
+            "position": pitcher.position,
+            "rarity": pitcher.rarity.value if pitcher.rarity else "COMMON",
+            "team": pitcher.team.name if pitcher.team else "UNKNOWN",
+            "stats": format_player_stats(pitcher, "PITCHER"),
+            "already_used": pitcher.id in used_pitcher_ids,
+        })
+    
+    print(f"\n✅ [AVAILABLE PITCHERS RESPONSE] Retornando {len(pitchers_data)} pitchers\n")
+    
+    return {
+        "available_pitchers": pitchers_data,
+        "current_pitcher_id": active_pitcher_id,
+        "game_id": game_id,
+    }
 
 
 @router.get("/{game_id}/box-score", summary="Obtener box score de la partida")
