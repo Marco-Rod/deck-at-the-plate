@@ -41,8 +41,9 @@ const getMaxStepDelay = (steps: Array<{ name: string; delay: number }>): number 
 
 /**
  * Define qué ocurre en cada tipo de evento y en qué orden
+ * Movido FUERA del componente para evitar que EVENT_SEQUENCES sea una nueva referencia cada render
  */
-export const EVENT_SEQUENCES = {
+const EVENT_SEQUENCES_STABLE = {
   HOME_RUN: {
     displayDuration: 3500,
     steps: [
@@ -51,6 +52,7 @@ export const EVENT_SEQUENCES = {
       { name: 'update-batter-stats', delay: 3700 },
       { name: 'update-runners', delay: 3800 },
       { name: 'load-next-batter', delay: 4000 },
+      { name: 'close-modal', delay: 4100 },
     ],
   },
   STRIKEOUT: {
@@ -60,6 +62,7 @@ export const EVENT_SEQUENCES = {
       { name: 'update-outs', delay: 2600 },
       { name: 'update-pitcher-stats', delay: 2700 },
       { name: 'check-inning-end', delay: 2800 },
+      { name: 'close-modal', delay: 2900 },
     ],
   },
   HIT_1B: {
@@ -70,6 +73,7 @@ export const EVENT_SEQUENCES = {
       { name: 'update-batter-stats', delay: 3000 },
       { name: 'update-runners', delay: 3100 },
       { name: 'load-next-batter', delay: 3200 },
+      { name: 'close-modal', delay: 3300 },
     ],
   },
   HIT_2B: {
@@ -80,6 +84,7 @@ export const EVENT_SEQUENCES = {
       { name: 'update-batter-stats', delay: 3200 },
       { name: 'update-runners', delay: 3300 },
       { name: 'load-next-batter', delay: 3400 },
+      { name: 'close-modal', delay: 3500 },
     ],
   },
   HIT_3B: {
@@ -90,24 +95,27 @@ export const EVENT_SEQUENCES = {
       { name: 'update-batter-stats', delay: 3200 },
       { name: 'update-runners', delay: 3300 },
       { name: 'load-next-batter', delay: 3400 },
+      { name: 'close-modal', delay: 3500 },
     ],
   },
-  OUT_FLYBALL: {
+  OUT_FLY: {
     displayDuration: 2400,
     steps: [
       { name: 'show-modal', delay: 0 },
       { name: 'update-outs', delay: 2500 },
       { name: 'update-pitcher-stats', delay: 2600 },
       { name: 'check-inning-end', delay: 2700 },
+      { name: 'close-modal', delay: 2800 },
     ],
   },
-  OUT_GROUNDBALL: {
+  OUT_GROUND: {
     displayDuration: 2400,
     steps: [
       { name: 'show-modal', delay: 0 },
       { name: 'update-outs', delay: 2500 },
       { name: 'update-pitcher-stats', delay: 2600 },
       { name: 'check-inning-end', delay: 2700 },
+      { name: 'close-modal', delay: 2800 },
     ],
   },
   BALL: {
@@ -115,6 +123,7 @@ export const EVENT_SEQUENCES = {
     steps: [
       { name: 'show-modal', delay: 0 },
       { name: 'update-balls', delay: 1900 },
+      { name: 'close-modal', delay: 2000 },
     ],
   },
   STRIKE: {
@@ -122,6 +131,23 @@ export const EVENT_SEQUENCES = {
     steps: [
       { name: 'show-modal', delay: 0 },
       { name: 'update-strikes', delay: 1900 },
+      { name: 'close-modal', delay: 2000 },
+    ],
+  },
+  STRIKE_LOOKING: {
+    displayDuration: 1800,
+    steps: [
+      { name: 'show-modal', delay: 0 },
+      { name: 'update-strikes', delay: 1900 },
+      { name: 'close-modal', delay: 2000 },
+    ],
+  },
+  STRIKE_SWINGING: {
+    displayDuration: 1800,
+    steps: [
+      { name: 'show-modal', delay: 0 },
+      { name: 'update-strikes', delay: 1900 },
+      { name: 'close-modal', delay: 2000 },
     ],
   },
   PITCHER_CHANGED: {
@@ -130,6 +156,7 @@ export const EVENT_SEQUENCES = {
       { name: 'show-modal', delay: 0 },
       { name: 'update-pitcher-card', delay: 2100 },
       { name: 'reset-pitch-selector', delay: 2150 },
+      { name: 'close-modal', delay: 2250 },
     ],
   },
   FOUL: {
@@ -137,6 +164,7 @@ export const EVENT_SEQUENCES = {
     steps: [
       { name: 'show-modal', delay: 0 },
       { name: 'update-strikes', delay: 1900 },
+      { name: 'close-modal', delay: 2000 },
     ],
   },
   WALK: {
@@ -145,6 +173,7 @@ export const EVENT_SEQUENCES = {
       { name: 'show-modal', delay: 0 },
       { name: 'update-runners', delay: 1600 },
       { name: 'load-next-batter', delay: 1800 },
+      { name: 'close-modal', delay: 1900 },
     ],
   },
   DOUBLE_PLAY: {
@@ -154,8 +183,41 @@ export const EVENT_SEQUENCES = {
       { name: 'update-outs', delay: 2700 },
       { name: 'update-runners', delay: 2800 },
       { name: 'check-inning-end', delay: 2900 },
+      { name: 'close-modal', delay: 3000 },
     ],
   },
+  GAME_OVER: {
+    displayDuration: 3000,
+    steps: [
+      { name: 'show-modal', delay: 0 },
+      { name: 'close-modal', delay: 3100 },
+    ],
+  },
+};
+
+// Export como EVENT_SEQUENCES para mantener compatibilidad con código existente
+export const EVENT_SEQUENCES = EVENT_SEQUENCES_STABLE;
+
+/**
+ * Durations for each event type (for modal overlay timing)
+ */
+export const EVENT_DURATIONS: Record<keyof typeof EVENT_SEQUENCES_STABLE, number> = {
+  HOME_RUN: 3500,
+  STRIKEOUT: 2500,
+  HIT_1B: 2800,
+  HIT_2B: 3000,
+  HIT_3B: 3000,
+  OUT_FLY: 2400,
+  OUT_GROUND: 2400,
+  BALL: 1800,
+  STRIKE: 1800,
+  STRIKE_LOOKING: 1800,
+  STRIKE_SWINGING: 1800,
+  PITCHER_CHANGED: 2000,
+  FOUL: 1800,
+  WALK: 2400,
+  DOUBLE_PLAY: 2600,
+  GAME_OVER: 3000,
 };
 
 /**
@@ -229,90 +291,115 @@ export const useEventSequencer = (): UseEventSequencerReturn => {
    * Registrar un callback para un step específico
    */
   const onStep = useCallback((stepName: string, callback: StepCallback) => {
+    console.log(`📌 [REGISTER STEP] Registering callback for step: ${stepName}`);
     stepCallbacksRef.current.set(stepName, callback);
+    console.log(`   ✅ Step "${stepName}" now has callback. Total steps registered: ${stepCallbacksRef.current.size}`);
   }, []);
 
   /**
    * Procesar el evento actual
    */
+  // ⚠️ CRITICAL BUGFIX: El problema es que setQueue() y setCurrentEvent() happen en el same setTimeout
+  // Esto causa que el useEffect no se re-ejecute a tiempo para procesar el siguiente evento
+  // SOLUCIÓN: Usar isProcessing state como trigger para re-ejecutar
   useEffect(() => {
-    if (queue.length === 0 || processingRef.current) return;
+    // Si la queue tiene eventos y no estamos procesando, iniciar el siguiente
+    if (queue.length > 0 && !isProcessing) {
+      const event = queue[0];
+      setIsProcessing(true);
+      processingRef.current = true;
+      const eventStartTime = Date.now();
+      
+      setCurrentEvent(event);
+      console.log(`⚙️  [EVENT SEQUENCER] Processing event: ${event.type} (id: ${event.id})`);
+      console.log(`   🕐 Event sequence starting at T=${eventStartTime}`);
+      console.log(`   📋 Available callbacks: ${Array.from(stepCallbacksRef.current.keys()).join(', ')}`);
 
-    processingRef.current = true;
-    const event = queue[0];
-    
-    setCurrentEvent(event);
-    console.log(`⚙️  [EVENT SEQUENCER] Processing event: ${event.type} (id: ${event.id})`);
+      const sequence = EVENT_SEQUENCES_STABLE[event.type];
+      if (!sequence) {
+        console.error(`❌ [EVENT SEQUENCER] Sequence not defined for: ${event.type}`);
+        setQueue(prev => prev.slice(1));
+        processingRef.current = false;
+        setIsProcessing(false);
+        return;
+      }
 
-    const sequence = EVENT_SEQUENCES[event.type];
-    if (!sequence) {
-      console.error(`❌ [EVENT SEQUENCER] Sequence not defined for: ${event.type}`);
-      setQueue(prev => prev.slice(1));
-      processingRef.current = false;
-      return;
-    }
-
-    // Ejecutar cada step en su momento exacto
-    sequence.steps.forEach(step => {
-      const timer = setTimeout(() => {
-        const callback = stepCallbacksRef.current.get(step.name);
-        if (callback) {
-          try {
-            console.log(`  📍 [STEP] ${step.name} (delay: ${step.delay}ms) - executing callback`);
-            // Execute callback without awaiting in setTimeout
-            // If it's a promise, let it resolve independently
-            const result = callback(event.payload, step.name);
-            if (result instanceof Promise) {
-              result.catch(err => {
-                console.error(`  ❌ [STEP] Error in ${step.name}:`, err);
-              });
+      // Ejecutar cada step en su momento exacto
+      sequence.steps.forEach(step => {
+        const timer = setTimeout(() => {
+          console.log(`   ⏱️  [STEP TIMEOUT] ${step.name} timeout fired at T=${Date.now()}`);
+          const callback = stepCallbacksRef.current.get(step.name);
+          console.log(`   🔍 Looking for callback "${step.name}" - Found: ${callback ? 'YES ✅' : 'NO ❌'}`);
+          
+          if (callback) {
+            try {
+              const stepExecTime = Date.now();
+              console.log(`  📍 [STEP] ${step.name} (delay: ${step.delay}ms) - executing callback at T=${stepExecTime} (+${stepExecTime - eventStartTime}ms from start)`);
+              const result = callback(event.payload, step.name);
+              if (result instanceof Promise) {
+                result.catch(err => {
+                  console.error(`  ❌ [STEP] Error in ${step.name}:`, err);
+                });
+              }
+              const stepEndTime = Date.now();
+              console.log(`      ✅ ${step.name} completed in ${stepEndTime - stepExecTime}ms`);
+            } catch (err) {
+              console.error(`  ❌ [STEP] Error in ${step.name}:`, err);
             }
-          } catch (err) {
-            console.error(`  ❌ [STEP] Error in ${step.name}:`, err);
+          } else {
+            console.warn(`  ⚠️  [STEP] No callback registered for ${step.name}`);
+            console.log(`      Current callbacks in ref: ${Array.from(stepCallbacksRef.current.keys()).join(', ')}`);
           }
-        } else {
-          console.warn(`  ⚠️  [STEP] No callback registered for ${step.name}`);
-        }
-      }, step.delay);
+        }, step.delay);
 
-      timersRef.current.set(`${event.id}-${step.name}`, timer);
-    });
-
-    // Calculate completion time based on maximum step delay (Error #2 fix)
-    const maxStepDelay = getMaxStepDelay(sequence.steps);
-    const eventCompletionTime = maxStepDelay + 500; // 500ms buffer after last step
-
-    // Cuando el evento se completa, removerlo de la queue y procesar el siguiente
-    const completeTimer = setTimeout(() => {
-      console.log(`✅ [EVENT SEQUENCER] Event completed: ${event.type}`);
-      
-      setQueue(prev => prev.slice(1));
-      setCurrentEvent(null);
-      processingRef.current = false;
-      
-      // Limpiar todos los timers de este evento específicamente (Error #5 fix)
-      Array.from(timersRef.current.keys()).forEach(key => {
-        if (key.startsWith(event.id)) {
-          const timer = timersRef.current.get(key);
-          if (timer) clearTimeout(timer);
-          timersRef.current.delete(key);
-        }
+        timersRef.current.set(`${event.id}-${step.name}`, timer);
       });
-    }, eventCompletionTime);
 
-    timersRef.current.set(`${event.id}-complete`, completeTimer);
+      // Calculate completion time based on maximum step delay
+      const maxStepDelay = getMaxStepDelay(sequence.steps);
+      const eventCompletionTime = maxStepDelay + 500;
 
-    return () => {
-      // Cleanup: cancelar solo los timers de este evento específico
-      Array.from(timersRef.current.keys()).forEach(key => {
-        if (key.startsWith(event.id)) {
-          const timer = timersRef.current.get(key);
-          if (timer) clearTimeout(timer);
-          timersRef.current.delete(key);
-        }
-      });
-    };
-  }, [queue]);
+      // Cuando el evento se completa, removerlo de la queue y procesar el siguiente
+      const completeTimer = setTimeout(() => {
+        console.log(`✅ [EVENT SEQUENCER] Event completed: ${event.type}`);
+        console.log(`   📊 Queue before removal: ${queue.length}, After will be: ${queue.length - 1}`);
+        console.log(`   🔓 Setting isProcessing to FALSE to allow next event`);
+        
+        setQueue(prev => {
+          console.log(`   🔄 setQueue called: removing first event, new length: ${prev.length - 1}`);
+          return prev.slice(1);
+        });
+        setCurrentEvent(null);
+        processingRef.current = false;
+        console.log(`   ✋ processingRef.current set to false`);
+        setIsProcessing(false);
+        console.log(`   ✅ setIsProcessing(false) executed`);
+        
+        // Limpiar todos los timers de este evento específicamente
+        Array.from(timersRef.current.keys()).forEach(key => {
+          if (key.startsWith(event.id)) {
+            const timer = timersRef.current.get(key);
+            if (timer) clearTimeout(timer);
+            timersRef.current.delete(key);
+          }
+        });
+      }, eventCompletionTime);
+
+      timersRef.current.set(`${event.id}-complete`, completeTimer);
+      console.log(`   ⏰ Complete timer scheduled for ${eventCompletionTime}ms`);
+
+      return () => {
+        // Cleanup: cancelar solo los timers de este evento específico
+        Array.from(timersRef.current.keys()).forEach(key => {
+          if (key.startsWith(event.id)) {
+            const timer = timersRef.current.get(key);
+            if (timer) clearTimeout(timer);
+            timersRef.current.delete(key);
+          }
+        });
+      };
+    }
+  }, [queue.length]); // ← BUGFIX: Solo queue.length, no isProcessing. Esto evita cancelar el setTimeout cuando isProcessing cambia
 
   return {
     queue,
