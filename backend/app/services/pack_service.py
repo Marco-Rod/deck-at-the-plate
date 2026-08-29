@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
 
 from app.models import PlayerCardModel, CardRarity, UserWallet, UserCardInventory, User
+from app.core.enums import PITCHER_POSITIONS
 
 logger = logging.getLogger(__name__)
 
@@ -15,8 +16,8 @@ class StarterPackConfig:
     # Posiciones requeridas del baseball (campo + DH)
     REQUIRED_POSITIONS = {"P", "C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "DH"}
     
-    # Clasificación de posiciones
-    PITCHER_POSITIONS = {"SP", "RP", "CP"}
+    # Clasificación de posiciones (la regla "es pitcher" es global y vive en core)
+    PITCHER_POSITIONS = PITCHER_POSITIONS
     FIELDER_POSITIONS = {"C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "DH"}
     
     # Totales

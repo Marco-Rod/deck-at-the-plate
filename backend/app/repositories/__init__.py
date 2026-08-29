@@ -9,6 +9,11 @@ Pauta: los repos NO lanzan HTTPException (eso queda en el router/handler)
 y solo devuelven entidades o None.
 """
 from app.repositories.game_repository import get_game_by_id, save_game
+from app.repositories.game_stats_repository import (
+    get_game_box_score,
+    get_player_game_stats,
+    record_game_event,
+)
 from app.repositories.card_repository import (
     count_user_inventory,
     find_all_cards,
@@ -35,6 +40,9 @@ from app.repositories.user_repository import (
 __all__ = [
     "get_game_by_id",
     "save_game",
+    "get_game_box_score",
+    "get_player_game_stats",
+    "record_game_event",
     "count_user_inventory",
     "find_all_cards",
     "find_pitchers_for_team",

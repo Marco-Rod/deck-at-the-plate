@@ -10,6 +10,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.core.enums import PITCHER_POSITIONS
 from app.database import get_db
 from app.models import GameSession
 from app.schemas import CreateGameRequest, GameSessionResponse
@@ -143,9 +144,10 @@ def create_game_session(
             detail="No hay cartas disponibles en la base de datos. Ejecuta el seed primero."
         )
 
-    # ⭐ ARREGLADO: Incluir is_two_way para Ohtani y otros jugadores con dos roles
-    pitchers = [c for c in cpu_cards if c.position in ["SP", "RP", "CP", "TWP"] or c.is_two_way]
-    batters = [c for c in cpu_cards if c.position not in ["SP", "RP", "CP"] or c.is_two_way]
+    # ⭐ INCLUIR is_two_way para Ohtani y otros jugadores con dos roles
+    # (la regla "es pitcher" es global: PITCHER_POSITIONS incluye SP/RP/CP/TWP)
+    pitchers = [c for c in cpu_cards if c.position in PITCHER_POSITIONS or c.is_two_way]
+    batters = [c for c in cpu_cards if c.position not in PITCHER_POSITIONS or c.is_two_way]
 
     # Asignar cartas CPU según su posición
     if human_is_home:
@@ -290,7 +292,7 @@ def get_box_score(
 
     Seguridad: solo los usuarios participantes de la partida pueden consultarla.
     """
-    from app.engine.stats_recorder import get_game_box_score
+    from app.repositories import get_game_box_score
     
     game = get_game_by_id(db, game_id)
     if not game:
@@ -330,7 +332,7 @@ def get_player_game_stats(
 
     Seguridad: solo los usuarios participantes de la partida pueden consultarla.
     """
-    from app.engine.stats_recorder import get_player_game_stats as calc_player_stats
+    from app.repositories import get_player_game_stats as calc_player_stats
     
     game = get_game_by_id(db, game_id)
     if not game:

@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.schemas import UserProfileResponseSchema, UserInventoryResponseSchema, CreateTeamRequestSchema, UserTeamResponseSchema
 from app.database import get_db
+from app.core.enums import PITCHER_POSITIONS
 from app.models import UserLineup, UserTeam
 from app.repositories import (
     find_user_inventory_cards,
@@ -178,7 +179,7 @@ def get_user_team_stats(
         ovr = card.get("overall", 70)
         pos = card.get("position", "")
 
-        if pos in ["SP", "RP", "CP"] or slot_pos == "P":
+        if pos in PITCHER_POSITIONS or slot_pos == "P":
             pitchers_ovr.append(ovr)
         else:
             batters_ovr.append(ovr)

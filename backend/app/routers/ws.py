@@ -72,17 +72,17 @@ async def websocket_endpoint(
             })
             print(f"[WS] Conexión establecida: game={game_id}, user={user_id}")
             
-            # ⭐ ARREGLADO: Ejecutar trigger_cpu_response_if_needed si es necesario
+            # ⭐ ARREGLADO: Ejecutar trigger_cpu_response si es necesario
             # En caso de que la CPU deba actuar en el primer turn (ej. usuario es AWAY en TOP)
             print(f"[WS] Verificando si CPU debe actuar al conectar...")
-            from app.routers.gameplay import trigger_cpu_response_if_needed
+            from app.engine.game_actions import trigger_cpu_response
             state = dict(game.state_data or {})
             print(f"[WS] State before trigger: current_pitch={state.get('current_pitch')}, is_top={game.is_top_inning}, mode={state.get('mode')}")
             try:
-                await trigger_cpu_response_if_needed(game, state, db, game_id)
-                print(f"[WS] ✅ trigger_cpu_response_if_needed completed successfully")
+                await trigger_cpu_response(game, state, db, game_id)
+                print(f"[WS] ✅ trigger_cpu_response completed successfully")
             except Exception as e:
-                print(f"[WS] ❌ Error en trigger_cpu_response_if_needed: {e}")
+                print(f"[WS] ❌ Error en trigger_cpu_response: {e}")
                 import traceback
                 traceback.print_exc()
             

@@ -5,17 +5,9 @@ Centraliza las consultas de cartas usadas por el motor y los routers.
 """
 from typing import Iterable, Sequence
 
-from app.core.enums import Position
+from app.core.enums import PITCHER_POSITIONS
 from app.models import PlayerCardModel, TacticCard
 from app.models.user_data import UserCardInventory
-
-# Posiciones consideradas "pitcher" (coinciden con las usadas en los routers)
-PITCHER_POSITIONS = (
-    Position.STARTER,
-    Position.RELIEVER,
-    Position.CLOSER,
-    Position.TWO_WAY,
-)
 
 
 def get_card_by_id(db, card_id) -> "PlayerCardModel | None":

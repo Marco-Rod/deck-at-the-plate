@@ -16,6 +16,7 @@ from sqlalchemy import Column, String, Integer, Boolean, Enum, ForeignKey, JSON
 from sqlalchemy.orm import relationship
 import enum
 from app.database import Base
+from app.core.enums import PITCHER_POSITIONS
 
 
 class CardRarity(str, enum.Enum):
@@ -65,12 +66,12 @@ class PlayerCardModel(Base):
     @property
     def is_pitcher(self) -> bool:
         """Determina si la carta puede lanzar en el juego."""
-        return self.position in ["SP", "RP", "CP", "TWP"] or self.is_two_way
+        return self.position in PITCHER_POSITIONS or self.is_two_way
 
     @property
     def is_batter(self) -> bool:
         """Determina si la carta puede batear en el juego."""
-        return self.position not in ["SP", "RP", "CP"] or self.is_two_way
+        return self.position not in PITCHER_POSITIONS or self.is_two_way
 
     def get_pitch_stats(self, pitch_type_name: str) -> dict | None:
         """

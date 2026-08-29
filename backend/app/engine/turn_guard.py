@@ -1,30 +1,43 @@
-from fastapi import HTTPException, status
-from app.models import GameSession
+"""
+Guardia de turno (lógica pura)
+===============================
+Determina si un usuario tiene el turno activo bajo un rol (PITCHER/BATTER) en
+la media entrada actual (TOP/BOT).
 
-def verify_player_turn(game: GameSession, user_id: str, required_role: str) -> None:
+Este módulo NO depende de FastAPI: expone decisiones puras. La traducción a
+HTTP (HTTPException 400/403) queda en el router que lo consume.
+"""
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.models import GameSession
+
+
+def expected_actor(game: "GameSession", required_role: str):
     """
-    Verifica si es el turno del usuario según su rol (PITCHER o BATTER) y la entrada (TOP/BOT).
-    
-    Considera la posición del usuario (HOME/AWAY) guardada en state_data.user_role.
+    Retorna el ``user_id`` al que le corresponde actuar según el rol y la media
+    entrada. Retorna ``None`` si el rol no es válido.
+
+    - PITCHER: lanza el local (HOME) en la Alta, el visitante (AWAY) en la Baja.
+    - BATTER:  batea el visitante (AWAY) en la Alta, el local (HOME) en la Baja.
     """
-    user_role = game.state_data.get("user_role") if game.state_data else "HOME"
-    
-    # Determinar qué usuario debe tomar la acción según el rol requerido e inning
-    if required_role.upper() == "PITCHER":
-        # En TOP: lanza el local (home). En BOT: lanza el visitante (away)
-        expected_user_id = game.home_user_id if game.is_top_inning else game.away_user_id
-    elif required_role.upper() == "BATTER":
-        # En TOP: batea el visitante (away). En BOT: batea el local (home)
-        expected_user_id = game.away_user_id if game.is_top_inning else game.home_user_id
-    else:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Rol de juego no válido.")
+    normalized = required_role.upper()
+    if normalized == "PITCHER":
+        return game.home_user_id if game.is_top_inning else game.away_user_id
+    if normalized == "BATTER":
+        return game.away_user_id if game.is_top_inning else game.home_user_id
+    return None
 
-    # Permitir la ejecución si el turno actual le pertenece al Bot de la CPU
-    if expected_user_id == "CPU_BOT":
-        return
 
-    if user_id != expected_user_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"No es tu turno. Se esperaba la acción del usuario con rol {required_role}. user_id={user_id}, expected={expected_user_id}, user_role={user_role}, is_top={game.is_top_inning}"
-        )
+def is_player_turn(game: "GameSession", user_id: str, required_role: str) -> bool:
+    """
+    Decide si ``user_id`` tiene el turno activo para ``required_role``.
+    La CPU (``CPU_BOT``) se considera "en turno" automáticamente cuando le
+    corresponde actuar (bypass del control humano).
+    """
+    expected = expected_actor(game, required_role)
+    if expected is None:
+        return False
+    if expected == "CPU_BOT":
+        return True
+    return user_id == expected

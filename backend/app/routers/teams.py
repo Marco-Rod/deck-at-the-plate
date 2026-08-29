@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from app.database import get_db
+from app.core.enums import PITCHER_POSITIONS
 from app.repositories import find_cards_by_team, get_all_teams
 
 router = APIRouter(prefix="/api/v1/teams", tags=["Teams"])
@@ -17,8 +18,8 @@ def get_cpu_teams(db: Session = Depends(get_db)):
             continue
 
         # CÁLCULO DINÁMICO DE MEDIAS
-        batters = [c for c in cards if c.position not in ["SP", "RP", "CP"]]
-        pitchers = [c for c in cards if c.position in ["SP", "RP", "CP"]]
+        batters = [c for c in cards if c.position not in PITCHER_POSITIONS]
+        pitchers = [c for c in cards if c.position in PITCHER_POSITIONS]
 
         bat_ovr = round(sum(c.overall for c in batters) / len(batters)) if batters else 80
         pit_ovr = round(sum(c.overall for c in pitchers) / len(pitchers)) if pitchers else 80

@@ -1,11 +1,15 @@
 """
 Vocabulario canónico del juego
-================================
+===============================
 Enums que centralizan los strings mágicos usados por el motor (eventos,
 posiciones, dificultad, tipos de picheo, etc.). Al derivar de ``str`` los
 valores siguen siendo intercambiables con los literales existentes en la base
 de datos y en los payloads de la API, por lo que su introducción es 100%
 compatible con el código actual.
+
+Fuerza de la regla "es pitcher": la cardinalidad de posiciones lanzadoras se
+define UNA sola vez aquí (``PITCHER_POSITIONS``). Modelos, repositorios y
+routers deben derivarla de esta constante, nunca redefinirla.
 
 Beneficios SOLID:
     - Open/Closed: agregar un nuevo evento/picheo es definir una constante,
@@ -106,7 +110,6 @@ class RunnerBase(str, enum.Enum):
     SECOND = "2b"
     THIRD = "3b"
 
-
 class Position(str, enum.Enum):
     """Posiciones de los jugadores en el diamante."""
 
@@ -127,7 +130,12 @@ class Position(str, enum.Enum):
 
     @property
     def is_pitcher(self) -> bool:
-        return self in (Position.STARTER, Position.RELIEVER, Position.CLOSER, Position.TWO_WAY)
+        return self in (
+            Position.STARTER,
+            Position.RELIEVER,
+            Position.CLOSER,
+            Position.TWO_WAY,
+        )
 
     @property
     def is_fielder(self) -> bool:
@@ -142,3 +150,7 @@ class Position(str, enum.Enum):
             Position.RIGHT_FIELD,
             Position.DESIGNATED_HITTER,
         )
+
+
+# Posiciones capaces de lanzar (single source of truth).
+PITCHER_POSITIONS: frozenset[str] = frozenset(p.value for p in Position if p.is_pitcher)

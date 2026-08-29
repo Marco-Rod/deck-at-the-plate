@@ -1,18 +1,22 @@
 """
-Módulo: stats_recorder
-======================
-Registra eventos de la partida en la base de datos.
-Se llama después de cada jugada para guardar estadísticas.
+Repositorio de estadísticas de partida (GameEventLog)
+======================================================
+Centraliza el registro de eventos y la agregación del box score.
+Sustituye al antiguo `engine/stats_recorder.py`: la persistencia vive en la
+capa de datos (repositories), no en el motor.
+
+Pauta: los repos NO lanzan HTTPException; solo acceden a datos.
 """
 
 import uuid
-from datetime import datetime
-from sqlalchemy.orm import Session
-from app.models import GameEventLog, PlayerCardModel
+
+from app.core.enums import Event
+from app.models import GameEventLog
+from app.repositories.card_repository import get_card_by_id
 
 
 def record_game_event(
-    db: Session,
+    db,
     game_id: str,
     event_type: str,
     inning: int,
@@ -28,7 +32,7 @@ def record_game_event(
 ) -> GameEventLog:
     """
     Registra un evento de la partida en la base de datos.
-    
+
     Args:
         db: Sesión de base de datos
         game_id: ID de la partida
@@ -43,17 +47,16 @@ def record_game_event(
         runners_on_base: Dict con corredores en base
         runs_scored: Carreras anotadas
         rbi: RBIs generados
-    
+
     Returns:
         GameEventLog registrado
     """
-    # Obtener nombres de jugadores desde las tarjetas
-    batter_card = db.query(PlayerCardModel).filter(PlayerCardModel.id == batter_id).first()
-    pitcher_card = db.query(PlayerCardModel).filter(PlayerCardModel.id == pitcher_id).first()
-    
+    batter_card = get_card_by_id(db, batter_id)
+    pitcher_card = get_card_by_id(db, pitcher_id)
+
     batter_name = batter_card.name if batter_card else "Unknown Batter"
     pitcher_name = pitcher_card.name if pitcher_card else "Unknown Pitcher"
-    
+
     event_log = GameEventLog(
         id=f"event_{uuid.uuid4().hex[:8]}",
         game_id=game_id,
@@ -71,18 +74,18 @@ def record_game_event(
         runs_scored=runs_scored,
         rbi=rbi,
     )
-    
+
     db.add(event_log)
     db.commit()
     db.refresh(event_log)
-    
+
     return event_log
 
 
-def get_game_box_score(db: Session, game_id: str) -> dict:
+def get_game_box_score(db, game_id: str) -> dict:
     """
     Calcula el box score (resumen de estadísticas) de una partida.
-    
+
     Retorna:
     {
         "batters": {
@@ -114,10 +117,10 @@ def get_game_box_score(db: Session, game_id: str) -> dict:
     }
     """
     events = db.query(GameEventLog).filter(GameEventLog.game_id == game_id).all()
-    
+
     batters = {}
     pitchers = {}
-    
+
     for event in events:
         # Estadísticas de bateador
         if event.batter_id not in batters:
@@ -134,37 +137,37 @@ def get_game_box_score(db: Session, game_id: str) -> dict:
                 "strikeouts": 0,
                 "walks": 0,
             }
-        
+
         # Contar at-bats (cualquier evento es un AB excepto walks y doble play sin movimiento)
-        if event.event_type not in ("WALK",):
+        if event.event_type != Event.WALK:
             batters[event.batter_id]["at_bats"] += 1
-        
+
         # Contar hits y sus tipos
-        if event.event_type == "HIT_1B":
+        if event.event_type == Event.HIT_1B:
             batters[event.batter_id]["hits"] += 1
             batters[event.batter_id]["singles"] += 1
-        elif event.event_type == "HIT_2B":
+        elif event.event_type == Event.HIT_2B:
             batters[event.batter_id]["hits"] += 1
             batters[event.batter_id]["doubles"] += 1
-        elif event.event_type == "HIT_3B":
+        elif event.event_type == Event.HIT_3B:
             batters[event.batter_id]["hits"] += 1
             batters[event.batter_id]["triples"] += 1
-        elif event.event_type == "HOME_RUN":
+        elif event.event_type == Event.HOME_RUN:
             batters[event.batter_id]["hits"] += 1
             batters[event.batter_id]["home_runs"] += 1
-        elif event.event_type == "STRIKEOUT":
+        elif event.event_type == Event.STRIKEOUT:
             batters[event.batter_id]["strikeouts"] += 1
-        elif event.event_type == "WALK":
+        elif event.event_type == Event.WALK:
             batters[event.batter_id]["walks"] += 1
-        elif event.event_type == "DOUBLE_PLAY":
+        elif event.event_type == Event.DOUBLE_PLAY:
             # El bateador tiene un at-bat en doble play (ya contado arriba)
             # No es un hit, así que no se suma a hits
             pass
-        
+
         # RBIs y carreras
         batters[event.batter_id]["rbi"] += event.rbi
         batters[event.batter_id]["runs"] += event.runs_scored
-        
+
         # Estadísticas de pitcher
         if event.pitcher_id not in pitchers:
             pitchers[event.pitcher_id] = {
@@ -175,26 +178,26 @@ def get_game_box_score(db: Session, game_id: str) -> dict:
                 "home_runs_allowed": 0,
                 "runs_allowed": 0,
             }
-        
-        if event.event_type == "STRIKEOUT":
+
+        if event.event_type == Event.STRIKEOUT:
             pitchers[event.pitcher_id]["strikeouts"] += 1
-        elif event.event_type == "WALK":
+        elif event.event_type == Event.WALK:
             pitchers[event.pitcher_id]["walks"] += 1
-        elif event.event_type in ("HIT_1B", "HIT_2B", "HIT_3B"):
+        elif event.event_type in (Event.HIT_1B, Event.HIT_2B, Event.HIT_3B):
             pitchers[event.pitcher_id]["hits_allowed"] += 1
-        elif event.event_type == "HOME_RUN":
+        elif event.event_type == Event.HOME_RUN:
             pitchers[event.pitcher_id]["hits_allowed"] += 1
             pitchers[event.pitcher_id]["home_runs_allowed"] += 1
-        
+
         pitchers[event.pitcher_id]["runs_allowed"] += event.runs_scored
-    
+
     return {
         "batters": batters,
         "pitchers": pitchers,
     }
 
 
-def get_player_game_stats(db: Session, game_id: str, player_id: str) -> dict:
+def get_player_game_stats(db, game_id: str, player_id: str) -> dict:
     """
     Obtiene estadísticas de un jugador específico en una partida.
     Puede ser bateador o pitcher.
@@ -203,7 +206,7 @@ def get_player_game_stats(db: Session, game_id: str, player_id: str) -> dict:
         (GameEventLog.game_id == game_id) &
         ((GameEventLog.batter_id == player_id) | (GameEventLog.pitcher_id == player_id))
     ).all()
-    
+
     stats = {
         "batting": {
             "at_bats": 0,
@@ -225,28 +228,28 @@ def get_player_game_stats(db: Session, game_id: str, player_id: str) -> dict:
             "runs_allowed": 0,
         }
     }
-    
+
     for event in events:
         if event.batter_id == player_id:
-            if event.event_type != "WALK":
+            if event.event_type != Event.WALK:
                 stats["batting"]["at_bats"] += 1
-            
-            if event.event_type == "HIT_1B":
+
+            if event.event_type == Event.HIT_1B:
                 stats["batting"]["hits"] += 1
-            elif event.event_type == "HIT_2B":
+            elif event.event_type == Event.HIT_2B:
                 stats["batting"]["hits"] += 1
                 stats["batting"]["doubles"] += 1
-            elif event.event_type == "HIT_3B":
+            elif event.event_type == Event.HIT_3B:
                 stats["batting"]["hits"] += 1
                 stats["batting"]["triples"] += 1
-            elif event.event_type == "HOME_RUN":
+            elif event.event_type == Event.HOME_RUN:
                 stats["batting"]["hits"] += 1
                 stats["batting"]["home_runs"] += 1
-            elif event.event_type == "STRIKEOUT":
+            elif event.event_type == Event.STRIKEOUT:
                 stats["batting"]["strikeouts"] += 1
-            elif event.event_type == "WALK":
+            elif event.event_type == Event.WALK:
                 stats["batting"]["walks"] += 1
-            
+
             stats["batting"]["rbi"] += event.rbi
             stats["batting"]["runs"] += event.runs_scored
             stats["batting"]["events"].append({
@@ -254,18 +257,18 @@ def get_player_game_stats(db: Session, game_id: str, player_id: str) -> dict:
                 "event": event.event_type,
                 "rbi": event.rbi,
             })
-        
+
         if event.pitcher_id == player_id:
-            if event.event_type == "STRIKEOUT":
+            if event.event_type == Event.STRIKEOUT:
                 stats["pitching"]["strikeouts"] += 1
-            elif event.event_type == "WALK":
+            elif event.event_type == Event.WALK:
                 stats["pitching"]["walks"] += 1
-            elif event.event_type in ("HIT_1B", "HIT_2B", "HIT_3B"):
+            elif event.event_type in (Event.HIT_1B, Event.HIT_2B, Event.HIT_3B):
                 stats["pitching"]["hits_allowed"] += 1
-            elif event.event_type == "HOME_RUN":
+            elif event.event_type == Event.HOME_RUN:
                 stats["pitching"]["hits_allowed"] += 1
                 stats["pitching"]["home_runs_allowed"] += 1
-            
+
             stats["pitching"]["runs_allowed"] += event.runs_scored
-    
+
     return stats

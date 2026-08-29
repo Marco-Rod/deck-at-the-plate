@@ -225,10 +225,10 @@ def process_at_bat_transition(
                     state["active_batter"] = away_lineup[away_idx]
 
                 # Log: qué pitcher está en el montículo en la Alta
-                # (la dependencia ORM solo vive en el path con sesión de BD)
+                # (el acceso a datos solo vive en el path con sesión de BD)
                 if db:
-                    from app.models import PlayerCardModel
-                    pitcher_card = db.query(PlayerCardModel).filter(PlayerCardModel.id == home_pitcher).first()
+                    from app.repositories import get_card_by_id
+                    pitcher_card = get_card_by_id(db, home_pitcher)
                 else:
                     pitcher_card = None
                 print(f"🔄 [INNING CHANGE] → ALTA de Inning {game.current_inning}")
@@ -243,10 +243,10 @@ def process_at_bat_transition(
                     state["active_batter"] = home_lineup[home_idx]
 
                 # Log: qué pitcher está en el montículo en la Baja
-                # (la dependencia ORM solo vive en el path con sesión de BD)
+                # (el acceso a datos solo vive en el path con sesión de BD)
                 if db:
-                    from app.models import PlayerCardModel
-                    pitcher_card = db.query(PlayerCardModel).filter(PlayerCardModel.id == away_pitcher).first()
+                    from app.repositories import get_card_by_id
+                    pitcher_card = get_card_by_id(db, away_pitcher)
                 else:
                     pitcher_card = None
                 print(f"🔄 [INNING CHANGE] → BAJA de Inning {game.current_inning}")
