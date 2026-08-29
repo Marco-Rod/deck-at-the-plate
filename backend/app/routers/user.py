@@ -4,22 +4,32 @@ from sqlalchemy.orm import Session
 from app.schemas import UserProfileResponseSchema, UserInventoryResponseSchema, CreateTeamRequestSchema, UserTeamResponseSchema
 from app.database import get_db
 from app.models import User, UserWallet, UserCardInventory, PlayerCardModel, UserLineup, UserTeam
+from app.auth import get_current_user
 
 router = APIRouter(prefix="/api/v1/user", tags=["User & Inventory"])
 
 
-@router.get("/{user_id}/profile", response_model=UserProfileResponseSchema)
-def get_user_profile(user_id: str, db: Session = Depends(get_db)):
-    """Obtiene la información general del usuario y su saldo de monedas."""
+def _get_current_user_or_404(user_id: str, db: Session) -> User:
+    """Resuelve el usuario autenticado o lanza 404."""
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    return user
 
-    wallet = db.query(UserWallet).filter(UserWallet.user_id == user_id).first()
-    
+
+@router.get("/me/profile", response_model=UserProfileResponseSchema)
+def get_user_profile(
+    db: Session = Depends(get_db),
+    current_user_id: str = Depends(get_current_user),
+):
+    """Obtiene la información general del usuario autenticado y su saldo de monedas."""
+    user = _get_current_user_or_404(current_user_id, db)
+
+    wallet = db.query(UserWallet).filter(UserWallet.user_id == current_user_id).first()
+
     # Si por alguna razón el usuario no tiene wallet creada, se inicializa con valores base
     if not wallet:
-        wallet = UserWallet(user_id=user_id, stamps=1000, gems=0)
+        wallet = UserWallet(user_id=current_user_id, stamps=1000, gems=0)
         db.add(wallet)
         db.commit()
         db.refresh(wallet)
@@ -35,16 +45,17 @@ def get_user_profile(user_id: str, db: Session = Depends(get_db)):
     }
 
 
-@router.get("/{user_id}/inventory", response_model=UserInventoryResponseSchema)
-def get_user_inventory(user_id: str, db: Session = Depends(get_db)):
-    """Devuelve la lista completa de cartas que posee el usuario en su colección."""
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+@router.get("/me/inventory", response_model=UserInventoryResponseSchema)
+def get_user_inventory(
+    db: Session = Depends(get_db),
+    current_user_id: str = Depends(get_current_user),
+):
+    """Devuelve la lista completa de cartas del usuario autenticado en su colección."""
+    _get_current_user_or_404(current_user_id, db)
 
     inventory_items = (
         db.query(UserCardInventory)
-        .filter(UserCardInventory.user_id == user_id)
+        .filter(UserCardInventory.user_id == current_user_id)
         .all()
     )
 
@@ -59,41 +70,46 @@ def get_user_inventory(user_id: str, db: Session = Depends(get_db)):
             })
 
     return {
-        "user_id": user_id,
+        "user_id": current_user_id,
         "total_cards": len(cards_list),
         "inventory": cards_list
     }
 
 
-@router.get("/{user_id}/lineup")
-def get_user_active_lineup(user_id: str, db: Session = Depends(get_db)):
-    """Recupera la alineación activa del usuario desde la base de datos."""
+@router.get("/me/lineup")
+def get_user_active_lineup(
+    db: Session = Depends(get_db),
+    current_user_id: str = Depends(get_current_user),
+):
+    """Recupera la alineación activa del usuario autenticado desde la base de datos."""
     lineup = (
         db.query(UserLineup)
-        .filter(UserLineup.user_id == user_id, UserLineup.is_active == True)
+        .filter(UserLineup.user_id == current_user_id, UserLineup.is_active == True)
         .first()
     )
     if not lineup:
-        return {"user_id": user_id, "name": "Lineup Principal", "slots": {}}
+        return {"user_id": current_user_id, "name": "Lineup Principal", "slots": {}}
     return lineup
 
 
-@router.put("/{user_id}/lineup")
-def save_user_lineup(user_id: str, payload: dict, db: Session = Depends(get_db)):
-    """Crea o actualiza el lineup activo del usuario en PostgreSQL."""
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+@router.put("/me/lineup")
+def save_user_lineup(
+    payload: dict,
+    db: Session = Depends(get_db),
+    current_user_id: str = Depends(get_current_user),
+):
+    """Crea o actualiza el lineup activo del usuario autenticado en PostgreSQL."""
+    _get_current_user_or_404(current_user_id, db)
 
     lineup = (
         db.query(UserLineup)
-        .filter(UserLineup.user_id == user_id, UserLineup.is_active == True)
+        .filter(UserLineup.user_id == current_user_id, UserLineup.is_active == True)
         .first()
     )
 
     if not lineup:
         lineup = UserLineup(
-            user_id=user_id,
+            user_id=current_user_id,
             name=payload.get("name", "Lineup Principal"),
             is_active=True,
             slots=payload.get("slots", {})
@@ -107,19 +123,21 @@ def save_user_lineup(user_id: str, payload: dict, db: Session = Depends(get_db))
     return lineup
 
 
-@router.post("/{user_id}/team", response_model=UserTeamResponseSchema)
-def create_user_team(user_id: str, payload: CreateTeamRequestSchema, db: Session = Depends(get_db)):
-    """Crea el club personalizado para el usuario."""
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+@router.post("/me/team", response_model=UserTeamResponseSchema)
+def create_user_team(
+    payload: CreateTeamRequestSchema,
+    db: Session = Depends(get_db),
+    current_user_id: str = Depends(get_current_user),
+):
+    """Crea el club personalizado para el usuario autenticado."""
+    _get_current_user_or_404(current_user_id, db)
 
-    existing_team = db.query(UserTeam).filter(UserTeam.user_id == user_id).first()
+    existing_team = db.query(UserTeam).filter(UserTeam.user_id == current_user_id).first()
     if existing_team:
         raise HTTPException(status_code=400, detail="El usuario ya tiene un club registrado")
 
     new_team = UserTeam(
-        user_id=user_id,
+        user_id=current_user_id,
         name=payload.name,
         short_name=payload.short_name.upper(),
         city=payload.city,
@@ -134,23 +152,29 @@ def create_user_team(user_id: str, payload: CreateTeamRequestSchema, db: Session
     db.refresh(new_team)
     return new_team
 
-@router.get("/{user_id}/team", response_model=UserTeamResponseSchema)
-def get_user_team(user_id: str, db: Session = Depends(get_db)):
-    """Obtiene los datos del club personalizado del usuario."""
-    team = db.query(UserTeam).filter(UserTeam.user_id == user_id).first()
+@router.get("/me/team", response_model=UserTeamResponseSchema)
+def get_user_team(
+    db: Session = Depends(get_db),
+    current_user_id: str = Depends(get_current_user),
+):
+    """Obtiene los datos del club personalizado del usuario autenticado."""
+    team = db.query(UserTeam).filter(UserTeam.user_id == current_user_id).first()
     if not team:
         raise HTTPException(status_code=404, detail="El usuario no ha fundado ningún club")
     return team
 
 
-@router.get("/{user_id}/team-stats")
-def get_user_team_stats(user_id: str, db: Session = Depends(get_db)):
+@router.get("/me/team-stats")
+def get_user_team_stats(
+    db: Session = Depends(get_db),
+    current_user_id: str = Depends(get_current_user),
+):
     """
     Calcula dinámicamente el OVR General, Bateo (BAT) y Pitcheo (PIT)
     basado en las cartas de la alineación activa guardada en la BD.
     """
     lineup = db.query(UserLineup).filter(
-        UserLineup.user_id == user_id, 
+        UserLineup.user_id == current_user_id,
         UserLineup.is_active == True
     ).first()
 

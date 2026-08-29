@@ -51,18 +51,18 @@ export const MyTeamScreen = ({ user, onBack }) => {
     setLoading(true);
     
     // 1. Obtener la identidad del club
-    userApi.getTeam(user.userId)
+    userApi.getTeam()
       .then(data => setUserTeam(data))
       .catch(err => console.error("El usuario no tiene club registrado:", err));
 
     // 2. Cargar inventario y lineup desde el Backend
-    userApi.getInventory(user.userId)
+    userApi.getInventory()
       .then(async (data) => {
         const rawInventory = (data.inventory || []).map(i => i.card || i).filter(c => c && c.id);
         setInventory(rawInventory);
 
         try {
-          const remoteLineup = await userApi.getLineup(user.userId);
+          const remoteLineup = await userApi.getLineup();
           if (remoteLineup && remoteLineup.slots && Object.keys(remoteLineup.slots).length > 0) {
             setFieldLineup(remoteLineup.slots);
           } else {
@@ -88,7 +88,7 @@ export const MyTeamScreen = ({ user, onBack }) => {
 
     try {
       setSavingStatus('GUARDANDO...');
-      await userApi.updateLineup(user.userId, updatedLineup);
+      await userApi.updateLineup(updatedLineup);
       setSavingStatus('✓ GUARDADO EN DB');
       setTimeout(() => setSavingStatus(null), 2000);
     } catch (err) {

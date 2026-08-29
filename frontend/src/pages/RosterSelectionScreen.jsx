@@ -14,7 +14,7 @@ export const RosterSelectionScreen = ({ user, gameConfig, onRosterConfirmed, onB
     if (!user?.userId) return;
 
     setLoading(true);
-    userApi.getLineup(user.userId)
+    userApi.getLineup()
       .then(data => {
         if (data && data.slots) {
           setActiveLineup(data.slots);

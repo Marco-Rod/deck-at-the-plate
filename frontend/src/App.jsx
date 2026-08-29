@@ -52,6 +52,19 @@ export default function App() {
     } else {
       setHasCheckedRecovery(true);
     }
+
+    // Cerrar sesión automáticamente si el token expira o es inválido (401).
+    const handleSessionExpired = () => {
+      clearGameSession();
+      authApi.logout();
+      setUser(null);
+      setActiveGameId(null);
+      setPendingGameConfig(null);
+      setPendingOnboardingUserId(null);
+      setCurrentView('LOBBY');
+    };
+    window.addEventListener('auth:session-expired', handleSessionExpired);
+    return () => window.removeEventListener('auth:session-expired', handleSessionExpired);
   }, []);
 
   const handleLoginSuccess = (userData) => {

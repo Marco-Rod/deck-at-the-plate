@@ -28,6 +28,20 @@ interface GameMetadata {
 }
 
 /**
+ * Elimina del state_data persistido los campos que el Fog of War del servidor
+ * debería ocultar al jugador (p. ej. la selección de picheo del rival: current_pitch).
+ */
+const SENSITIVE_STATE_KEYS = ['current_pitch'];
+
+export const sanitizePersistedState = (stateData: Record<string, unknown>): Record<string, unknown> => {
+  const sanitized = { ...(stateData || {}) };
+  for (const key of SENSITIVE_STATE_KEYS) {
+    delete sanitized[key];
+  }
+  return sanitized;
+};
+
+/**
  * Guarda el estado del juego en localStorage
  */
 export const persistGameState = (gameState: GameStateWS | null, gameId: string, userId: string) => {
@@ -67,8 +81,9 @@ export const persistGameState = (gameState: GameStateWS | null, gameId: string, 
       awayHits: gameState.awayHits,
       inning_runs: gameState.inning_runs || {},
       
-      // state_data completo (contiene info del backend)
-      state_data: gameState.state_data || {},
+      // state_data sanitizado: excluye datos sensibles del rival
+      // (p. ej. current_pitch), que el Fog of War debe ocultar.
+      state_data: sanitizePersistedState(gameState.state_data || {}),
     };
 
     // Guardar estado del juego

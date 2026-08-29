@@ -16,11 +16,13 @@ Seguridad:
     - Nunca se retorna el hash de la contraseña en ninguna respuesta.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from passlib.context import CryptContext
 import bcrypt
+import time
+import threading
 
 from app.database import get_db
 from app.models import User, UserWallet
@@ -50,12 +52,68 @@ def _verify_password(plain: str, hashed: str) -> bool:
     return bcrypt.checkpw(pwd_bytes, hashed_bytes)
 
 
+# ---------------------------------------------------------------------------
+# Rate limiting simple en memoria (aplica a /login y /register).
+# Limita intentos por IP para mitigar fuerza bruta y enumeración de cuentas.
+# Nota: en un despliegue multi-instancia se debe sustituir por un store
+# distribuido (Redis) o un reverse proxy (nginx limit_req).
+# ---------------------------------------------------------------------------
+
+_login_limits: dict = {}       # ip -> lista de timestamps
+_login_lock = threading.Lock()
+
+# Máximo de solicitudes por ventana de tiempo (p. ej. 10 por 5 minutos)
+RATE_LIMIT_MAX = 10
+RATE_LIMIT_WINDOW_SECONDS = 300
+
+
+def _client_ip(request: Request) -> str:
+    # Confiar en el header X-Forwarded-For solo si está presente y es válido.
+    fwd = request.headers.get("x-forwarded-for")
+    if fwd:
+        return fwd.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def enforce_login_rate_limit(request: Request) -> None:
+    """Comprueba el límite de intentos por IP; lanza 429 si se excede."""
+    ip = _client_ip(request)
+    now = time.time()
+
+    with _login_lock:
+        window = _login_limits.setdefault(ip, [])
+        # Descartar timestamps fuera de la ventana
+        cutoff = now - RATE_LIMIT_WINDOW_SECONDS
+        window[:] = [ts for ts in window if ts > cutoff]
+
+        if len(window) >= RATE_LIMIT_MAX:
+            # Limpiar IPs con listas vacías para evitar crecimiento sin límite
+            if not window:
+                _login_limits.pop(ip, None)
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Demasiados intentos. Espera unos minutos e inténtalo de nuevo.",
+            )
+
+        window.append(now)
+
+        # Poda defensiva: evitar que el dict crezca indefinidamente.
+        if len(_login_limits) > 10000:
+            stale_cutoff = now - RATE_LIMIT_WINDOW_SECONDS
+            for key, ts_list in list(_login_limits.items()):
+                pruned = [ts for ts in ts_list if ts > stale_cutoff]
+                if pruned:
+                    _login_limits[key] = pruned
+                else:
+                    _login_limits.pop(key, None)
+
+
 @router.post(
     "/register",
     status_code=status.HTTP_201_CREATED,
     summary="Registrar nuevo usuario"
 )
-def register(payload: RegisterRequest, db: Session = Depends(get_db)):
+def register(payload: RegisterRequest, request: Request, db: Session = Depends(get_db)):
     """
     Crea un nuevo usuario en el sistema.
 
@@ -65,6 +123,8 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)):
 
     Retorna el user_id y username del usuario creado (sin contraseña ni hash).
     """
+    enforce_login_rate_limit(request)
+
     existing = db.query(User).filter(User.username == payload.username).first()
     if existing:
         raise HTTPException(
@@ -100,6 +160,7 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)):
     summary="Iniciar sesión y obtener JWT"
 )
 def login(
+    request: Request,
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db)
 ):
@@ -111,6 +172,8 @@ def login(
 
     El token incluye el user_id en el claim "sub" y expira en 8 horas.
     """
+    enforce_login_rate_limit(request)
+
     user = db.query(User).filter(User.username == form_data.username).first()
 
     if not user or not _verify_password(form_data.password, user.hashed_password):

@@ -52,6 +52,12 @@ async function _request(path, options = {}) {
   });
 
   if (!response.ok) {
+    // Sesión expirada o token inválido → forzar logout del lado del cliente.
+    if (response.status === 401) {
+      auth.logout();
+      window.dispatchEvent(new CustomEvent('auth:session-expired', { detail: { status: 401 } }));
+    }
+
     let errorDetail = `Error ${response.status}`;
     try {
       const errorBody = await response.json();
@@ -167,12 +173,12 @@ export const games = {
 
   /**
    * Obtiene el estado sanitizado de una partida (Fog of War aplicado).
+   * La identidad del usuario se deriva del JWT en el backend.
    * @param {string} gameId
-   * @param {string} userId - ID del usuario que consulta (determina qué se oculta)
    * @returns {GameSessionResponse}
    */
-  getState: (gameId, userId) =>
-    _request(`/api/v1/games/${gameId}?user_id=${userId}`),
+  getState: (gameId) =>
+    _request(`/api/v1/games/${gameId}`),
 
   /**
    * Registra el picheo del lanzador (Fase 1 del at-bat).
@@ -213,22 +219,20 @@ export const games = {
    * @param {string} gameId
    * @param {{ new_pitcher_id: string }} payload
    */
-  changePitcher: (gameId, payload, userId) =>
-    _request(`/api/v1/games/${gameId}/change-pitcher?user_id=${userId}`, {
+  changePitcher: (gameId, payload) =>
+    _request(`/api/v1/games/${gameId}/change-pitcher`, {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
 
   /**
    * Obtiene los lanzadores disponibles en el bullpen.
+   * La identidad del usuario se deriva del JWT en el backend.
    * @param {string} gameId
-   * @param {string} userId - ID del usuario para determinar su equipo (HOME o AWAY)
    * @returns {Promise<{available_pitchers: Array}>}
    */
-  getAvailablePitchers: (gameId, userId) => {
-    const url = `/api/v1/games/${gameId}/available-pitchers?user_id=${userId}`;
-    return _request(url, { method: 'GET' });
-  },
+  getAvailablePitchers: (gameId) =>
+    _request(`/api/v1/games/${gameId}/available-pitchers`),
 
   /**
    * Obtiene los lanzadores disponibles del equipo rival (CPU).
@@ -287,34 +291,35 @@ export const games = {
 
 export const user = {
   /**
-   * Obtiene el perfil y wallet del usuario.
-   * @param {string} userId
+   * Obtiene el perfil y wallet del usuario autenticado.
+   * La identidad se deriva del JWT, no del parámetro userId.
+   * @param {string} [userId] - Ignorado; se mantiene para compatibilidad.
    * @returns {UserProfileResponseSchema}
    */
-  getProfile: (userId) => _request(`/api/v1/user/${userId}/profile`),
+  getProfile: () => _request('/api/v1/user/me/profile'),
 
   /**
-   * Obtiene el inventario de cartas del usuario.
-   * @param {string} userId
+   * Obtiene el inventario de cartas del usuario autenticado.
+   * @param {string} [userId] - Ignorado.
    * @returns {UserInventoryResponseSchema}
    */
-  getInventory: (userId) => _request(`/api/v1/user/${userId}/inventory`),
+  getInventory: () => _request('/api/v1/user/me/inventory'),
 
   /**
-   * Obtiene la alineación (lineup) activa del usuario desde la base de datos.
-   * @param {string} userId
+   * Obtiene la alineación (lineup) activa del usuario autenticado.
+   * @param {string} [userId] - Ignorado.
    * @returns {Promise<Object>}
    */
-  getLineup: (userId) => _request(`/api/v1/user/${userId}/lineup`),
+  getLineup: () => _request('/api/v1/user/me/lineup'),
 
   /**
-   * Actualiza o crea la alineación activa del usuario en la base de datos.
-   * @param {string} userId
+   * Actualiza o crea la alineación activa del usuario autenticado.
+   * @param {string} [userId] - Ignorado.
    * @param {Object} lineupData - Objeto con el mapeo de posiciones {"P": card, "C": card, ...}
    * @returns {Promise<Object>}
    */
-  updateLineup: (userId, lineupData) =>
-    _request(`/api/v1/user/${userId}/lineup`, {
+  updateLineup: (lineupData) =>
+    _request('/api/v1/user/me/lineup', {
       method: 'PUT',
       body: JSON.stringify({
         name: 'Lineup Principal',
@@ -324,30 +329,30 @@ export const user = {
     }),
 
   /**
-   * Registra un nuevo club personalizado para el usuario.
-   * @param {string} userId
+   * Registra un nuevo club personalizado para el usuario autenticado.
+   * @param {string} [userId] - Ignorado.
    * @param {Object} teamData
    * @returns {Promise<Object>}
    */
-  createTeam: (userId, teamData) =>
-    _request(`/api/v1/user/${userId}/team`, {
+  createTeam: (teamData) =>
+    _request('/api/v1/user/me/team', {
       method: 'POST',
       body: JSON.stringify(teamData),
     }),
 
   /**
-   * Obtiene los datos del club personalizado del usuario.
-   * @param {string} userId
+   * Obtiene los datos del club personalizado del usuario autenticado.
+   * @param {string} [userId] - Ignorado.
    * @returns {Promise<Object>}
    */
-  getTeam: (userId) => _request(`/api/v1/user/${userId}/team`),
+  getTeam: () => _request('/api/v1/user/me/team'),
 
   /**
    * Obtiene las métricas calculadas del equipo del usuario (Overall, Bateo, Pitcheo).
-   * @param {string} userId - ID del usuario.
+   * @param {string} [userId] - Ignorado.
    * @returns {Promise<{overall: number, batOvr: number, pitOvr: number}>}
    */
-  getTeamStats: (userId) => _request(`/api/v1/user/${userId}/team-stats`),
+  getTeamStats: () => _request('/api/v1/user/me/team-stats'),
 
   /**
    * Obtiene todos los equipos disponibles para seleccionar como franquicia base.
@@ -400,24 +405,26 @@ export const teams = {
 
 export const shop = {
   /**
-   * Asigna el starter pack de un equipo al inventario del usuario.
-   * @param {string} userId
+   * Asigna el starter pack de un equipo al inventario del usuario autenticado.
+   * La identidad se deriva del JWT.
+   * @param {string} [userId] - Ignorado.
    * @param {string} teamId
    * @returns {StarterPackResponseSchema}
    */
-  claimStarterPack: (userId, teamId) =>
-    _request(`/api/v1/shop/starter-pack?user_id=${userId}&team_id=${teamId}`, {
+  claimStarterPack: (teamId) =>
+    _request(`/api/v1/shop/starter-pack?team_id=${teamId}`, {
       method: 'POST',
     }),
 
   /**
-   * Abre un sobre de cartas (descuenta stamps del wallet).
-   * @param {string} userId
+   * Abre un sobre de cartas (descuenta stamps del wallet autenticado).
+   * La identidad se deriva del JWT.
+   * @param {string} [userId] - Ignorado.
    * @param {'BRONZE' | 'GOLD' | 'DIAMOND'} packType
    * @returns {OpenPackResponseSchema}
    */
-  openPack: (userId, packType) =>
-    _request(`/api/v1/shop/open-pack?user_id=${userId}&pack_type=${packType}`, {
+  openPack: (packType) =>
+    _request(`/api/v1/shop/open-pack?pack_type=${packType}`, {
       method: 'POST',
     }),
 };

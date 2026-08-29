@@ -20,7 +20,7 @@ a ambos clientes conectados vía WebSocket.
 """
 
 import random
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import Dict, Any
 
@@ -738,7 +738,12 @@ async def trigger_cpu_response_if_needed(game: GameSession, state: dict, db: Ses
 # ---------------------------------------------------------------------------
 
 @router.post("/{game_id}/play-tactic", summary="Activar carta táctica")
-def play_tactic(game_id: str, payload: PlayTacticRequest, db: Session = Depends(get_db)):
+def play_tactic(
+    game_id: str,
+    payload: PlayTacticRequest,
+    db: Session = Depends(get_db),
+    current_user_id: str = Depends(get_current_user),
+):
     """
     Registra el uso de una carta táctica para el turno actual en state_data.
     La carta se mueve de la mano al descarte y sus efectos quedan pendientes de aplicar
@@ -751,6 +756,10 @@ def play_tactic(game_id: str, payload: PlayTacticRequest, db: Session = Depends(
     game = db.query(GameSession).filter(GameSession.id == game_id).first()
     if not game:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sesión de juego no encontrada.")
+
+    # Solo usuarios involucrados pueden jugar tácticas.
+    if current_user_id not in (game.home_user_id, game.away_user_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No tienes acceso a esta partida.")
 
     tactic = db.query(TacticCard).filter(TacticCard.id == payload.tactic_id).first()
     if not tactic:
@@ -975,24 +984,28 @@ async def execute_swing(
 async def change_pitcher(
     game_id: str,
     payload: ChangePitcherRequest,
-    user_id: str = Query(..., description="ID del usuario que hace el cambio (para determinar HOME/AWAY)"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user_id: str = Depends(get_current_user),
 ):
     """
     Sustituye al lanzador activo por un relevista del bullpen.
     Actualiza home_pitcher_id / away_pitcher_id en state_data para que
     la transición de inning restaure el pitcher correcto.
+
+    Seguridad: la identidad del usuario se deriva del JWT.
     """
     print(f"🔍 [CHANGE_PITCHER] Request recibido")
     print(f"🔍 game_id: {game_id}")
     print(f"🔍 new_pitcher_id: {payload.new_pitcher_id}")
-    
+
     game = db.query(GameSession).filter(GameSession.id == game_id).first()
     if not game:
         print(f"❌ Juego NO encontrado: {game_id}")
         raise HTTPException(status_code=404, detail="Sesión de juego no encontrada.")
 
-    print(f"✅ Juego encontrado: {game_id}")
+    # Solo usuarios involucrados en la partida pueden hacer cambios.
+    if current_user_id not in (game.home_user_id, game.away_user_id):
+        raise HTTPException(status_code=403, detail="No tienes acceso a esta partida.")
 
     new_pitcher = db.query(PlayerCardModel).filter(PlayerCardModel.id == payload.new_pitcher_id).first()
     old_pitcher = db.query(PlayerCardModel).filter(PlayerCardModel.id == (dict(game.state_data or {}).get("active_pitcher"))).first()
@@ -1027,7 +1040,7 @@ async def change_pitcher(
     # ── Actualizar home_pitcher_id / away_pitcher_id según quién es el usuario ──
     # state_manager usa estos campos para restaurar el pitcher al cambiar de media entrada.
     # Si no se actualizan aquí, el inning siguiente restaura el pitcher original.
-    is_home_user = (user_id == game.home_user_id) if user_id else True
+    is_home_user = (current_user_id == game.home_user_id)
     if is_home_user:
         state["home_pitcher_id"] = payload.new_pitcher_id
     else:
@@ -1095,7 +1108,8 @@ async def change_pitcher(
 @router.get("/{game_id}/rival-available-pitchers", summary="Obtener lanzadores disponibles del equipo rival")
 def get_rival_available_pitchers(
     game_id: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user_id: str = Depends(get_current_user),
 ):
     """
     Retorna los pitchers disponibles del equipo rival (CPU).
@@ -1113,6 +1127,9 @@ def get_rival_available_pitchers(
     game = db.query(GameSession).filter(GameSession.id == game_id).first()
     if not game:
         raise HTTPException(status_code=404, detail="Sesión de juego no encontrada.")
+
+    if current_user_id not in (game.home_user_id, game.away_user_id):
+        raise HTTPException(status_code=403, detail="No tienes acceso a esta partida.")
 
     state = dict(game.state_data or {})
     active_pitcher_id = state.get("active_pitcher")
@@ -1198,35 +1215,32 @@ def get_rival_available_pitchers(
 @router.get("/{game_id}/available-pitchers", summary="Obtener lanzadores disponibles del bullpen")
 def get_available_pitchers(
     game_id: str,
-    user_id: str = Query(..., description="ID del usuario que hace la solicitud"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user_id: str = Depends(get_current_user),
 ):
     """
     Retorna los pitchers disponibles en el bullpen del usuario (los que posee en inventario).
     Excluye el pitcher actualmente activo en el montículo.
 
-    Flujo:
-      1. Determinar si el user_id corresponde a HOME o AWAY del juego.
-      2. El CPU nunca llama a este endpoint — si user_id es CPU_BOT, error.
-      3. Buscar en UserCardInventory los pitchers que el usuario posee.
-      4. Excluir el active_pitcher actual del resultado.
+    Seguridad: la identidad del usuario se deriva del JWT.
     """
-    print(f"\n🔍 [GET_AVAILABLE_PITCHERS] game_id={game_id}, user_id={user_id}")
+    print(f"\n🔍 [GET_AVAILABLE_PITCHERS] game_id={game_id}, user_id={current_user_id}")
 
     game = db.query(GameSession).filter(GameSession.id == game_id).first()
     if not game:
         print(f"❌ Game not found: {game_id}")
         raise HTTPException(status_code=404, detail="Sesión de juego no encontrada.")
 
-    # ── Validar que el user_id corresponde a un jugador humano del juego ────
-    if user_id not in (game.home_user_id, game.away_user_id):
-        print(f"❌ User {user_id} not in game. home={game.home_user_id}, away={game.away_user_id}")
+    # ── Validar que el user del token corresponde a un jugador humano del juego ────
+    if current_user_id not in (game.home_user_id, game.away_user_id):
+        print(f"❌ User {current_user_id} not in game. home={game.home_user_id}, away={game.away_user_id}")
         raise HTTPException(status_code=403, detail="El usuario no pertenece a este juego.")
 
-    if user_id == "CPU_BOT":
+    if current_user_id == "CPU_BOT":
         print(f"❌ CPU_BOT cannot change pitcher")
         raise HTTPException(status_code=400, detail="El CPU no puede cambiar pitcher manualmente.")
 
+    user_id = current_user_id
     state = dict(game.state_data or {})
     active_pitcher_id = state.get("active_pitcher")
 
@@ -1307,7 +1321,11 @@ def get_available_pitchers(
 
 
 @router.post("/{game_id}/acknowledge-pitcher-change", summary="Confirmar cambio de pitcher del rival")
-def acknowledge_pitcher_change(game_id: str, db: Session = Depends(get_db)):
+def acknowledge_pitcher_change(
+    game_id: str,
+    db: Session = Depends(get_db),
+    current_user_id: str = Depends(get_current_user),
+):
     """
     El usuario confirma que vio y aceptó el cambio de pitcher de la CPU.
     
@@ -1317,6 +1335,9 @@ def acknowledge_pitcher_change(game_id: str, db: Session = Depends(get_db)):
     game = db.query(GameSession).filter(GameSession.id == game_id).first()
     if not game:
         raise HTTPException(status_code=404, detail="Sesión de juego no encontrada.")
+
+    if current_user_id not in (game.home_user_id, game.away_user_id):
+        raise HTTPException(status_code=403, detail="No tienes acceso a esta partida.")
     
     state = dict(game.state_data or {})
     
@@ -1341,6 +1362,7 @@ def acknowledge_pitcher_change(game_id: str, db: Session = Depends(get_db)):
     
     # Broadcast para notificar que se desbloqueó
     import asyncio
+    import logging
     from app.engine.websocket_manager import manager
     try:
         asyncio.run(manager.broadcast_to_game(game_id, {
@@ -1348,8 +1370,10 @@ def acknowledge_pitcher_change(game_id: str, db: Session = Depends(get_db)):
             "message": "El juego continúa. El nuevo pitcher está listo.",
             "state_data": game.state_data,
         }))
-    except:
-        pass  # Si falla el broadcast, al menos el estado está actualizado
+    except Exception as e:  # noqa: BLE001 - el broadcast no debe romper el flujo
+        logging.getLogger(__name__).warning(
+            "No se pudo emitir el broadcast de ack de cambio de pitcher: %s", e
+        )
     
     return {
         "status": "ok",
@@ -1358,7 +1382,12 @@ def acknowledge_pitcher_change(game_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/{game_id}/steal", summary="Intentar robo de base")
-async def steal_base(game_id: str, payload: StealBaseRequest, db: Session = Depends(get_db)):
+async def steal_base(
+    game_id: str,
+    payload: StealBaseRequest,
+    db: Session = Depends(get_db),
+    current_user_id: str = Depends(get_current_user),
+):
     """
     Ejecuta un intento de robo de base (2B o 3B) por parte del equipo ofensivo.
     La probabilidad de éxito depende de los atributos del pitcher activo.
@@ -1368,6 +1397,9 @@ async def steal_base(game_id: str, payload: StealBaseRequest, db: Session = Depe
     game = db.query(GameSession).filter(GameSession.id == game_id).first()
     if not game:
         raise HTTPException(status_code=404, detail="Sesión de juego no encontrada.")
+
+    if current_user_id not in (game.home_user_id, game.away_user_id):
+        raise HTTPException(status_code=403, detail="No tienes acceso a esta partida.")
 
     state = dict(game.state_data or {})
     active_pitcher_id = state.get("active_pitcher")

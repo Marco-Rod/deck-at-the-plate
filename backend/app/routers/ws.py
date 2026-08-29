@@ -1,4 +1,4 @@
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException, Query
 from sqlalchemy.orm import Session
 import asyncio
 
@@ -6,25 +6,48 @@ from app.database import SessionLocal
 from app.models import GameSession
 from app.engine.websocket_manager import manager
 from app.engine.fog_of_war import sanitize_state_for_player
+from app.auth import authenticate_ws_token
 
 router = APIRouter(tags=["WebSockets"])
 
-@router.websocket("/ws/games/{game_id}/{user_id}")
-async def websocket_endpoint(websocket: WebSocket, game_id: str, user_id: str):
+@router.websocket("/ws/games/{game_id}")
+async def websocket_endpoint(
+    websocket: WebSocket,
+    game_id: str,
+    token: str = Query(..., description="JWT del usuario que se conecta"),
+    user_id: str = Query(None, description="(legado) ignorado — la identidad se valida con el token"),
+):
     """
-    Punto de conexión WebSocket por partida y usuario. 
+    Punto de conexión WebSocket por partida y usuario.
     Mantiene el canal abierto para notificar eventos en tiempo real.
+
+    Seguridad:
+      - La identidad del usuario se deriva del token JWT (query param `token`),
+        nunca del path ni de un parámetro manipulable por el cliente.
+      - Solo usuarios que pertenecen a la partida pueden conectarse.
 
     NOTA: Se instancia la sesión de DB manualmente porque Depends(get_db) no
     funciona de forma fiable en handlers WebSocket async de FastAPI — el generador
     síncrono puede no inyectarse correctamente y provoca un error de handshake.
     """
+    # Autenticar antes de aceptar la conexión → evita que cualquiera se suscriba
+    try:
+        user_id = authenticate_ws_token(token)
+    except HTTPException:
+        await websocket.close(code=4401)
+        return
+
     await manager.connect(websocket, game_id)
     db: Session = SessionLocal()
     try:
         # Enviar estado actual sanitizado al conectar
         game = db.query(GameSession).filter(GameSession.id == game_id).first()
         if game:
+            # Verificar que el usuario autenticado pertenezca a la partida.
+            if user_id not in (game.home_user_id, game.away_user_id):
+                await websocket.close(code=4403)
+                return
+
             sanitized_state = sanitize_state_for_player(
                 state_data=game.state_data,
                 requesting_user_id=user_id,

@@ -100,8 +100,8 @@ export const CentralField: React.FC<CentralFieldProps & {
     }
     try {
       setIsLoadingPitchers(true);
-      console.log(`📡 [SOLICITUD] GET /api/v1/games/${gameId}/available-pitchers?user_id=${userId}`);
-      const response = await gamesApi.getAvailablePitchers(gameId, userId);
+      console.log(`📡 [SOLICITUD] GET /api/v1/games/${gameId}/available-pitchers`);
+      const response = await gamesApi.getAvailablePitchers(gameId);
       const pitchers = response?.available_pitchers || [];
       setAvailablePitchers(pitchers);
     } catch (error) {
@@ -115,7 +115,7 @@ export const CentralField: React.FC<CentralFieldProps & {
     if (!gameId) return;
 
     try {
-      const response = await gamesApi.changePitcher(gameId, { new_pitcher_id: newPitcherId }, userId);
+      const response = await gamesApi.changePitcher(gameId, { new_pitcher_id: newPitcherId });
       
       // Notificar al componente padre
       if (onPitcherChanged && response?.active_pitcher) {

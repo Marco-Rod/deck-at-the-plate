@@ -119,8 +119,8 @@ export const StadiumShowcaseScreen: React.FC<StadiumShowcaseScreenProps> = ({
   useEventSequencerCallbacks(onStep, setIsModalVisible, setDeferredGameState, gameState, setModalEventData, () => {});
 
   React.useEffect(() => {
-    userApi.getTeam(userId).then(setUserTeam).catch(() => null);
-  }, [userId]);
+    userApi.getTeam().then(setUserTeam).catch(() => null);
+  }, []);
 
   // 🔍 DEBUG: Monitor isModalVisible changes
   React.useEffect(() => {

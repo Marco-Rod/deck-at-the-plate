@@ -31,13 +31,13 @@ export const LobbyScreen = ({ user, onStartGame, onOpenMyTeam, onOpenShowcase, o
     if (!user?.userId) return;
 
     // 1. Obtener club del usuario
-    userApi.getTeam(user.userId)
+    userApi.getTeam()
       .then(data => setUserTeam(data))
       .catch(err => console.error('Sin club activo:', err));
 
     // 2. Obtener métricas calculadas del club del usuario (OVR, BAT, PIT)
     if (userApi.getTeamStats) {
-      userApi.getTeamStats(user.userId)
+      userApi.getTeamStats()
         .then(stats => {
           if (stats) setUserStats(stats);
         })

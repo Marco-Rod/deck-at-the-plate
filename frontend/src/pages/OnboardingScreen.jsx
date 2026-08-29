@@ -103,7 +103,7 @@ export default function OnboardingScreen({ userId, onComplete }) {
         setSelectedFranchise(franchiseToUse);
       }
 
-      await userApi.createTeam(userId, {
+      await userApi.createTeam({
         ...teamForm,
         base_franchise: franchiseToUse,
       });
@@ -127,7 +127,7 @@ export default function OnboardingScreen({ userId, onComplete }) {
       console.log(`[DEBUG] selectedFranchise STATE ANTES DE ENVIAR: "${selectedFranchise}"`);
       console.log(`[DEBUG] Tipo de selectedFranchise: ${typeof selectedFranchise}`);
       console.log(`[DEBUG] Enviando starter pack con selectedFranchise=${selectedFranchise}`);
-      const response = await shopApi.claimStarterPack(userId, selectedFranchise);
+      const response = await shopApi.claimStarterPack(selectedFranchise);
       setClaimedCards(response.cards || []);
       setStep('PACK_UNBOX');
     } catch (err) {

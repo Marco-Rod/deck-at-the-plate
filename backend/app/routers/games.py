@@ -6,23 +6,31 @@ Endpoints para crear y consultar sesiones de juego:
   - GET  /{game_id}     → Retorna el estado sanitizado (Fog of War aplicado según el rol del usuario).
 """
 import uuid
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+import logging
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import GameSession, PlayerCardModel, UserLineup
 from app.schemas import CreateGameRequest, GameSessionResponse
+from app.auth import get_current_user
 
 from app.engine.deck_manager import initialize_tactics_state
 from app.engine.fog_of_war import sanitize_state_for_player
 
 router = APIRouter(prefix="/api/v1/games", tags=["Gestión de Sesión 1v1"])
 
+logger = logging.getLogger(__name__)
+
 # Mazos de tácticas predeterminados por defecto
 DEFAULT_TACTICS_DECK = ["t1", "t2", "t3", "t4", "t1"]
 
 @router.post("/create", response_model=GameSessionResponse, status_code=status.HTTP_201_CREATED, summary="Iniciar nueva partida 1v1")
-def create_game_session(payload: CreateGameRequest, db: Session = Depends(get_db)):
+def create_game_session(
+    payload: CreateGameRequest,
+    db: Session = Depends(get_db),
+    current_user_id: str = Depends(get_current_user),
+):
     """
     Crea una nueva sesión de juego 1v1 e inicializa:
     - Marcador 0-0, Inning 1 Alta.
@@ -31,11 +39,18 @@ def create_game_session(payload: CreateGameRequest, db: Session = Depends(get_db
     - Pitcher activo inicial (el visitante lanza en la Alta del primer inning).
 
     En modo PVE el equipo visitante es la CPU.
-    
-    ⭐ NUEVO: El usuario puede elegir ser LOCAL (HOME) o VISITANTE (AWAY).
-    Si elige AWAY, se intercambian automáticamente las posiciones.
+
+    Seguridad: el usuario humano de la partida se deriva del JWT; no se permite
+    crear una partida en nombre de otro usuario.
     """
-    
+
+    # El jugador humano siempre debe ser el usuario autenticado.
+    if payload.home_user_id != current_user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No puedes crear una partida en nombre de otro usuario.",
+        )
+
     # ⭐ MAPEO: Determinar posiciones basadas en player_position
     if payload.player_position == "AWAY":
         # Usuario elige ser visitante → CPU es local
@@ -104,7 +119,7 @@ def create_game_session(payload: CreateGameRequest, db: Session = Depends(get_db
     
     # ⭐ FALLBACK: Si no hay cartas del equipo rival, usar cartas de cualquier equipo
     if not cpu_cards:
-        print(f"⚠️  No hay cartas para equipo {rival_team_id}, buscando cartas de cualquier equipo...")
+        logger.warning("No hay cartas para equipo %s; usando cartas de cualquier equipo.", rival_team_id)
         cpu_cards = db.query(PlayerCardModel).all()
     
     if not cpu_cards:
@@ -117,43 +132,26 @@ def create_game_session(payload: CreateGameRequest, db: Session = Depends(get_db
     pitchers = [c for c in cpu_cards if c.position in ["SP", "RP", "CP", "TWP"] or c.is_two_way]
     batters = [c for c in cpu_cards if c.position not in ["SP", "RP", "CP"] or c.is_two_way]
 
-    print(f"🔍 DEBUG create_game_session:")
-    print(f"   rival_team_id: {rival_team_id}")
-    print(f"   rival_team_name: {rival_team_name}")
-    print(f"   cpu_cards: {len(cpu_cards)}")
-    print(f"   pitchers available: {len(pitchers)}")
-    print(f"   🎯 PITCHER LIST FOR CPU:")
-    for p in pitchers:
-        print(f"      - {p.name} ({p.id}) | Team: {p.team.name if p.team else 'UNKNOWN'} | OVR: {p.overall} | Pos: {p.position}")
-    print(f"   batters available: {len(batters)} → {[b.name for b in batters[:3]]}")
-    print(f"   home_pitcher_id (before): {home_pitcher_id}")
-    print(f"   away_pitcher_id (before): {away_pitcher_id}")
-
     # Asignar cartas CPU según su posición
     if human_is_home:
         # CPU es visitante (away)
         if not away_pitcher_id and pitchers:
             away_pitcher_id = pitchers[0].id
-            print(f"   ✅ Assigned away pitcher: {pitchers[0].name}")
         if (not away_lineup_ids or len(away_lineup_ids) < 9) and batters:
             away_lineup_ids = [c.id for c in batters[:9]]
             while len(away_lineup_ids) < 9 and cpu_cards:
                 away_lineup_ids.append(cpu_cards[0].id)
-            print(f"   ✅ Assigned away lineup: {len(away_lineup_ids)} cards")
     else:
         # CPU es local (home)
         if not home_pitcher_id and pitchers:
             home_pitcher_id = pitchers[0].id
-            print(f"   ✅ Assigned home pitcher: {pitchers[0].name}")
         if (not home_lineup_ids or len(home_lineup_ids) < 9) and batters:
             home_lineup_ids = [c.id for c in batters[:9]]
             while len(home_lineup_ids) < 9 and cpu_cards:
                 home_lineup_ids.append(cpu_cards[0].id)
-            print(f"   ✅ Assigned home lineup: {len(home_lineup_ids)} cards")
 
     # Validaciones de seguridad
     if not home_pitcher_id or not away_pitcher_id:
-        print(f"❌ ERROR: home_pitcher_id={home_pitcher_id}, away_pitcher_id={away_pitcher_id}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Se requiere un lanzador válido para ambos equipos. home={home_pitcher_id}, away={away_pitcher_id}"
@@ -197,59 +195,26 @@ def create_game_session(payload: CreateGameRequest, db: Session = Depends(get_db
     db.add(game)
     db.commit()
     db.refresh(game)
-    
-    # ⭐ NUEVO: Log detallado de lanzadores disponibles para cada equipo
-    print(f"\n🎮 [GAME CREATED] {game.id}")
-    print(f"   MODE: {payload.game_mode} | DIFFICULTY: {payload.difficulty}")
-    print(f"   TOTAL INNINGS: {total_innings}")
-    print(f"   Human Position: {payload.player_position}")
-    print(f"   Home User: {home_user_id} | Away User: {away_user_id}")
-    
-    # Log HOME pitchers
-    print(f"\n   📍 HOME TEAM PITCHERS:")
-    print(f"      Active Pitcher: {home_pitcher_id}")
-    home_pitchers = [c for c in db.query(PlayerCardModel).filter(PlayerCardModel.id.in_(home_lineup_ids)).all() 
-                      if c.position in ["SP", "RP", "CP", "TWP"] or c.is_two_way]
-    if home_pitchers:
-        for p in home_pitchers:
-            print(f"         - {p.name} ({p.id}) | Pos: {p.position} | OVR: {p.overall}")
-    else:
-        print(f"         (No pitchers in lineup)")
-    
-    # Log AWAY pitchers
-    print(f"\n   📍 AWAY TEAM PITCHERS:")
-    print(f"      Active Pitcher: {away_pitcher_id}")
-    away_pitchers = [c for c in db.query(PlayerCardModel).filter(PlayerCardModel.id.in_(away_lineup_ids)).all() 
-                      if c.position in ["SP", "RP", "CP", "TWP"] or c.is_two_way]
-    if away_pitchers:
-        for p in away_pitchers:
-            print(f"         - {p.name} ({p.id}) | Pos: {p.position} | OVR: {p.overall}")
-    else:
-        print(f"         (No pitchers in lineup)")
-    
-    # Log available backup pitchers for each team
-    print(f"\n   🔄 AVAILABLE BACKUP PITCHERS (for changes):")
-    all_home_pitchers = [p for p in pitchers if p.id != home_pitcher_id][:5]
-    all_away_pitchers = [p for p in pitchers if p.id != away_pitcher_id][:5]
-    print(f"      HOME backups: {len(all_home_pitchers)} available")
-    for p in all_home_pitchers:
-        print(f"         - {p.name} ({p.id}) | OVR: {p.overall}")
-    print(f"      AWAY backups: {len(all_away_pitchers)} available")
-    for p in all_away_pitchers:
-        print(f"         - {p.name} ({p.id}) | OVR: {p.overall}")
-    print()
+
+    logger.info(
+        "Partida creada: %s | modo=%s | dificultad=%s | local=%s | visitante=%s",
+        game.id, payload.game_mode, payload.difficulty, home_user_id, away_user_id,
+    )
 
     return game
 
 @router.get("/{game_id}", response_model=GameSessionResponse, summary="Obtener estado sanitizado de la partida")
 def get_game_session(
-    game_id: str, 
-    user_id: str = Query(..., description="ID del usuario que realiza la consulta"),
-    db: Session = Depends(get_db)
+    game_id: str,
+    db: Session = Depends(get_db),
+    current_user_id: str = Depends(get_current_user),
 ):
     """
-    Obtiene el estado de la partida aplicando Niebla de Guerra. 
+    Obtiene el estado de la partida aplicando Niebla de Guerra.
     Si el bateador consulta, no verá la zona ni el tipo de pitcheo del rival.
+
+    Seguridad: la identidad del usuario se deriva del JWT (no del query param),
+    y solo un usuario perteneciente a la partida puede consultarla.
     """
     game = db.query(GameSession).filter(GameSession.id == game_id).first()
     if not game:
@@ -258,18 +223,20 @@ def get_game_session(
             detail=f"No se encontró la sesión de juego '{game_id}'."
         )
 
+    # Solo los usuarios involucrados en la partida pueden acceder a su estado.
+    if current_user_id not in (game.home_user_id, game.away_user_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No tienes acceso a esta partida."
+        )
+
     state = dict(game.state_data or {})
     active_pitcher_id = state.get("active_pitcher")
     active_pitcher = db.query(PlayerCardModel).filter(PlayerCardModel.id == active_pitcher_id).first() if active_pitcher_id else None
-    
-    print(f"🎮 [GET_GAME_SESSION] {game_id}")
-    print(f"   Current Inning: {game.current_inning} ({'ALTA' if game.is_top_inning else 'BAJA'})")
-    print(f"   Active Pitcher: {active_pitcher.name if active_pitcher else 'UNKNOWN'} ({active_pitcher_id})")
-    print(f"   Requesting User: {user_id}")
 
     sanitized_state = sanitize_state_for_player(
         state_data=game.state_data,
-        requesting_user_id=user_id,
+        requesting_user_id=current_user_id,
         home_user_id=game.home_user_id,
         away_user_id=game.away_user_id,
         is_top_inning=game.is_top_inning
@@ -288,19 +255,25 @@ def get_game_session(
         score_away=game.score_away,
         state_data={
             **sanitized_state,
-            "user_role": "HOME" if user_id == game.home_user_id else "AWAY",  # ⭐ NUEVO
+            "user_role": "HOME" if current_user_id == game.home_user_id else "AWAY",
         }
     )
 
 
 @router.get("/{game_id}/box-score", summary="Obtener box score de la partida")
-def get_box_score(game_id: str, db: Session = Depends(get_db)):
+def get_box_score(
+    game_id: str,
+    db: Session = Depends(get_db),
+    current_user_id: str = Depends(get_current_user),
+):
     """
     Obtiene el resumen de estadísticas (box score) de una partida completada.
     
     Incluye:
     - Estadísticas de bateadores (AB, H, 2B, 3B, HR, RBI, R, SO, BB)
     - Estadísticas de pitchers (SO, BB, H, HR, R)
+
+    Seguridad: solo los usuarios participantes de la partida pueden consultarla.
     """
     from app.engine.stats_recorder import get_game_box_score
     
@@ -309,6 +282,13 @@ def get_box_score(game_id: str, db: Session = Depends(get_db)):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Partida '{game_id}' no encontrada."
+        )
+
+    # Solo los usuarios involucrados en la partida pueden acceder.
+    if current_user_id not in (game.home_user_id, game.away_user_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No tienes acceso a esta partida."
         )
     
     box_score = get_game_box_score(db, game_id)
@@ -323,10 +303,17 @@ def get_box_score(game_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/{game_id}/player/{player_id}/stats", summary="Obtener estadísticas de un jugador en la partida")
-def get_player_game_stats(game_id: str, player_id: str, db: Session = Depends(get_db)):
+def get_player_game_stats(
+    game_id: str,
+    player_id: str,
+    db: Session = Depends(get_db),
+    current_user_id: str = Depends(get_current_user),
+):
     """
     Obtiene las estadísticas de un jugador específico en una partida.
     Puede ser bateador o pitcher.
+
+    Seguridad: solo los usuarios participantes de la partida pueden consultarla.
     """
     from app.engine.stats_recorder import get_player_game_stats as calc_player_stats
     
@@ -335,6 +322,13 @@ def get_player_game_stats(game_id: str, player_id: str, db: Session = Depends(ge
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Partida '{game_id}' no encontrada."
+        )
+
+    # Solo los usuarios involucrados en la partida pueden acceder.
+    if current_user_id not in (game.home_user_id, game.away_user_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No tienes acceso a esta partida."
         )
     
     stats = calc_player_stats(db, game_id, player_id)

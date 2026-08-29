@@ -114,9 +114,17 @@ export const useStadiumSocket = (
   useEffect(() => {
     if (!gameId || !userId) return;
 
+    // El backend autentica la conexión con el JWT (query param `token`).
+    // La identidad se deriva del token, no del userId que envíe el cliente.
+    const token = localStorage.getItem('jwt_token');
+    if (!token) {
+      console.error('[WS] No hay token JWT para autenticar la conexión.');
+      return;
+    }
+
     const wsHost = (import.meta.env.VITE_API_URL || 'http://localhost:8000')
       .replace(/^http/, 'ws');
-    const wsUrl = `${wsHost}/ws/games/${gameId}/${userId}`;
+    const wsUrl = `${wsHost}/ws/games/${gameId}?token=${encodeURIComponent(token)}`;
 
     // Flag para ignorar eventos si el efecto ya fue limpiado (doble montaje de StrictMode)
     let cancelled = false;
@@ -246,13 +254,9 @@ export const useStadiumSocket = (
   const sendPitch = useCallback(
     async (zone: number, pitchType: PitchType): Promise<void> => {
       const payload: PitchPayload = { pitch_type: pitchType, zone };
-      console.log('🚀 [FRONTEND] Enviando pitch al backend:');
-      console.log('   payload:', JSON.stringify(payload));
-      console.log('   gameId:', gameId);
-      console.log('   URL esperada:', `/api/v1/games/${gameId}/pitch`);
       try {
         const response = await gamesApi.pitch(gameId, payload);
-        console.log('✅ [FRONTEND] Respuesta del servidor:', response);
+        console.log('✅ [FRONTEND] Pitch enviado correctamente');
       } catch (error) {
         console.error('❌ [FRONTEND] Error al enviar pitch:', error);
         throw error;
