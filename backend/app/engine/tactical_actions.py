@@ -4,12 +4,16 @@ Tácticas de juego (funciones puras)
 - resolve_bunt: Resuelve el intento de toque de bola (sacrificio).
 - resolve_steal: Resuelve un intento de robo de base según control/velocidad
   del pitcher contra la probabilidad base de robo en MLB (~68%).
+- activate_tactic: Valida y aplica el uso de una carta táctica sobre el
+  estado del juego (regla compartida con cualquier cliente/CPU).
 """
 from typing import Tuple
 import random
 
 from app.core.enums import Event, RunnerBase
 from app.core.engine_types import BatterAttrs, PitcherAttrs, Runners
+from app.engine.deck_manager import discard_used_tactic
+from app.engine.game_rules import EXTRA_INNINGS_MIN_INNING
 
 
 def resolve_bunt(
@@ -67,3 +71,51 @@ def resolve_steal(
         return True, f"¡Robo exitoso! El corredor se estafa la {target_base.upper()}."
     else:
         return False, f"¡Out en las bases! El receptor saca al corredor intentando robar la {target_base.upper()}."
+
+
+def activate_tactic(
+    state: dict,
+    *,
+    player_role: str,
+    tactic_id: str,
+    tactic_category: str,
+    current_inning: int,
+    is_top_inning: bool,
+) -> Tuple[bool, str | None]:
+    """
+    Valida y aplica el uso de una carta táctica para el turno actual.
+
+    La carta debe estar en la mano del jugador y, si pertenece a la categoría
+    EXTRA_INNINGS, solo puede activarse desde la entrada
+    ``EXTRA_INNINGS_MIN_INNING`` en adelante.
+
+    Retorna ``(ok, code)``:
+      - ``(True, None)``: la carta se activó (``state`` mutado).
+      - ``(False, code)`` con ``code`` ∈ {"invalid_role", "not_in_hand", "extra_innings"}.
+    """
+    role = player_role.upper()
+    if role == "BATTER":
+        # En la Alta batea el visitante; en la Baja batea el local.
+        player_key = "away" if is_top_inning else "home"
+        role_key = "batter"
+    elif role == "PITCHER":
+        player_key = "home" if is_top_inning else "away"
+        role_key = "pitcher"
+    else:
+        return False, "invalid_role"
+
+    tactics_data = state.get("tactics", {}).get(player_key, {})
+    player_hand = tactics_data.get("hand", [])
+
+    if tactic_id not in player_hand:
+        return False, "not_in_hand"
+
+    if tactic_category == "EXTRA_INNINGS" and current_inning < EXTRA_INNINGS_MIN_INNING:
+        return False, "extra_innings"
+
+    active_tactics = state.get("active_tactics", {"home": None, "away": None})
+    active_tactics[role_key] = tactic_id
+    state["active_tactics"] = active_tactics
+
+    discard_used_tactic(state["tactics"], player_key, tactic_id)
+    return True, None

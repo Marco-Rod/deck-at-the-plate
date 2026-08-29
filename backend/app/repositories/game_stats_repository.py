@@ -118,8 +118,7 @@ def record_game_event(
     )
 
     db.add(event_log)
-    db.commit()
-    db.refresh(event_log)
+    db.flush()  # Genera el id y superficie errores; el commit lo hace el caller.
 
     return event_log
 

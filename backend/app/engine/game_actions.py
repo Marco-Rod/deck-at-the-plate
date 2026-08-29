@@ -33,7 +33,6 @@ from app.engine.cpu_ai import (
 from app.engine.fatigue_manager import (
     apply_pitcher_fatigue,
     compute_fatigue_level,
-    get_pitch_threshold,
 )
 from app.engine.state_manager import process_at_bat_transition
 from app.engine.tactic_resolver import (
@@ -84,10 +83,7 @@ def build_play_resolved_payload(game: GameSession, event: str, description: str,
                 
                 home_lineup_ids = set(str(p) if isinstance(p, str) else str(p.get("id", "")) for p in home_lineup if p)
                 away_lineup_ids = set(str(p) if isinstance(p, str) else str(p.get("id", "")) for p in away_lineup if p)
-                
-                print(f"⭐ [DEBUG HITS] home_lineup_ids({len(home_lineup_ids)}): {home_lineup_ids}")
-                print(f"⭐ [DEBUG HITS] away_lineup_ids({len(away_lineup_ids)}): {away_lineup_ids}")
-                
+
                 for batter_id, bat_stats in box_score["batters"].items():
                     hits = bat_stats.get("hits", 0)
                     batter_id_str = str(batter_id)
@@ -107,32 +103,22 @@ def build_play_resolved_payload(game: GameSession, event: str, description: str,
                     # Acumular hits por equipo (comparar tanto el objeto como string)
                     if batter_id in home_lineup_ids or batter_id_str in home_lineup_ids:
                         home_hits_total += hits
-                        print(f"⭐ [HITS] HOME batter {batter_id}: {hits} hits (total: {home_hits_total})")
                     elif batter_id in away_lineup_ids or batter_id_str in away_lineup_ids:
                         away_hits_total += hits
-                        print(f"⭐ [HITS] AWAY batter {batter_id}: {hits} hits (total: {away_hits_total})")
-                    else:
-                        print(f"⭐ [HITS] UNMAPPED batter {batter_id} ({batter_id_str}): {hits} hits (not in either lineup)")
             
             # ⭐ NUEVO: Obtener carreras por inning de score_history
             # score_history se crea y actualiza en state_manager.py cuando se anotan carreras
-            if db:
-                score_history = state_with_role.get("score_history", {})
-                total_innings = int(state_with_role.get("total_innings", 9))
-                print(f"⭐ [SCORE HISTORY] Carreras por inning: {score_history}")
+            score_history = state_with_role.get("score_history", {})
+            total_innings = int(state_with_role.get("total_innings", 9))
 
-                # Asegurar que todas las entradas están presentes (incluidas las sin carreras)
-                inning_runs = {}
-                for i in range(1, total_innings + 1):  # Entradas 1..total_innings
-                    inning_runs[f"{i}_true"] = score_history.get(f"{i}_true", 0)
-                    inning_runs[f"{i}_false"] = score_history.get(f"{i}_false", 0)
-                
-                print(f"⭐ [INNING RUNS] Desglose por entrada (from score_history): {inning_runs}")
-                
+            # Asegurar que todas las entradas están presentes (incluidas las sin carreras)
+            inning_runs = {}
+            for i in range(1, total_innings + 1):  # Entradas 1..total_innings
+                inning_runs[f"{i}_true"] = score_history.get(f"{i}_true", 0)
+                inning_runs[f"{i}_false"] = score_history.get(f"{i}_false", 0)
+
         except Exception as e:
             print(f"⚠️ [STATS] Error obteniendo box score: {e}")
-            import traceback
-            traceback.print_exc()
     
     
     # ⭐ NUEVO: Obtener datos del pitcher y bateador activos para mostrar en la tarjeta
@@ -151,32 +137,9 @@ def build_play_resolved_payload(game: GameSession, event: str, description: str,
                 pitch_counts = state_with_role.get("pitch_counts", {})
                 current_pitch_count = pitch_counts.get(active_pitcher_id, 0)
 
-                # Obtener umbral dinámico basado en total_innings
-                total_innings = state_with_role.get("total_innings", 9)
-                pitch_threshold = get_pitch_threshold(total_innings)
-
                 # Calcular fatigue level (0-100%) - usar la misma lógica que apply_pitcher_fatigue
+                total_innings = state_with_role.get("total_innings", 9)
                 fatigue_level = compute_fatigue_level(current_pitch_count, total_innings)
-
-                # ⭐ DEBUG: Logging de fatiga AGRESIVA (sin cap)
-                print(f"🔍 [PITCHER STAMINA DEBUG - AGGRESSIVE]")
-                print(f"   Pitcher ID: {active_pitcher_id}")
-                print(f"   Current Pitch Count: {current_pitch_count}")
-                print(f"   Total Innings: {total_innings}")
-                print(f"   Dynamic Pitch Threshold: {pitch_threshold}")
-
-                if current_pitch_count > pitch_threshold:
-                    extra_pitches = current_pitch_count - pitch_threshold
-                    penalty_factor = 1.0 - (0.10 * extra_pitches)
-                    print(f"   ⚡ FATIGUE ACTIVATED!")
-                    print(f"      Extra Pitches: {extra_pitches}")
-                    print(f"      Penalty Factor (uncapped): {penalty_factor:.2f}")
-                    print(f"      Degradation: {max(0, (1.0-penalty_factor)*100):.1f}%")
-                else:
-                    print(f"   ✅ No fatigue yet (under threshold)")
-
-                print(f"   Final Fatigue Level (%): {fatigue_level:.2f}")
-                print(f"   Status: {'🟢 FRESH' if fatigue_level < 40 else '🟡 MODERATE' if fatigue_level < 70 else '🟠 TIRED' if fatigue_level < 85 else '🔴 CRITICAL'}")
 
                 active_pitcher_data = build_pitcher_payload(
                     pitcher_card,
@@ -191,11 +154,7 @@ def build_play_resolved_payload(game: GameSession, event: str, description: str,
             if batter_card:
                 active_batter_data = build_batter_payload(batter_card)
     
-    # ⭐ DEBUG
-    print(f"📊 [PLAY_RESOLVED PAYLOAD] event={event}, pitchers={len(pitcher_strikeouts)}, batters={len(batter_stats)}, home_hits={home_hits_total}, away_hits={away_hits_total}")
-    print(f"📊 [FINAL SCORES] HOME={game.score_home}, AWAY={game.score_away}")
-    
-    return {
+    payload = {
         "type": "PLAY_RESOLVED",
         "event": event,
         "description": description,
@@ -216,6 +175,7 @@ def build_play_resolved_payload(game: GameSession, event: str, description: str,
         "active_pitcher": active_pitcher_data,  # ⭐ NUEVO: Datos del pitcher para la tarjeta
         "active_batter": active_batter_data,    # ⭐ NUEVO: Datos del bateador para la tarjeta
     }
+    return payload
 
 
 def apply_tactic_modifiers(active_tactics: dict, db) -> dict:
@@ -326,20 +286,14 @@ async def resolve_swing(
         )
 
     # --- 6. Transición de estado ---
-    at_bat_ended, inning_ended, event, description = process_at_bat_transition(game, raw_event, state, db)
+    at_bat_ended, inning_ended, event, description = process_at_bat_transition(game, raw_event, state)
 
-    # La descripción ya está completa desde state_manager.py
-    # No la sobrescribimos, solo la usamos directamente
-
-    # ⭐ NUEVO: Registrar evento en estadísticas
+    # --- 7. Registrar evento en estadísticas ---
     if at_bat_ended:
-        # ⭐ CORREGIDO: Usar el runs_scored ya calculado en state_manager
-        # en lugar de recalcularlo (que daría valores incorrectos)
+        # Usar el runs_scored ya calculado en state_manager (evita recalcular un valor inconsistente)
         runs_scored = state.get("last_runs_scored", 0)
         rbi = runs_scored
-        
-        print(f"📊 [RECORD EVENT] event={event}, runs_scored={runs_scored} (from state_manager)")
-        
+
         try:
             record_game_event(
                 db=db,
@@ -356,20 +310,18 @@ async def resolve_swing(
                 runs_scored=runs_scored,
                 rbi=rbi,
             )
-            print(f"✅ [STATS] Evento registrado: {event}")
         except Exception as e:
             print(f"❌ [STATS ERROR] {e}")
 
-    # --- 7. Persistir y hacer broadcast ---
+    # --- 8. Preparar state final y broadcast ---
     state["current_pitch"] = None
     state["last_event"] = event
     game.state_data = state
 
-    db.add(game)
-    db.commit()
-    db.refresh(game)
+    # La persistencia (commit) es responsabilidad del router que inició la acción
+    # (Unit of Work); build_play_resolved_payload y el broadcast usan el estado en memoria.
 
-    # ⭐ ASEGURAR que los strikeouts están frescos de la BD antes de enviar por WebSocket
+    # Asegurar que los strikeouts están frescos de la BD antes de enviar por WebSocket
     base_payload = build_play_resolved_payload(game, event, description, inning_completed=inning_ended, user_id=user_id, db=db)
 
     def _play_resolved_for(recipient_user_id: str) -> dict:
@@ -481,13 +433,18 @@ async def execute_cpu_pitcher_change(
     # Ejecutar el cambio en state (regla compartida humano/CPU)
     old_pitcher_id = perform_pitcher_change(game, state, new_pitcher.id, is_home=cpu_is_home)
 
+    # ⭐ Marcar que se está esperando confirmación del usuario
+    state["awaiting_pitcher_change_acknowledgment"] = True
+    state["pending_pitcher_change"] = {
+        "old_pitcher_id": old_pitcher_id,
+        "new_pitcher_id": new_pitcher.id,
+    }
+
+    # Persistir el estado en el objeto en memoria; el commit lo hace el router
+    # que inició la acción (Unit of Work).
     game.state_data = state
-    db.commit()
-    db.refresh(game)
-    
-    print(f"🤖 [CPU PITCHER CHANGE] ✅ Cambio completado y guardado en BD")
-    
-    # ⭐ NUEVO: Obtener datos del pitcher anterior
+
+    # Obtener datos del pitcher anterior
     old_pitcher = None
     old_pitcher_data = None
     if old_pitcher_id:
@@ -520,42 +477,34 @@ async def execute_cpu_pitcher_change(
             is_top_inning=game.is_top_inning,
         ),
     })
-    
-    # ⭐ NUEVO: Marcar que se está esperando confirmación del usuario
-    state["awaiting_pitcher_change_acknowledgment"] = True
-    state["pending_pitcher_change"] = {
-        "old_pitcher_id": old_pitcher_id,
-        "new_pitcher_id": new_pitcher.id,
-    }
-    game.state_data = state
-    db.commit()
-    
+
     return True
 
 
 async def trigger_cpu_response(game: GameSession, state: dict, db, game_id: str) -> None:
     """
     En partidas PvE, evalúa si le toca actuar a la CPU y ejecuta su acción.
+
+    Caso A (batear): hay un picheo humano pendiente y el bateador activo es la CPU.
+    Caso B (pichear): no hay picheo pendiente y el pitcher activo es la CPU (aquí
+    también se evalúa si conviene un cambio de pitcher por fatiga).
+
+    Estrategia (decidir/ruta) y persistencia están separadas: este módulo NUNCA
+    commitea. El router que inició la acción humana es dueño de la transacción
+    (Unit of Work), por lo que los cambios en memoria se persisten cuando el
+    caller hace ``db.commit()``.
     """
     if state.get("mode") != "PVE" or state.get("is_game_over"):
-        print(f"🤖 [trigger_cpu] EARLY RETURN: mode={state.get('mode')}, is_game_over={state.get('is_game_over')}")
         return
 
     difficulty = state.get("difficulty", "MEDIUM")
-    
-    print(f"🤖 DEBUG trigger_cpu_response:")
-    print(f"   is_top_inning={game.is_top_inning}, home_user={game.home_user_id}, away_user={game.away_user_id}")
-    cpu_pitcher_turn = is_cpu_turn(game, state, 'PITCHER')
     cpu_batter_turn = is_cpu_turn(game, state, 'BATTER')
-    print(f"   cpu_turn_pitcher={cpu_pitcher_turn}, cpu_turn_batter={cpu_batter_turn}")
-    print(f"   current_pitch={state.get('current_pitch')}")
-    
+    cpu_pitcher_turn = is_cpu_turn(game, state, 'PITCHER')
+
     # Caso A: la CPU debe batear (hay un picheo humano pendiente)
     if cpu_batter_turn and state.get("current_pitch"):
-        print(f"   ✅ CASO A: CPU debería batear")
         cpu_swing = get_cpu_swing_action(difficulty)
-
-        _, _, _ = await resolve_swing(
+        await resolve_swing(
             game=game,
             state=state,
             swing_type=cpu_swing["swing_type"],
@@ -572,40 +521,31 @@ async def trigger_cpu_response(game: GameSession, state: dict, db, game_id: str)
 
     # Caso B: la CPU debe pichear (no hay picheo pendiente y es el turno de la CPU)
     if cpu_pitcher_turn and not state.get("current_pitch"):
-        print(f"   ✅ CASO B: CPU debería pichear")
-        
-        # ── NUEVO: Evaluar si la CPU debe cambiar pitcher ──────────────────
+        # Evaluar si la CPU debe cambiar pitcher por fatiga
         active_pitcher_id = state.get("active_pitcher")
         if active_pitcher_id:
             pitch_count = state.get("pitch_counts", {}).get(active_pitcher_id, 0)
             pitcher_card = get_card_by_id(db, active_pitcher_id)
-            
+
             if pitcher_card:
-                # ← CORRECCIÓN: Calcular fatiga_level correctamente (no era None/0.0)
                 total_innings = state.get("total_innings", 9)
-                pitch_threshold = get_pitch_threshold(total_innings)
                 fatigue_level = compute_fatigue_level(pitch_count, total_innings)
-                
-                print(f"🤖 [CPU FATIGUE CHECK] pitcher={active_pitcher_id}, pitch_count={pitch_count}, threshold={pitch_threshold}, fatigue={fatigue_level:.1f}%")
-                
-                # Decisión de la CPU: ¿cambiar pitcher?
+
                 should_change = get_cpu_pitcher_change_decision(
                     pitch_count=pitch_count,
                     fatigue_level=fatigue_level,
                     difficulty=difficulty,
                 )
-                
+
                 if should_change:
-                    # Ejecutar el cambio de pitcher
                     changed = await execute_cpu_pitcher_change(game, state, db, game_id, difficulty)
                     if changed:
                         # Recargar state después del cambio
                         state = dict(game.state_data or {})
                         active_pitcher_id = state.get("active_pitcher")
-        
+
         # Usar solo pitch types del repertorio real de la carta del pitcher activo
         cpu_pitch = get_cpu_pitch_action(difficulty)
-
         if active_pitcher_id:
             pitcher_card = get_card_by_id(db, active_pitcher_id)
             pitch_type = choose_pitch_from_repertoire(pitcher_card.repertoire if pitcher_card else None)
@@ -614,16 +554,9 @@ async def trigger_cpu_response(game: GameSession, state: dict, db, game_id: str)
 
         state["current_pitch"] = cpu_pitch
         game.state_data = state
-        db.commit()
-        db.refresh(game)  # ← ⭐ NUEVO: Recargar game después de commit para sincronizar
-        print(f"   ✅ CPU picheo: {cpu_pitch['pitch_type']} a zona {cpu_pitch['zone']}")
-        print(f"   ✅ State committed. current_pitch EN DB = {game.state_data.get('current_pitch')}")
-        print(f"   ✅ Broadcasteando PITCH_COMMITTED al cliente...")
 
         await manager.broadcast_to_game(game_id, {
             "type": "PITCH_COMMITTED",
             "message": "La CPU ha seleccionado su picheo. Es tu turno de batear.",
             "has_pitched": True,
         })
-    else:
-        print(f"   ❌ CASO B no se ejecutó completamente")

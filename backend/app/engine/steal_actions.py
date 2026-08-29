@@ -9,6 +9,7 @@ juego). Es lógica PURA: sin FastAPI, sin sesión de BD ni broadcasts.
 from typing import TYPE_CHECKING, Any, Dict, Tuple
 
 from app.engine.tactical_actions import resolve_steal
+from app.engine.state_manager import end_half_inning
 from app.engine.game_over_manager import check_game_over
 
 if TYPE_CHECKING:
@@ -43,15 +44,15 @@ def steal_attempt(
         game.outs += 1
 
         if game.outs >= 3:
-            game.outs = 0
-            game.balls = 0
-            game.strikes = 0
-            state["just_switched_half"] = True
-            runners = dict(_DEFAULT_RUNNERS)
-            game.is_top_inning = not game.is_top_inning
-            if game.is_top_inning:
-                game.current_inning += 1
+            # Cambio de media entrada vía la fuente única (reset de conteo,
+            # corredores, alternancia de innings, swap de pitcher/bateador,
+            # ghost runner y cartas tácticas).
+            end_half_inning(game, state)
             description += " Tres outs registrados. Cambio de entrada."
+
+            # end_half_inning ya limpió las bases: conservar esa limpieza y no
+            # permitir que el dict local reintroduzca corredores al asignarse abajo.
+            runners = dict(state["runners"])
 
             # Verificar fin de juego tras el out por robo
             is_over, win_msg = check_game_over(game, state)

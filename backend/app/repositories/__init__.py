@@ -15,8 +15,14 @@ from app.repositories.game_stats_repository import (
     record_game_event,
 )
 from app.repositories.card_repository import (
+    add_inventory_item,
     count_user_inventory,
     find_all_cards,
+    find_any_card,
+    find_cards_by_rarity,
+    find_cards_excluding_team,
+    find_inventory_entry,
+    find_inventory_with_cards,
     find_pitchers_for_team,
     find_user_inventory_cards,
     find_user_inventory_pitchers,
@@ -44,6 +50,11 @@ __all__ = [
     "record_game_event",
     "count_user_inventory",
     "find_all_cards",
+    "find_any_card",
+    "find_cards_by_rarity",
+    "find_cards_excluding_team",
+    "find_inventory_entry",
+    "find_inventory_with_cards",
     "find_pitchers_for_team",
     "find_user_inventory_cards",
     "find_user_inventory_pitchers",
@@ -58,4 +69,5 @@ __all__ = [
     "get_user_by_username",
     "get_user_team",
     "get_wallet_by_user_id",
+    "add_inventory_item",
 ]

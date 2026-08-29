@@ -101,3 +101,58 @@ def find_user_inventory_cards(
     if limit is not None:
         query = query.limit(limit)
     return query.all()
+
+
+def find_inventory_with_cards(
+    db,
+    user_id: str,
+) -> Sequence[tuple["UserCardInventory", "PlayerCardModel"]]:
+    """
+    Retorna (fila de inventario, carta) de un usuario en una sola query
+    (evita el N+1 de pedir cada carta por separado).
+    """
+    return (
+        db.query(UserCardInventory, PlayerCardModel)
+        .join(PlayerCardModel, PlayerCardModel.id == UserCardInventory.card_id)
+        .filter(UserCardInventory.user_id == user_id)
+        .all()
+    )
+
+
+def find_inventory_entry(
+    db,
+    user_id: str,
+    card_id: str,
+) -> "UserCardInventory | None":
+    """Retorna la fila de inventario (user_id, card_id) o None si no existe."""
+    return (
+        db.query(UserCardInventory)
+        .filter(UserCardInventory.user_id == user_id, UserCardInventory.card_id == card_id)
+        .first()
+    )
+
+
+def add_inventory_item(
+    db,
+    user_id: str,
+    card_id: str,
+) -> "UserCardInventory":
+    """Crea (sin commit) una fila de inventario para (user_id, card_id)."""
+    item = UserCardInventory(user_id=user_id, card_id=card_id)
+    db.add(item)
+    return item
+
+
+def find_cards_excluding_team(db, team_id: str) -> Sequence["PlayerCardModel"]:
+    """Retorna las cartas de todos los equipos excepto el indicado."""
+    return db.query(PlayerCardModel).filter(PlayerCardModel.team_id != team_id).all()
+
+
+def find_cards_by_rarity(db, rarity) -> Sequence["PlayerCardModel"]:
+    """Retorna todas las cartas con la rareza indicada."""
+    return db.query(PlayerCardModel).filter(PlayerCardModel.rarity == rarity).all()
+
+
+def find_any_card(db) -> "PlayerCardModel | None":
+    """Retorna una carta arbitraria (fallback), o None si no hay ninguna."""
+    return db.query(PlayerCardModel).first()

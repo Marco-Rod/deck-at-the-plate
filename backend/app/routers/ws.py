@@ -86,6 +86,9 @@ async def websocket_endpoint(
                 import traceback
                 traceback.print_exc()
             
+            # La CPU pudo actuar sin commitear (Unit of Work del router): persistir
+            # antes de recargar desde BD para no perder los cambios en memoria.
+            db.commit()
             # Recargar game desde DB para sincronizar
             db.refresh(game)
             print(f"[WS] State after trigger: current_pitch={game.state_data.get('current_pitch') if game.state_data else None}")

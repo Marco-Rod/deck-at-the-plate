@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.repositories import find_cards_by_team, get_all_teams
+from app.repositories import find_all_cards, get_all_teams
 from app.services.team_ratings import compute_team_ratings
 
 router = APIRouter(prefix="/api/v1/teams", tags=["Teams"])
@@ -10,10 +10,16 @@ router = APIRouter(prefix="/api/v1/teams", tags=["Teams"])
 def get_cpu_teams(db: Session = Depends(get_db)):
     """Devuelve todos los equipos disponibles como rivales CPU con sus medias globales calculadas."""
     teams = get_all_teams(db)
+
+    # Un solo query para todas las cartas evita el N+1 por equipo.
+    cards_by_team = {}
+    for card in find_all_cards(db):
+        cards_by_team.setdefault(card.team_id, []).append(card)
+
     result = []
 
     for team in teams:
-        cards = find_cards_by_team(db, team.id)
+        cards = cards_by_team.get(team.id, [])
         if not cards:
             continue
 

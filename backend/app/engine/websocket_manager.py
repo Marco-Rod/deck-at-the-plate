@@ -1,18 +1,33 @@
-from typing import Dict, List, Tuple, Callable
-from fastapi import WebSocket
+from typing import Dict, List, Tuple, Callable, Protocol
+
+
+class WSConnection(Protocol):
+    """
+    Contrato mínimo que el motor exige a una conexión WebSocket.
+
+    Depender de este Protocol (en lugar de importar ``fastapi.WebSocket``) hace
+    que ``websocket_manager`` —y por tanto el engine— no dependa de FastAPI.
+    La instancia real de FastAPI (``fastapi.WebSocket``) satisface este
+    Protocol estructuralmente (tiene ``accept()`` y ``send_json()``).
+    """
+
+    async def accept(self) -> None: ...
+
+    async def send_json(self, data: object) -> None: ...
+
 
 class ConnectionManager:
     def __init__(self):
         # game_id -> Lista de (WebSocket, user_id) activos (Jugador Local y Visitante)
-        self.active_connections: Dict[str, List[Tuple[WebSocket, str]]] = {}
+        self.active_connections: Dict[str, List[Tuple[WSConnection, str]]] = {}
 
-    async def connect(self, websocket: WebSocket, game_id: str, user_id: str):
+    async def connect(self, websocket: WSConnection, game_id: str, user_id: str):
         await websocket.accept()
         if game_id not in self.active_connections:
             self.active_connections[game_id] = []
         self.active_connections[game_id].append((websocket, user_id))
 
-    def disconnect(self, websocket: WebSocket, game_id: str):
+    def disconnect(self, websocket: WSConnection, game_id: str):
         if game_id in self.active_connections:
             self.active_connections[game_id] = [
                 (ws, uid) for ws, uid in self.active_connections[game_id] if ws is not websocket

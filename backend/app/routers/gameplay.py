@@ -33,15 +33,15 @@ from app.schemas import (
     ChangePitcherRequest,
     StealBaseRequest,
 )
-from app.engine.deck_manager import discard_used_tactic
 from app.engine.websocket_manager import manager
 from app.engine.fog_of_war import sanitize_state_for_player
-from app.engine.game_rules import MIN_PITCHES_TO_CHANGE
+from app.engine.game_rules import MIN_PITCHES_TO_CHANGE, EXTRA_INNINGS_MIN_INNING
 from app.engine.turn_guard import expected_actor, is_player_turn
 from app.engine.cpu_ai import is_cpu_turn
 from app.engine.attribute_mapper import map_card_to_pitcher_attrs
 from app.engine.game_actions import resolve_swing, trigger_cpu_response, perform_pitcher_change
 from app.engine.steal_actions import steal_attempt
+from app.engine.tactical_actions import activate_tactic
 from app.repositories import (
     count_user_inventory,
     find_pitchers_for_team,
@@ -136,39 +136,32 @@ def play_tactic(
     if current_user_id not in (game.home_user_id, game.away_user_id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No tienes acceso a esta partida.")
 
+    # La táctica se activa para el rol y el turno actual del solicitante.
+    _require_turn(game, current_user_id, required_role=payload.player_role.upper())
+
     tactic = get_tactic_card_by_id(db, payload.tactic_id)
     if not tactic:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Carta táctica no encontrada.")
 
     state = dict(game.state_data or {})
 
-    # En la Alta batea el visitante; en la Baja batea el local.
-    if payload.player_role.upper() == "BATTER":
-        player_key = "away" if game.is_top_inning else "home"
-    else:
-        player_key = "home" if game.is_top_inning else "away"
-
-    tactics_data = state.get("tactics", {}).get(player_key, {})
-    player_hand = tactics_data.get("hand", [])
-
-    if payload.tactic_id not in player_hand:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="La carta seleccionada no se encuentra en la mano actual del jugador."
-        )
-
-    if tactic.category == "EXTRA_INNINGS" and game.current_inning < 10:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"La carta '{tactic.name}' solo se puede activar en extra innings (Entrada 10+)."
-        )
-
-    active_tactics = state.get("active_tactics", {"home": None, "away": None})
-    role_key = "pitcher" if payload.player_role.upper() == "PITCHER" else "batter"
-    active_tactics[role_key] = tactic.id
-    state["active_tactics"] = active_tactics
-
-    discard_used_tactic(state["tactics"], player_key, payload.tactic_id)
+    # Regla de dominio (turno, mano, extra innings) en el engine puro.
+    ok, error_code = activate_tactic(
+        state,
+        player_role=payload.player_role,
+        tactic_id=payload.tactic_id,
+        tactic_category=tactic.category,
+        current_inning=game.current_inning,
+        is_top_inning=game.is_top_inning,
+    )
+    if not ok:
+        if error_code == "extra_innings":
+            detail = f"La carta '{tactic.name}' solo se puede activar en extra innings (Entrada {EXTRA_INNINGS_MIN_INNING}+)."
+        elif error_code == "invalid_role":
+            detail = "player_role debe ser 'PITCHER' o 'BATTER'."
+        else:
+            detail = "La carta seleccionada no se encuentra en la mano actual del jugador."
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
 
     game.state_data = state
     db.commit()
@@ -257,6 +250,8 @@ async def select_pitch(
     state = dict(game.state_data or {})
     if not state.get("is_game_over"):
         await trigger_cpu_response(game, state, db, game_id)
+        # La CPU pudo batear/pichear sin commitear: persistir la transacción completa.
+        db.commit()
 
     return {"status": "ok", "message": "Picheo registrado exitosamente."}
 
@@ -315,6 +310,8 @@ async def execute_swing(
         if is_cpu_turn(game, state, "PITCHER"):
             print(f"   🤖 CPU debería haber lanzado! Ejecutando trigger ahora...")
             await trigger_cpu_response(game, state, db, game_id)
+            # La CPU pudo pichear/cambiar pitcher sin commitear: persistir antes de recargar.
+            db.commit()
             # Recargar state después de que CPU lance
             db.expunge_all()
             game = get_game_by_id(db, game_id)
@@ -347,6 +344,10 @@ async def execute_swing(
     state = dict(game.state_data or {})
     if not state.get("is_game_over"):
         await trigger_cpu_response(game, state, db, game_id)
+
+    # Persistir la transacción completa (swing humano + picheo/cambio de la CPU).
+    db.commit()
+    db.refresh(game)
 
     return _build_play_result_response(game, event, description)
 

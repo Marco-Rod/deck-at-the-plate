@@ -47,8 +47,6 @@ def get_or_create_wallet(
         return wallet
     wallet = UserWallet(user_id=user_id, stamps=stamps, gems=gems)
     db.add(wallet)
-    db.commit()
-    db.refresh(wallet)
     return wallet
 
 

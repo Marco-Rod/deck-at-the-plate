@@ -5,9 +5,8 @@ from app.schemas import UserProfileResponseSchema, UserInventoryResponseSchema, 
 from app.database import get_db
 from app.models import UserLineup, UserTeam
 from app.repositories import (
-    find_user_inventory_cards,
+    find_inventory_with_cards,
     get_active_lineup,
-    get_card_by_id,
     get_or_create_wallet,
     get_user_by_id,
     get_user_team as repo_get_user_team,
@@ -31,10 +30,11 @@ def get_user_profile(
     db: Session = Depends(get_db),
     current_user_id: str = Depends(get_current_user),
 ):
-    """Obtiene la información general del usuario autenticado y su saldo de monedas."""
+    """"Obtiene la información general del usuario autenticado y su saldo de monedas."""
     user = _get_current_user_or_404(current_user_id, db)
 
     wallet = get_or_create_wallet(db, current_user_id)
+    db.commit()  # Persistir wallet si fue creada recién (los repos no commitean)
 
     return {
         "user_id": user.id,
@@ -55,17 +55,18 @@ def get_user_inventory(
     """Devuelve la lista completa de cartas del usuario autenticado en su colección."""
     _get_current_user_or_404(current_user_id, db)
 
-    inventory_items = find_user_inventory_cards(db, current_user_id)
+    # Un solo JOIN evita el N+1 de pedir cada carta con get_card_by_id.
+    inventory_rows = find_inventory_with_cards(db, current_user_id)
 
-    cards_list = []
-    for item in inventory_items:
-        card = get_card_by_id(db, item.card_id)
-        if card:
-            cards_list.append({
-                "inventory_id": item.id,
-                "acquired_at": item.acquired_at,
-                "card": card
-            })
+    cards_list = [
+        {
+            "inventory_id": item.id,
+            "acquired_at": item.acquired_at,
+            "card": card,
+        }
+        for item, card in inventory_rows
+        if card
+    ]
 
     return {
         "user_id": current_user_id,
