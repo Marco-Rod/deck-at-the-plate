@@ -303,7 +303,7 @@ def get_available_pitchers(
     # Filtrar solo lanzadores (excluyendo el lanzador actual)
     available_pitchers = [
         c for c in all_cards 
-        if c.position in ["SP", "RP", "CP", "TWP"] or c.is_two_way
+        if (c.position in ["SP", "RP", "CP", "TWP"] or c.is_two_way)
         and c.id != active_pitcher_id
     ]
     
