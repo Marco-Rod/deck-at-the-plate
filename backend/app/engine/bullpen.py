@@ -17,6 +17,7 @@ from app.engine.game_actions import perform_pitcher_change
 from app.engine.game_rules import MIN_PITCHES_TO_CHANGE
 from app.repositories import (
     find_pitchers_for_team,
+    find_inventory_entry,
     find_user_inventory_pitchers,
     get_card_by_id,
 )
@@ -85,6 +86,7 @@ def apply_human_pitcher_change(
     state: dict,
     new_pitcher_id: str,
     is_home_user: bool,
+    user_id: str,
 ) -> Tuple[str | None, str | None]:
     """
     Valida y ejecuta el cambio de pitcher del usuario.
@@ -93,6 +95,12 @@ def apply_human_pitcher_change(
         (old_pitcher_id, error_detail). ``error_detail`` no vacío indica una
         validación que el router traduce a HTTP 400.
     """
+    # El pitcher no sólo debe existir: debe ser una carta que el jugador posee.
+    # Sin esta comprobación un cliente podría enviar el ID de cualquier pitcher
+    # del catálogo o del rival.
+    if not find_inventory_entry(db, user_id, new_pitcher_id):
+        return None, "No puedes usar un lanzador que no está en tu inventario."
+
     new_pitcher = get_card_by_id(db, new_pitcher_id)
     if not new_pitcher or not new_pitcher.is_pitcher:
         return None, (
@@ -101,6 +109,14 @@ def apply_human_pitcher_change(
         )
 
     active_pitcher_id = state.get("active_pitcher")
+    if new_pitcher_id == active_pitcher_id:
+        return None, "El lanzador seleccionado ya está en el montículo."
+
+    # La regla de disponibilidad es igual para humano y CPU: un pitcher que ya
+    # lanzó en esta partida no puede volver a entrar.
+    if new_pitcher_id in state.get("pitch_counts", {}):
+        return None, "Ese lanzador ya participó en esta partida y no puede reingresar."
+
     current_pitch_count = (
         state.get("pitch_counts", {}).get(active_pitcher_id, 0) if active_pitcher_id else 0
     )

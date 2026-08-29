@@ -35,11 +35,12 @@ from app.schemas import (
 )
 from app.engine.websocket_manager import manager
 from app.engine.fog_of_war import sanitize_state_for_player
-from app.engine.game_rules import MIN_PITCHES_TO_CHANGE, EXTRA_INNINGS_MIN_INNING
+from app.engine.game_rules import EXTRA_INNINGS_MIN_INNING
 from app.engine.turn_guard import expected_actor, is_player_turn
 from app.engine.cpu_ai import is_cpu_turn
 from app.engine.attribute_mapper import map_card_to_pitcher_attrs
-from app.engine.game_actions import resolve_swing, trigger_cpu_response, perform_pitcher_change
+from app.engine.game_actions import resolve_swing, trigger_cpu_response
+from app.engine.bullpen import apply_human_pitcher_change
 from app.engine.steal_actions import steal_attempt
 from app.engine.tactical_actions import activate_tactic
 from app.repositories import (
@@ -379,38 +380,37 @@ async def change_pitcher(
     if current_user_id not in (game.home_user_id, game.away_user_id):
         raise HTTPException(status_code=403, detail="No tienes acceso a esta partida.")
 
-    active_state_pre = dict(game.state_data or {})
-    new_pitcher = get_card_by_id(db, payload.new_pitcher_id)
-    old_pitcher = get_card_by_id(db, active_state_pre.get("active_pitcher"))
-    
-    print(f"🔍 Pitcher anterior: {old_pitcher.name if old_pitcher else 'UNKNOWN'} ({old_pitcher.id if old_pitcher else 'N/A'})")
-    print(f"🔍 Pitcher nuevo: {new_pitcher.name if new_pitcher else 'UNKNOWN'} ({payload.new_pitcher_id})")
-    
-    if not new_pitcher or not new_pitcher.is_pitcher:
-        print(f"❌ Pitcher inválido o posición incorrecta")
-        raise HTTPException(
-            status_code=400,
-            detail="La carta indicada no corresponde a un lanzador válido (SP, RP, CP, SU, CL o TWP)."
-        )
-
     state = dict(game.state_data or {})
-
-    # ── Validar mínimo de lanzamientos antes de permitir el cambio ──────────
-    # (regla compartida con la CPU — ver app/engine/game_rules.py)
-    active_pitcher_id = state.get("active_pitcher")
-    pitch_counts_check: dict = state.get("pitch_counts", {})
-    current_pitch_count = pitch_counts_check.get(active_pitcher_id, 0) if active_pitcher_id else 0
-
-    if current_pitch_count < MIN_PITCHES_TO_CHANGE:
+    if state.get("awaiting_pitcher_change_acknowledgment"):
         raise HTTPException(
-            status_code=400,
-            detail=f"El lanzador debe haber lanzado al menos {MIN_PITCHES_TO_CHANGE} pitches. Lleva {current_pitch_count}."
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Hay un cambio de pitcher pendiente de confirmación.",
         )
 
-    is_home_user = (current_user_id == game.home_user_id)
+    # Un jugador sólo puede hacer cambios mientras controla al pitcher. Esto
+    # impide sustituir al rival o alterar el pitcher activo fuera de su turno.
+    _require_turn(game, current_user_id, required_role="PITCHER")
+    is_home_user = current_user_id == game.home_user_id
+    own_pitcher_field = "home_pitcher_id" if is_home_user else "away_pitcher_id"
+    if state.get("active_pitcher") != state.get(own_pitcher_field):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="El lanzador activo no corresponde al lado del jugador actual.",
+        )
 
-    # ⭐ Aplicar el cambio (regla compartida con la CPU en app/engine/game_actions.py)
-    old_pitcher_id = perform_pitcher_change(game, state, payload.new_pitcher_id, is_home=is_home_user)
+    old_pitcher_id, error_detail = apply_human_pitcher_change(
+        db,
+        game,
+        state,
+        payload.new_pitcher_id,
+        is_home_user,
+        current_user_id,
+    )
+    if error_detail:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error_detail)
+
+    new_pitcher = get_card_by_id(db, payload.new_pitcher_id)
+    old_pitcher = get_card_by_id(db, old_pitcher_id)
 
     print(f"🔄 [CHANGE_PITCHER] Cambiando {'HOME' if is_home_user else 'AWAY'} pitcher")
     print(f"   {old_pitcher.name if old_pitcher else 'OLD PITCHER'} ({old_pitcher_id}) → {new_pitcher.name} ({payload.new_pitcher_id})")

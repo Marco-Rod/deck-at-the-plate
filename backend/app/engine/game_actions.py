@@ -294,24 +294,24 @@ async def resolve_swing(
         runs_scored = state.get("last_runs_scored", 0)
         rbi = runs_scored
 
-        try:
-            record_game_event(
-                db=db,
-                game_id=game_id,
-                event_type=event,
-                inning=game.current_inning,
-                is_top_inning=game.is_top_inning,
-                batter_id=active_batter_id,
-                pitcher_id=active_pitcher_id,
-                balls=game.balls,
-                strikes=game.strikes,
-                outs=game.outs,
-                runners_on_base=state.get("runners", {}),
-                runs_scored=runs_scored,
-                rbi=rbi,
-            )
-        except Exception as e:
-            print(f"❌ [STATS ERROR] {e}")
+        # La estadística forma parte de la misma unidad de trabajo que la
+        # jugada. No se puede ocultar un error aquí: el caller debe revertir la
+        # transacción para no dejar el marcador y el box score desincronizados.
+        record_game_event(
+            db=db,
+            game_id=game_id,
+            event_type=event,
+            inning=game.current_inning,
+            is_top_inning=game.is_top_inning,
+            batter_id=active_batter_id,
+            pitcher_id=active_pitcher_id,
+            balls=game.balls,
+            strikes=game.strikes,
+            outs=game.outs,
+            runners_on_base=state.get("runners", {}),
+            runs_scored=runs_scored,
+            rbi=rbi,
+        )
 
     # --- 8. Preparar state final y broadcast ---
     state["current_pitch"] = None
