@@ -94,13 +94,24 @@ def create_game_session(
             UserLineup.is_active == True
         ).first()
         if user_lineup and user_lineup.slots:
-            lineup_cards = [
-                card["id"] for slot, card in user_lineup.slots.items() 
-                if slot != "P" and isinstance(card, dict) and "id" in card
-            ][:9]
+            # Normalizar slots: se acepta tanto el objeto completo de la carta
+            # ({"id": "card_xxx", ...}) como un id plano ("card_xxx"). Esto hace
+            # la carga robusta ante cualquier formato previamente persistido.
+            lineup_cards = []
             pitcher_card = None
-            if "P" in user_lineup.slots and isinstance(user_lineup.slots["P"], dict):
-                pitcher_card = user_lineup.slots["P"]["id"]
+            for slot, card in user_lineup.slots.items():
+                card_id = (
+                    card.get("id")
+                    if isinstance(card, dict) and isinstance(card.get("id"), str)
+                    else card if isinstance(card, str) else None
+                )
+                if not card_id:
+                    continue
+                if slot == "P":
+                    pitcher_card = card_id
+                else:
+                    lineup_cards.append(card_id)
+            lineup_cards = lineup_cards[:9]
             
             if human_is_home:
                 home_lineup_ids = lineup_cards
