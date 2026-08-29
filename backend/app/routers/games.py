@@ -10,7 +10,6 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.core.enums import PITCHER_POSITIONS
 from app.database import get_db
 from app.models import GameSession
 from app.schemas import CreateGameRequest, GameSessionResponse
@@ -145,9 +144,9 @@ def create_game_session(
         )
 
     # ⭐ INCLUIR is_two_way para Ohtani y otros jugadores con dos roles
-    # (la regla "es pitcher" es global: PITCHER_POSITIONS incluye SP/RP/CP/TWP)
-    pitchers = [c for c in cpu_cards if c.position in PITCHER_POSITIONS or c.is_two_way]
-    batters = [c for c in cpu_cards if c.position not in PITCHER_POSITIONS or c.is_two_way]
+    # (la regla "es pitcher" vive en PlayerCardModel.is_pitcher / core.PITCHER_POSITIONS)
+    pitchers = [c for c in cpu_cards if c.is_pitcher]
+    batters = [c for c in cpu_cards if c.is_batter]
 
     # Asignar cartas CPU según su posición
     if human_is_home:

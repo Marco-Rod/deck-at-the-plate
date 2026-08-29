@@ -33,16 +33,15 @@ from app.schemas import (
     ChangePitcherRequest,
     StealBaseRequest,
 )
-from app.core.enums import PITCHER_POSITIONS
 from app.engine.deck_manager import discard_used_tactic
-from app.engine.tactical_actions import resolve_steal
 from app.engine.websocket_manager import manager
 from app.engine.fog_of_war import sanitize_state_for_player
 from app.engine.game_rules import MIN_PITCHES_TO_CHANGE
 from app.engine.turn_guard import expected_actor, is_player_turn
 from app.engine.cpu_ai import is_cpu_turn
 from app.engine.attribute_mapper import map_card_to_pitcher_attrs
-from app.engine.game_actions import resolve_swing, trigger_cpu_response
+from app.engine.game_actions import resolve_swing, trigger_cpu_response, perform_pitcher_change
+from app.engine.steal_actions import steal_attempt
 from app.repositories import (
     count_user_inventory,
     find_pitchers_for_team,
@@ -386,11 +385,11 @@ async def change_pitcher(
     print(f"🔍 Pitcher anterior: {old_pitcher.name if old_pitcher else 'UNKNOWN'} ({old_pitcher.id if old_pitcher else 'N/A'})")
     print(f"🔍 Pitcher nuevo: {new_pitcher.name if new_pitcher else 'UNKNOWN'} ({payload.new_pitcher_id})")
     
-    if not new_pitcher or new_pitcher.position not in PITCHER_POSITIONS:
+    if not new_pitcher or not new_pitcher.is_pitcher:
         print(f"❌ Pitcher inválido o posición incorrecta")
         raise HTTPException(
             status_code=400,
-            detail="La carta indicada no corresponde a un lanzador válido (SP, RP, CP o TWP)."
+            detail="La carta indicada no corresponde a un lanzador válido (SP, RP, CP, SU, CL o TWP)."
         )
 
     state = dict(game.state_data or {})
@@ -407,36 +406,13 @@ async def change_pitcher(
             detail=f"El lanzador debe haber lanzado al menos {MIN_PITCHES_TO_CHANGE} pitches. Lleva {current_pitch_count}."
         )
 
-    old_pitcher_id = state.get("active_pitcher")
-    state["active_pitcher"] = payload.new_pitcher_id
-
-    # ── Actualizar home_pitcher_id / away_pitcher_id según quién es el usuario ──
-    # state_manager usa estos campos para restaurar el pitcher al cambiar de media entrada.
-    # Si no se actualizan aquí, el inning siguiente restaura el pitcher original.
     is_home_user = (current_user_id == game.home_user_id)
-    if is_home_user:
-        state["home_pitcher_id"] = payload.new_pitcher_id
-    else:
-        state["away_pitcher_id"] = payload.new_pitcher_id
+
+    # ⭐ Aplicar el cambio (regla compartida con la CPU en app/engine/game_actions.py)
+    old_pitcher_id = perform_pitcher_change(game, state, payload.new_pitcher_id, is_home=is_home_user)
 
     print(f"🔄 [CHANGE_PITCHER] Cambiando {'HOME' if is_home_user else 'AWAY'} pitcher")
     print(f"   {old_pitcher.name if old_pitcher else 'OLD PITCHER'} ({old_pitcher_id}) → {new_pitcher.name} ({payload.new_pitcher_id})")
-
-    pitch_counts = state.get("pitch_counts", {})
-    pitch_counts[payload.new_pitcher_id] = 0  # Reset pitch count para el nuevo pitcher
-    state["pitch_counts"] = pitch_counts
-    
-    # Log remaining available pitchers
-    print(f"\n📊 [PITCHERS REMAINING AFTER CHANGE]")
-    remaining_pitchers = find_pitchers_for_team(
-        db,
-        team_id=new_pitcher.team_id,
-        exclude_ids={payload.new_pitcher_id},
-    )
-    print(f"   Available backups: {len(remaining_pitchers)}")
-    for p in remaining_pitchers[:5]:
-        print(f"      - {p.name} ({p.id}) | OVR: {p.overall}")
-    print()
 
     game.state_data = state
     db.commit()
@@ -737,44 +713,15 @@ async def steal_base(
     pitcher_card = get_card_by_id(db, active_pitcher_id)
     pitcher_attrs = map_card_to_pitcher_attrs(pitcher_card) if pitcher_card else {"velocidad": 75, "control": 70, "movimiento": 70}
 
-    runners = state.get("runners", {"1b": None, "2b": None, "3b": None})
-    success, description = resolve_steal(pitcher_attrs, runners, payload.target_base)
+    # Lógica de dominio (incluye cambio de media entrada) en el engine
+    success, description = steal_attempt(game, state, payload.target_base, pitcher_attrs)
 
-    from_base = "1b" if payload.target_base == "2b" else "2b"
-
-    if success:
-        runners[payload.target_base] = runners[from_base]
-        runners[from_base] = None
-    else:
-        # Out por robo fallido (Caught Stealing)
-        runners[from_base] = None
-        game.outs += 1
-
-        if game.outs >= 3:
-            game.outs = 0
-            game.balls = 0
-            game.strikes = 0
-            state["just_switched_half"] = True
-            state["runners"] = {"1b": None, "2b": None, "3b": None}
-            game.is_top_inning = not game.is_top_inning
-            if game.is_top_inning:
-                game.current_inning += 1
-            description += " Tres outs registrados. Cambio de entrada."
-
-            # Verificar fin de juego tras el out por robo
-            from app.engine.game_over_manager import check_game_over
-            is_over, win_msg = check_game_over(game, state)
-            if is_over:
-                state["is_game_over"] = True
-                state["winner_message"] = win_msg
-        else:
-            state["just_switched_half"] = False
-
-    state["runners"] = runners
     game.state_data = state
 
     db.commit()
     db.refresh(game)
+
+    runners = state.get("runners", {})
 
     await manager.broadcast_to_game_view(game_id, lambda u: {
         "type": "STEAL_RESOLVED",

@@ -3,7 +3,6 @@ from sqlalchemy.orm import Session
 
 from app.schemas import UserProfileResponseSchema, UserInventoryResponseSchema, CreateTeamRequestSchema, UserTeamResponseSchema
 from app.database import get_db
-from app.core.enums import PITCHER_POSITIONS
 from app.models import UserLineup, UserTeam
 from app.repositories import (
     find_user_inventory_cards,
@@ -13,6 +12,7 @@ from app.repositories import (
     get_user_by_id,
     get_user_team as repo_get_user_team,
 )
+from app.services.team_ratings import compute_lineup_ratings
 from app.auth import get_current_user
 
 router = APIRouter(prefix="/api/v1/user", tags=["User & Inventory"])
@@ -168,28 +168,5 @@ def get_user_team_stats(
     if not lineup or not lineup.slots:
         return {"overall": 70, "batOvr": 70, "pitOvr": 70}
 
-    batters_ovr = []
-    pitchers_ovr = []
-
-    # Iterar sobre las posiciones asignadas en el diamante
-    for slot_pos, card in lineup.slots.items():
-        if not card or not isinstance(card, dict):
-            continue
-
-        ovr = card.get("overall", 70)
-        pos = card.get("position", "")
-
-        if pos in PITCHER_POSITIONS or slot_pos == "P":
-            pitchers_ovr.append(ovr)
-        else:
-            batters_ovr.append(ovr)
-
-    bat_ovr = round(sum(batters_ovr) / len(batters_ovr)) if batters_ovr else 70
-    pit_ovr = round(sum(pitchers_ovr) / len(pitchers_ovr)) if pitchers_ovr else 70
-    overall = round((bat_ovr + pit_ovr) / 2)
-
-    return {
-        "overall": overall,
-        "batOvr": bat_ovr,
-        "pitOvr": pit_ovr
-    }
+    # Cálculo OVR unificado (regla única en services/team_ratings.py)
+    return compute_lineup_ratings(lineup.slots, default=70)

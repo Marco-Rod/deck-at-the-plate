@@ -118,11 +118,12 @@ def build_play_resolved_payload(game: GameSession, event: str, description: str,
             # score_history se crea y actualiza en state_manager.py cuando se anotan carreras
             if db:
                 score_history = state_with_role.get("score_history", {})
+                total_innings = int(state_with_role.get("total_innings", 9))
                 print(f"⭐ [SCORE HISTORY] Carreras por inning: {score_history}")
-                
+
                 # Asegurar que todas las entradas están presentes (incluidas las sin carreras)
                 inning_runs = {}
-                for i in range(1, 10):  # Entradas 1-9
+                for i in range(1, total_innings + 1):  # Entradas 1..total_innings
                     inning_runs[f"{i}_true"] = score_history.get(f"{i}_true", 0)
                     inning_runs[f"{i}_false"] = score_history.get(f"{i}_false", 0)
                 
@@ -389,6 +390,28 @@ async def resolve_swing(
     return event, description, inning_ended
 
 
+def perform_pitcher_change(
+    game: GameSession, state: dict, new_pitcher_id: str, is_home: bool
+) -> str:
+    """
+    Aplica un cambio de lanzador sobre el state_data (regla compartida por el
+    cambio humano y el de la CPU): registra al nuevo pitcher como activo,
+    actualiza el campo lateral (home/away_pitcher_id) para que la transición
+    de inning lo restaure, y resetea su conteo de lanzamientos.
+
+    Returns:
+        old_pitcher_id (el pitcher que salió del montículo).
+    """
+    old_pitcher_id = state.get("active_pitcher")
+    state["active_pitcher"] = new_pitcher_id
+    side_field = "home_pitcher_id" if is_home else "away_pitcher_id"
+    state[side_field] = new_pitcher_id
+    pitch_counts = state.get("pitch_counts", {})
+    pitch_counts[new_pitcher_id] = 0
+    state["pitch_counts"] = pitch_counts
+    return old_pitcher_id
+
+
 async def execute_cpu_pitcher_change(
     game: GameSession, state: dict, db, game_id: str, difficulty: str
 ) -> bool:
@@ -412,7 +435,6 @@ async def execute_cpu_pitcher_change(
     
     # Pitcher del CPU según su rol
     cpu_pitcher_field = "home_pitcher_id" if cpu_is_home else "away_pitcher_id"
-    cpu_lineup_field = "home_lineup" if cpu_is_home else "away_lineup"
     cpu_user_id = game.home_user_id if cpu_is_home else game.away_user_id
     
     # Obtener el team_id del pitcher del CPU de referencia
@@ -456,17 +478,9 @@ async def execute_cpu_pitcher_change(
     print(f"   - Team: {new_pitcher.team.name if new_pitcher.team else 'UNKNOWN'} (ID: {new_pitcher.team_id})")
     print(f"   - Position: {new_pitcher.position} | Rarity: {new_pitcher.rarity}")
     
-    # Ejecutar el cambio en state
-    old_pitcher_id = state.get("active_pitcher")
-    state["active_pitcher"] = new_pitcher.id
-    
-    # Actualizar home_pitcher_id / away_pitcher_id para que la próxima entrada lo use
-    state[cpu_pitcher_field] = new_pitcher.id
-    
-    # Resetear contador de pitches para el nuevo pitcher
-    pitch_counts[new_pitcher.id] = 0
-    state["pitch_counts"] = pitch_counts
-    
+    # Ejecutar el cambio en state (regla compartida humano/CPU)
+    old_pitcher_id = perform_pitcher_change(game, state, new_pitcher.id, is_home=cpu_is_home)
+
     game.state_data = state
     db.commit()
     db.refresh(game)

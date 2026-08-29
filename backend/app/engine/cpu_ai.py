@@ -1,9 +1,10 @@
 import random
 from typing import Any, Dict
 
-from app.core.enums import Difficulty, PitchType, SwingType
+from app.core.enums import Difficulty, PitchType, SwingType, PlayerRole
 from app.core.engine_types import PitchSelection, SwingSelection
 from app.engine.game_rules import MIN_PITCHES_TO_CHANGE
+from app.engine.turn_guard import expected_actor
 
 # Tipos de picheo que deben coincidir con los usados en el repertorio de las cartas (seed data)
 # Orden de definición de PitchType: 4-SEAM, SLIDER, CHANGE, CURVE, SINKER, CUTTER, IBB
@@ -108,55 +109,20 @@ def is_cpu_turn(game, state: Dict[str, Any], required_role: str) -> bool:
     """
     Determina si en este momento le toca actuar a la CPU (PvE).
 
-    En modo PvE:
-      - Si CPU es AWAY: Alta → CPU pichea, humano batea. Baja → humano pichea, CPU batea.
-      - Si CPU es HOME: Alta → CPU pichea, humano batea. Baja → humano pichea, CPU batea.
+    Reutiliza ``expected_actor`` (turn_guard) como ÚNICA fuente del mapeo
+    rol → jugador según la media entrada, evitando duplicar la regla de turno.
+    Solo es turno de la CPU en modo PVE con partida activa.
 
     Args:
         game:          Instancia con home_user_id / away_user_id / is_top_inning.
         state:         state_data (mode, is_game_over).
         required_role: 'PITCHER' o 'BATTER' — el rol que se está evaluando.
     """
-    mode_check = state.get("mode") != "PVE"
-    game_over_check = state.get("is_game_over")
-
-    if mode_check or game_over_check:
-        print(f"🤖 is_cpu_turn({required_role}): EARLY EXIT - mode={state.get('mode')}, is_game_over={game_over_check}")
+    if required_role not in (PlayerRole.PITCHER, PlayerRole.BATTER):
         return False
-
-    # ARREGLADO: Identificar dónde está la CPU
-    is_cpu_home = game.home_user_id == "CPU_BOT"
-    is_cpu_away = game.away_user_id == "CPU_BOT"
-
-    print(f"🤖 is_cpu_turn({required_role}): is_cpu_home={is_cpu_home}, is_cpu_away={is_cpu_away}, is_top={game.is_top_inning}")
-
-    if not (is_cpu_home or is_cpu_away):
-        print(f"🤖 is_cpu_turn({required_role}): No CPU found")
-        return False  # No hay CPU en este juego
-
-    if required_role == "PITCHER":
-        # CPU pichea en la Alta si es local, o en la Baja si es visitante
-        if is_cpu_home:
-            result = game.is_top_inning      # CPU local pichea en Alta
-            print(f"🤖 is_cpu_turn(PITCHER): CPU es HOME, returning {result}")
-            return result
-        else:
-            result = not game.is_top_inning  # CPU visitante pichea en Baja
-            print(f"🤖 is_cpu_turn(PITCHER): CPU es AWAY, returning {result}")
-            return result
-
-    if required_role == "BATTER":
-        # CPU batea en la Alta si es visitante, o en la Baja si es local
-        if is_cpu_away:
-            result = game.is_top_inning      # CPU visitante batea en Alta
-            print(f"🤖 is_cpu_turn(BATTER): CPU es AWAY, returning {result}")
-            return result
-        else:
-            result = not game.is_top_inning  # CPU local batea en Baja
-            print(f"🤖 is_cpu_turn(BATTER): CPU es HOME, returning {result}")
-            return result
-
-    return False
+    if state.get("mode") != "PVE" or state.get("is_game_over"):
+        return False
+    return expected_actor(game, required_role) == "CPU_BOT"
 
 
 def choose_pitch_from_repertoire(repertoire) -> "str | None":

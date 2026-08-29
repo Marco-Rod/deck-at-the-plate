@@ -116,7 +116,9 @@ class Position(str, enum.Enum):
     PITCHER = "P"
     STARTER = "SP"
     RELIEVER = "RP"
+    SETUP = "SU"
     CLOSER = "CP"
+    CLOSER_MAJOR = "CL"
     TWO_WAY = "TWP"
     CATCHER = "C"
     FIRST_BASE = "1B"
@@ -133,7 +135,9 @@ class Position(str, enum.Enum):
         return self in (
             Position.STARTER,
             Position.RELIEVER,
+            Position.SETUP,
             Position.CLOSER,
+            Position.CLOSER_MAJOR,
             Position.TWO_WAY,
         )
 

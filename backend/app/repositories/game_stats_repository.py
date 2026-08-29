@@ -15,6 +15,48 @@ from app.models import GameEventLog
 from app.repositories.card_repository import get_card_by_id
 
 
+# ---------------------------------------------------------------------------
+# Clasificación declarativa de eventos (Open/Closed)
+# ---------------------------------------------------------------------------
+# Agregar un evento nuevo (p. ej. SACRIFICE_FLY) = añadir su entrada aquí.
+# Box score y stats de jugador lo heredan automáticamente: no se editan cadenas.
+_BAT_KEYS_BOX: dict[str, tuple[str, ...]] = {
+    Event.HIT_1B.value: ("hits", "singles"),
+    Event.HIT_2B.value: ("hits", "doubles"),
+    Event.HIT_3B.value: ("hits", "triples"),
+    Event.HOME_RUN.value: ("hits", "home_runs"),
+    Event.STRIKEOUT.value: ("strikeouts",),
+    Event.WALK.value: ("walks",),
+}
+
+# La vista de jugador no acumula "singles" (compatible con la respuesta legada).
+_BAT_KEYS_PLAYER: dict[str, tuple[str, ...]] = {
+    Event.HIT_1B.value: ("hits",),
+    Event.HIT_2B.value: ("hits", "doubles"),
+    Event.HIT_3B.value: ("hits", "triples"),
+    Event.HOME_RUN.value: ("hits", "home_runs"),
+    Event.STRIKEOUT.value: ("strikeouts",),
+    Event.WALK.value: ("walks",),
+}
+
+_PITCH_KEYS: dict[str, tuple[str, ...]] = {
+    Event.HIT_1B.value: ("hits_allowed",),
+    Event.HIT_2B.value: ("hits_allowed",),
+    Event.HIT_3B.value: ("hits_allowed",),
+    Event.HOME_RUN.value: ("hits_allowed", "home_runs_allowed"),
+    Event.STRIKEOUT.value: ("strikeouts",),
+    Event.WALK.value: ("walks",),
+}
+
+
+def _event_key(event_type) -> str:
+    """Normaliza un evento (str o miembro de Event) a la clave canónica del registro."""
+    try:
+        return Event(event_type).value
+    except (ValueError, TypeError):
+        return str(event_type)
+
+
 def record_game_event(
     db,
     game_id: str,
@@ -122,6 +164,8 @@ def get_game_box_score(db, game_id: str) -> dict:
     pitchers = {}
 
     for event in events:
+        evt_key = _event_key(event.event_type)
+
         # Estadísticas de bateador
         if event.batter_id not in batters:
             batters[event.batter_id] = {
@@ -138,31 +182,13 @@ def get_game_box_score(db, game_id: str) -> dict:
                 "walks": 0,
             }
 
-        # Contar at-bats (cualquier evento es un AB excepto walks y doble play sin movimiento)
-        if event.event_type != Event.WALK:
+        # Contar at-bats (cualquier evento es un AB excepto walks)
+        if evt_key != Event.WALK.value:
             batters[event.batter_id]["at_bats"] += 1
 
-        # Contar hits y sus tipos
-        if event.event_type == Event.HIT_1B:
-            batters[event.batter_id]["hits"] += 1
-            batters[event.batter_id]["singles"] += 1
-        elif event.event_type == Event.HIT_2B:
-            batters[event.batter_id]["hits"] += 1
-            batters[event.batter_id]["doubles"] += 1
-        elif event.event_type == Event.HIT_3B:
-            batters[event.batter_id]["hits"] += 1
-            batters[event.batter_id]["triples"] += 1
-        elif event.event_type == Event.HOME_RUN:
-            batters[event.batter_id]["hits"] += 1
-            batters[event.batter_id]["home_runs"] += 1
-        elif event.event_type == Event.STRIKEOUT:
-            batters[event.batter_id]["strikeouts"] += 1
-        elif event.event_type == Event.WALK:
-            batters[event.batter_id]["walks"] += 1
-        elif event.event_type == Event.DOUBLE_PLAY:
-            # El bateador tiene un at-bat en doble play (ya contado arriba)
-            # No es un hit, así que no se suma a hits
-            pass
+        # Acumular buckets de bateo declarativamente (registry _BAT_KEYS_BOX)
+        for key in _BAT_KEYS_BOX.get(evt_key, ()):
+            batters[event.batter_id][key] += 1
 
         # RBIs y carreras
         batters[event.batter_id]["rbi"] += event.rbi
@@ -179,15 +205,9 @@ def get_game_box_score(db, game_id: str) -> dict:
                 "runs_allowed": 0,
             }
 
-        if event.event_type == Event.STRIKEOUT:
-            pitchers[event.pitcher_id]["strikeouts"] += 1
-        elif event.event_type == Event.WALK:
-            pitchers[event.pitcher_id]["walks"] += 1
-        elif event.event_type in (Event.HIT_1B, Event.HIT_2B, Event.HIT_3B):
-            pitchers[event.pitcher_id]["hits_allowed"] += 1
-        elif event.event_type == Event.HOME_RUN:
-            pitchers[event.pitcher_id]["hits_allowed"] += 1
-            pitchers[event.pitcher_id]["home_runs_allowed"] += 1
+        # Acumular buckets de pitcher declarativamente (registry _PITCH_KEYS)
+        for key in _PITCH_KEYS.get(evt_key, ()):
+            pitchers[event.pitcher_id][key] += 1
 
         pitchers[event.pitcher_id]["runs_allowed"] += event.runs_scored
 
@@ -230,25 +250,15 @@ def get_player_game_stats(db, game_id: str, player_id: str) -> dict:
     }
 
     for event in events:
+        evt_key = _event_key(event.event_type)
+
         if event.batter_id == player_id:
-            if event.event_type != Event.WALK:
+            if evt_key != Event.WALK.value:
                 stats["batting"]["at_bats"] += 1
 
-            if event.event_type == Event.HIT_1B:
-                stats["batting"]["hits"] += 1
-            elif event.event_type == Event.HIT_2B:
-                stats["batting"]["hits"] += 1
-                stats["batting"]["doubles"] += 1
-            elif event.event_type == Event.HIT_3B:
-                stats["batting"]["hits"] += 1
-                stats["batting"]["triples"] += 1
-            elif event.event_type == Event.HOME_RUN:
-                stats["batting"]["hits"] += 1
-                stats["batting"]["home_runs"] += 1
-            elif event.event_type == Event.STRIKEOUT:
-                stats["batting"]["strikeouts"] += 1
-            elif event.event_type == Event.WALK:
-                stats["batting"]["walks"] += 1
+            # Acumular buckets de bateo declarativamente (registry _BAT_KEYS_PLAYER)
+            for key in _BAT_KEYS_PLAYER.get(evt_key, ()):
+                stats["batting"][key] += 1
 
             stats["batting"]["rbi"] += event.rbi
             stats["batting"]["runs"] += event.runs_scored
@@ -259,15 +269,9 @@ def get_player_game_stats(db, game_id: str, player_id: str) -> dict:
             })
 
         if event.pitcher_id == player_id:
-            if event.event_type == Event.STRIKEOUT:
-                stats["pitching"]["strikeouts"] += 1
-            elif event.event_type == Event.WALK:
-                stats["pitching"]["walks"] += 1
-            elif event.event_type in (Event.HIT_1B, Event.HIT_2B, Event.HIT_3B):
-                stats["pitching"]["hits_allowed"] += 1
-            elif event.event_type == Event.HOME_RUN:
-                stats["pitching"]["hits_allowed"] += 1
-                stats["pitching"]["home_runs_allowed"] += 1
+            # Acumular buckets de pitcher declarativamente (registry _PITCH_KEYS)
+            for key in _PITCH_KEYS.get(evt_key, ()):
+                stats["pitching"][key] += 1
 
             stats["pitching"]["runs_allowed"] += event.runs_scored
 
