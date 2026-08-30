@@ -6,7 +6,7 @@ import { useAuthStore, selectUser } from '@/features/auth/store'
 import { useRosterStore, selectInventory } from '@/features/team/rosterStore'
 import { useLobbyStore } from '@/features/lobby/store'
 import { createGame } from '@/features/lobby/api'
-import { PlayerCard } from '@/features/cards/components/PlayerCard'
+import { bestCardFor, findCard, findFreeSpot } from '@/features/team/lib/cardHelpers'
 import { Button, Spinner } from '@/shared/ui'
 import type { PlayerCard as PlayerCardData } from '@/shared/api/types'
 
@@ -22,7 +22,7 @@ export function RosterSelectionPage() {
 
   const [lineup, setLineup] = useState<Record<string, string>>({})
   const [selectedPitcherId, setSelectedPitcherId] = useState<string | null>(null)
-  const [deck, setDeck] = useState<string[]>(['t1', 't2', 't3', 't4', 't1'])
+  const [deck] = useState<string[]>(['t1', 't2', 't3', 't4', 't1'])
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -43,7 +43,10 @@ export function RosterSelectionPage() {
   // Auto-seleccionar el primer pitcher si no hay seleccionado
   useEffect(() => {
     if (!selectedPitcherId && pitchers.length > 0) {
-      setSelectedPitcherId(pitchers[0].card.id)
+      const firstPitcher = pitchers[0]
+      if (firstPitcher) {
+        setSelectedPitcherId(firstPitcher.card.id)
+      }
     }
   }, [pitchers, selectedPitcherId])
 
@@ -61,6 +64,34 @@ export function RosterSelectionPage() {
       next[slot] = card.id
       return next
     })
+  }
+
+  const autoAssignLineup = () => {
+    const assigned: Record<string, string> = {}
+    const usedCardIds = new Set<string>()
+
+    // Asignar bateadores por posición (1-9 del batting order)
+    for (const spot of BATTING_SPOTS) {
+      const match = bestCardFor(
+        batters,
+        (c) => !usedCardIds.has(c.id),
+      )
+      if (match) {
+        assigned[spot] = match.id
+        usedCardIds.add(match.id)
+      }
+    }
+
+    // Asignar el mejor pitcher disponible
+    const pitcher = bestCardFor(
+      pitchers,
+      (c) => !usedCardIds.has(c.id),
+    )
+    if (pitcher) {
+      setSelectedPitcherId(pitcher.id)
+    }
+
+    setLineup(assigned)
   }
 
   const handleConfirm = async () => {
@@ -97,7 +128,7 @@ export function RosterSelectionPage() {
         difficulty: config.difficulty,
         total_innings: config.innings,
         player_position: config.playerPosition,
-        home_pitcher_id: selectedPitcherId,
+        home_pitcher_id: selectedPitcherId || undefined,
         home_lineup: homeLineup,
         home_tactics_deck: deck,
       }
@@ -157,23 +188,61 @@ export function RosterSelectionPage() {
       </section>
 
       <section className="mb-8">
-        <h2 className="mb-3 font-sports text-xl font-bold uppercase tracking-wide text-koshien-chalk">
-          {t('roster.pick_lineup')}
-        </h2>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="font-sports text-xl font-bold uppercase tracking-wide text-koshien-chalk">
+            {t('roster.pick_lineup')}
+          </h2>
+          <Button
+            size="sm"
+            onClick={autoAssignLineup}
+            className="border border-koshien-gold bg-koshien-green text-koshien-gold hover:bg-koshien-light-green"
+          >
+            {t('team.auto_lineup') || 'Auto Alinear'}
+          </Button>
+        </div>
+        <div className="space-y-2">
           {batters.map((item) => {
             const inLineup = Object.values(lineup).includes(item.card.id)
+            const spot = Object.entries(lineup).find(([_, id]) => id === item.card.id)?.[0]
             return (
-              <PlayerCard
+              <button
                 key={item.inventory_id}
-                card={item.card}
-                selected={inLineup}
-                onSelect={() => {
-                  const spot = findFreeSpot(lineup, BATTING_SPOTS)
-                  if (spot) assign(spot, item.card)
+                onClick={() => {
+                  if (inLineup && spot) {
+                    const next = { ...lineup }
+                    delete next[spot]
+                    setLineup(next)
+                  } else {
+                    const freeSpot = findFreeSpot(lineup, BATTING_SPOTS)
+                    if (freeSpot) assign(freeSpot, item.card)
+                  }
                 }}
-                size="sm"
-              />
+                className={`w-full rounded-lg border-2 px-4 py-3 text-left transition-colors ${
+                  inLineup
+                    ? 'border-koshien-gold bg-koshien-gold/20'
+                    : 'border-koshien-border bg-koshien-dark/60 hover:border-koshien-gold/50'
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex-1">
+                    <div className="font-sports text-sm font-bold text-koshien-chalk">{item.card.name}</div>
+                    <div className="font-vintage text-xs text-koshien-cream/60">
+                      {item.card.team_id} • {item.card.position} • #{item.card.number}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <div className="text-right">
+                      <div className="font-sports text-sm font-bold text-koshien-gold">{item.card.overall}</div>
+                      <div className="font-vintage text-xs text-koshien-cream/60">OVR</div>
+                    </div>
+                    {inLineup && (
+                      <div className="rounded-lg bg-koshien-gold/30 px-2 py-1">
+                        <div className="font-sports text-xs font-bold text-koshien-gold">SPOT {spot}</div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </button>
             )
           })}
         </div>
@@ -232,13 +301,4 @@ export function RosterSelectionPage() {
       </Button>
     </motion.div>
   )
-}
-
-function findCard(list: { card: PlayerCardData }[], id?: string) {
-  if (!id) return undefined
-  return list.find((i) => i.card.id === id)?.card
-}
-
-function findFreeSpot(lineup: Record<string, string>, spots: string[]): string | undefined {
-  return spots.find((s) => !lineup[s])
 }

@@ -4,8 +4,9 @@ import { motion } from 'framer-motion'
 import { useTranslation } from 'react-i18next'
 import { useTeamStore, selectTeam } from '@/features/team/store'
 import { useRosterStore, selectInventory, selectLineup } from '@/features/team/rosterStore'
+import { bestCardFor } from '@/features/team/lib/cardHelpers'
 import { Button, Spinner } from '@/shared/ui'
-import type { InventoryItem, PlayerCard } from '@/shared/api/types'
+import type { PlayerCard } from '@/shared/api/types'
 
 const RARITY_BORDER: Record<string, string> = {
   COMMON: 'border-slate-400',
@@ -393,14 +394,4 @@ function CandidateRow({
       {selected ? <span className="flex-shrink-0 font-sports text-base text-koshien-gold">✓</span> : null}
     </button>
   )
-}
-
-function bestCardFor(
-  inventory: InventoryItem[],
-  predicate: (c: PlayerCard) => boolean,
-): PlayerCard | undefined {
-  return inventory
-    .map((i) => i.card)
-    .filter(predicate)
-    .sort((a, b) => b.overall - a.overall)[0]
 }

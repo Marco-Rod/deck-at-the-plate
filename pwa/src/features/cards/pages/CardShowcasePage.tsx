@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
 import { useTranslation } from 'react-i18next'
 import { useRosterStore, selectInventory } from '@/features/team/rosterStore'
-import { PlayerCard } from '@/features/cards/components/PlayerCard'
+import { PlayerCardShowcase } from '@/features/cards/components/PlayerCardShowcase'
 import { Spinner } from '@/shared/ui'
 
 const FILTERS = ['ALL', 'SP', 'RP', 'C', '1B', '2B', '3B', 'SS', 'LF', 'CF', 'RF', 'DH']
@@ -65,7 +65,7 @@ export function CardShowcasePage() {
       ) : (
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
           {cards.map((item) => (
-            <PlayerCard key={item.inventory_id} card={item.card} size="md" />
+            <PlayerCardShowcase key={item.inventory_id} card={item.card} size="md" />
           ))}
         </div>
       )}

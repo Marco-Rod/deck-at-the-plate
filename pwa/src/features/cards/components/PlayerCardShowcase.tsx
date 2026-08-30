@@ -24,7 +24,7 @@ interface Props {
   size?: 'sm' | 'md'
 }
 
-export function PlayerCard({ card, selected = false, onSelect, size = 'md' }: Props) {
+export function PlayerCardShowcase({ card, selected = false, onSelect, size = 'md' }: Props) {
   const { t } = useTranslation()
   const rarity = card.rarity?.toUpperCase() ?? 'COMMON'
   const isPitcher = card.position === 'SP' || card.position === 'RP' || card.position === 'CP'
@@ -39,8 +39,9 @@ export function PlayerCard({ card, selected = false, onSelect, size = 'md' }: Pr
   const ovrLabelCls = sm ? 'text-[6px]' : 'text-[8px]'
   const badgeCls = sm ? 'text-[7px]' : 'text-[9px]'
   const statValueCls = sm ? 'text-[10px]' : 'text-sm'
-  const padding = sm ? 'p-2' : 'p-3'
-  const gap = sm ? 'gap-1.5' : 'gap-2.5'
+  const padding = sm ? 'p-1.5' : 'p-3'
+  const gap = sm ? 'gap-1' : 'gap-2.5'
+  const aspectRatio = sm ? 'aspect-[5/7]' : 'aspect-[3/4]'
 
   return (
     <div
@@ -49,7 +50,7 @@ export function PlayerCard({ card, selected = false, onSelect, size = 'md' }: Pr
       aria-pressed={onSelect ? selected : undefined}
       onClick={onSelect}
       onKeyDown={onSelect ? (e) => e.key === 'Enter' && onSelect() : undefined}
-      className={`${glow} ${ring} aspect-[3/4]`}
+      className={`${glow} ${ring} ${aspectRatio}`}
     >
       <div className={`card-glow-inner flex h-full w-full flex-col ${gap} bg-koshien-dark ${padding}`}>
         <header className="flex items-start justify-between gap-1">

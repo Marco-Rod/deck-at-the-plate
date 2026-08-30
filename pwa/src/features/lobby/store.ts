@@ -18,8 +18,8 @@ interface LobbyState {
 const DEFAULT_CONFIG: LobbyConfig = {
   rivalId: '',
   gameMode: 'PVE',
-  difficulty: 'MEDIUM',
-  innings: 9,
+  difficulty: 'EASY',
+  innings: 3,
   playerPosition: 'HOME',
 }
 

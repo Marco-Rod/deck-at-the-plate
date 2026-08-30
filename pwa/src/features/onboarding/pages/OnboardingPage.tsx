@@ -13,7 +13,7 @@ import { useTeamStore } from '@/features/team/store'
 import { useAuthStore } from '@/features/auth/store'
 import type { Franchise, PlayerCard as PlayerCardData, UserTeam } from '@/shared/api/types'
 import { FranchiseCarousel } from '../components/FranchiseCarousel'
-import { PlayerCard } from '../components/PlayerCard'
+import { PlayerCardReveal } from '../components/PlayerCardReveal'
 
 type Step = 'CREATE_TEAM' | 'SELECT_FRANCHISE' | 'PACK_UNBOX' | 'SHOW_CARDS'
 
@@ -457,7 +457,7 @@ export function OnboardingPage() {
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     transition={{ duration: 0.4, ease: 'easeOut', delay: index * 0.06 }}
                   >
-                    <PlayerCard
+                    <PlayerCardReveal
                       card={card}
                       revealed={revealedIds.has(card.id)}
                       revealAll={revealAll}

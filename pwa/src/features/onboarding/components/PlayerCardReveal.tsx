@@ -26,7 +26,7 @@ interface Props {
   index?: number
 }
 
-export function PlayerCard({ card, revealed, onReveal, revealAll = false, index = 0 }: Props) {
+export function PlayerCardReveal({ card, revealed, onReveal, revealAll = false, index = 0 }: Props) {
   const { t } = useTranslation()
   const rarity = card.rarity?.toUpperCase() ?? 'COMMON'
   const isPitcher = card.position === 'SP' || card.position === 'RP' || card.position === 'CP'
