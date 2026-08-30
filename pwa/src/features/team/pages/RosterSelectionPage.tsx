@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore, selectUser } from '@/features/auth/store'
@@ -12,23 +12,16 @@ import type { PlayerCard as PlayerCardData } from '@/shared/api/types'
 
 const BATTING_SPOTS = ['1', '2', '3', '4', '5', '6', '7', '8', '9']
 
-const TACTIC_OPTIONS: { id: string; name: string; desc: string }[] = [
-  { id: 't1', name: 'Paciencia en el Plato', desc: '+Visión' },
-  { id: 't2', name: 'Swing de Barril', desc: '+Poder' },
-  { id: 't3', name: 'Batazo de Contacto', desc: '+Contacto' },
-  { id: 't4', name: 'Recta de Fuego', desc: '+Velocidad' },
-]
-
 export function RosterSelectionPage() {
   const { t } = useTranslation()
   const navigate = useNavigate()
-  const { gameId } = useParams<{ gameId: string }>()
   const user = useAuthStore(selectUser)
   const inventory = useRosterStore(selectInventory)
   const { load, hasLoaded, loading } = useRosterStore()
   const config = useLobbyStore((s) => s.config)
 
   const [lineup, setLineup] = useState<Record<string, string>>({})
+  const [selectedPitcherId, setSelectedPitcherId] = useState<string | null>(null)
   const [deck, setDeck] = useState<string[]>(['t1', 't2', 't3', 't4', 't1'])
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -41,6 +34,18 @@ export function RosterSelectionPage() {
     () => (inventory ?? []).filter((i) => i.card.position !== 'SP' && i.card.position !== 'RP'),
     [inventory],
   )
+
+  const pitchers = useMemo(
+    () => (inventory ?? []).filter((i) => i.card.position === 'SP' || i.card.position === 'RP'),
+    [inventory],
+  )
+
+  // Auto-seleccionar el primer pitcher si no hay seleccionado
+  useEffect(() => {
+    if (!selectedPitcherId && pitchers.length > 0) {
+      setSelectedPitcherId(pitchers[0].card.id)
+    }
+  }, [pitchers, selectedPitcherId])
 
   if (!hasLoaded || loading) {
     return <Spinner label={t('common.loading')} className="min-h-screen py-20" />
@@ -58,17 +63,25 @@ export function RosterSelectionPage() {
     })
   }
 
-  const toggleDeckCard = (id: string) => {
-    setDeck((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
-  }
-
   const handleConfirm = async () => {
     if (!user) return
+
+    if (!config.rivalId) {
+      setError(t('roster.error_no_rival'))
+      return
+    }
+
     const filledSlots = Object.values(lineup).filter(Boolean)
     if (filledSlots.length === 0) {
       setError(t('roster.error_empty'))
       return
     }
+
+    if (!selectedPitcherId && pitchers.length > 0) {
+      setError('Debes seleccionar un pitcher')
+      return
+    }
+
     setSubmitting(true)
     setError(null)
     try {
@@ -76,22 +89,22 @@ export function RosterSelectionPage() {
         .sort((a, b) => Number(a) - Number(b))
         .map((spot) => lineup[spot])
         .filter((id): id is string => Boolean(id))
-      const game = await createGame({
+
+      const payload = {
         home_user_id: user.userId,
-        away_user_id: 'CPU_BOT',
-        game_mode: 'PVE',
+        away_user_id: config.rivalId,
+        game_mode: config.gameMode,
         difficulty: config.difficulty,
         total_innings: config.innings,
-        player_position: 'HOME',
+        player_position: config.playerPosition,
+        home_pitcher_id: selectedPitcherId,
         home_lineup: homeLineup,
         home_tactics_deck: deck,
-      })
-      if (gameId && game.id !== gameId) {
-        navigate(`/game/${game.id}`, { replace: true })
-      } else {
-        navigate(`/game/${game.id}`)
       }
-    } catch {
+
+      const game = await createGame(payload)
+      navigate(`/game/${game.id}`)
+    } catch (error) {
       setError(t('roster.error_generic'))
     } finally {
       setSubmitting(false)
@@ -166,41 +179,55 @@ export function RosterSelectionPage() {
         </div>
       </section>
 
-      <section className="mb-8">
-        <h2 className="mb-3 font-sports text-xl font-bold uppercase tracking-wide text-koshien-chalk">
-          {t('roster.deck')}
-        </h2>
-        <p className="mb-3 font-vintage text-xs uppercase tracking-widest text-koshien-cream/60">
-          {t('roster.deck_hint')}
-        </p>
-        <div className="flex flex-wrap gap-2">
-          {TACTIC_OPTIONS.map((tac) => {
-            const active = deck.includes(tac.id)
-            return (
-              <button
-                key={tac.id}
-                type="button"
-                onClick={() => toggleDeckCard(tac.id)}
-                aria-pressed={active}
-                className={`rounded-lg border px-4 py-2 font-sports uppercase tracking-wider transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-koshien-gold ${
-                  active
-                    ? 'border-koshien-gold bg-koshien-gold text-koshien-dark'
-                    : 'border-koshien-border bg-koshien-green text-koshien-cream hover:border-koshien-gold/50'
-                }`}
-              >
-                <span className="block text-base font-bold">{tac.name}</span>
-                <span className="block font-vintage text-[10px] tracking-widest">{tac.desc}</span>
-              </button>
-            )
-          })}
-        </div>
-      </section>
+      {pitchers.length > 0 ? (
+        <section className="mb-8">
+          <h2 className="mb-3 font-sports text-xl font-bold uppercase tracking-wide text-koshien-chalk">
+            {t('roster.pitcher') || 'Pitcher'}
+          </h2>
+          <p className="mb-3 font-vintage text-xs uppercase tracking-widest text-koshien-cream/60">
+            Selecciona tu lanzador titular {selectedPitcherId ? '(seleccionado)' : ''}
+          </p>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+            {pitchers.map((item) => {
+              const isSelected = selectedPitcherId === item.card.id
+              return (
+                <button
+                  key={item.inventory_id}
+                  onClick={() => setSelectedPitcherId(item.card.id)}
+                  className={`rounded-lg border-2 p-3 text-center transition-colors ${
+                    isSelected
+                      ? 'border-koshien-gold bg-koshien-gold/20'
+                      : 'border-koshien-border bg-koshien-dark/60 hover:border-koshien-gold/50'
+                  }`}
+                >
+                  <div className="font-sports text-sm font-bold text-koshien-chalk">{item.card.name}</div>
+                  <div className="font-vintage text-xs text-koshien-cream/60">{item.card.position}</div>
+                  <div className="font-sports text-xs text-koshien-gold">{item.card.overall} OVR</div>
+                </button>
+              )
+            })}
+          </div>
+        </section>
+      ) : (
+        <section className="mb-8">
+          <h2 className="mb-3 font-sports text-xl font-bold uppercase tracking-wide text-koshien-chalk">
+            {t('roster.pitcher') || 'Pitcher'}
+          </h2>
+          <div className="rounded-lg border border-koshien-border bg-koshien-dark/60 p-4 text-center">
+            <p className="font-vintage text-xs uppercase text-koshien-cream/60">
+              No tienes lanzadores en tu inventario. Ve a "Mi Equipo" para adquirir uno.
+            </p>
+          </div>
+        </section>
+      )}
+
+
 
       {error ? (
         <p className="mb-3 font-vintage text-xs uppercase text-red-400">{error}</p>
       ) : null}
 
-      <Button size="lg" disabled={submitting} onClick={handleConfirm}>
+      <Button size="lg" disabled={submitting || !config.rivalId} onClick={handleConfirm}>
         {submitting ? t('roster.creating') : t('roster.start')}
       </Button>
     </motion.div>

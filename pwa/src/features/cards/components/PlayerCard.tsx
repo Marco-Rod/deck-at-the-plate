@@ -34,11 +34,13 @@ export function PlayerCard({ card, selected = false, onSelect, size = 'md' }: Pr
     : ''
   const sm = size === 'sm'
   const nameCls = sm ? 'text-xs' : 'text-base'
-  const metaCls = sm ? 'text-[8px]' : 'text-[9px]'
-  const ovrCls = sm ? 'text-base' : 'text-xl'
-  const ovrLabelCls = sm ? 'text-[7px]' : 'text-[8px]'
-  const badgeCls = sm ? 'text-[8px]' : 'text-[9px]'
-  const statValueCls = sm ? 'text-xs' : 'text-sm'
+  const metaCls = sm ? 'text-[7px]' : 'text-[9px]'
+  const ovrCls = sm ? 'text-sm' : 'text-xl'
+  const ovrLabelCls = sm ? 'text-[6px]' : 'text-[8px]'
+  const badgeCls = sm ? 'text-[7px]' : 'text-[9px]'
+  const statValueCls = sm ? 'text-[10px]' : 'text-sm'
+  const padding = sm ? 'p-2' : 'p-3'
+  const gap = sm ? 'gap-1.5' : 'gap-2.5'
 
   return (
     <div
@@ -49,8 +51,8 @@ export function PlayerCard({ card, selected = false, onSelect, size = 'md' }: Pr
       onKeyDown={onSelect ? (e) => e.key === 'Enter' && onSelect() : undefined}
       className={`${glow} ${ring} aspect-[3/4]`}
     >
-      <div className="card-glow-inner flex h-full w-full flex-col gap-2.5 bg-koshien-dark p-3">
-        <header className="flex items-start justify-between gap-2">
+      <div className={`card-glow-inner flex h-full w-full flex-col ${gap} bg-koshien-dark ${padding}`}>
+        <header className="flex items-start justify-between gap-1">
           <div className="flex flex-col">
             <span className={`font-sports ${nameCls} font-bold uppercase leading-none text-koshien-chalk`}>
               {card.name}
@@ -59,7 +61,7 @@ export function PlayerCard({ card, selected = false, onSelect, size = 'md' }: Pr
               {card.team_id ?? '—'} • {card.position} • #{card.number}
             </span>
           </div>
-          <div className="flex flex-col items-center rounded-lg border border-koshien-border bg-koshien-green/50 px-1.5 py-0.5">
+          <div className="flex flex-col items-center rounded-lg border border-koshien-border bg-koshien-green/50 px-1 py-0.5">
             <span className={`font-sports ${ovrCls} font-bold leading-none text-koshien-gold`}>
               {card.overall}
             </span>
@@ -67,25 +69,29 @@ export function PlayerCard({ card, selected = false, onSelect, size = 'md' }: Pr
           </div>
         </header>
 
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className={`rounded-full border border-koshien-gold/40 px-2 py-0.5 font-vintage ${badgeCls} uppercase tracking-widest text-koshien-gold`}>
-            {RARITY_LABEL[rarity] ?? rarity}
-          </span>
-          <span className={`font-vintage ${badgeCls} uppercase tracking-widest text-koshien-cream/70`}>
-            {isPitcher ? t('card.pitcher') : t('card.batter')}
-          </span>
-        </div>
+        {!sm && (
+          <>
+            <div className="flex flex-wrap items-center gap-1">
+              <span className={`rounded-full border border-koshien-gold/40 px-2 py-0.5 font-vintage ${badgeCls} uppercase tracking-widest text-koshien-gold`}>
+                {RARITY_LABEL[rarity] ?? rarity}
+              </span>
+              <span className={`font-vintage ${badgeCls} uppercase tracking-widest text-koshien-cream/70`}>
+                {isPitcher ? t('card.pitcher') : t('card.batter')}
+              </span>
+            </div>
 
-        <div className="grid grid-cols-2 gap-1.5">
-          <Stat label={t('card.power')} value={card.power} valueCls={statValueCls} />
-          <Stat label={t('card.contact')} value={card.contact} valueCls={statValueCls} />
-          {isPitcher || card.is_two_way ? (
-            <>
-              <Stat label={t('card.velocity')} value={card.velocity} valueCls={statValueCls} />
-              <Stat label={t('card.control')} value={card.control} valueCls={statValueCls} />
-            </>
-          ) : null}
-        </div>
+            <div className="grid grid-cols-2 gap-1">
+              <Stat label={t('card.power')} value={card.power} valueCls={statValueCls} />
+              <Stat label={t('card.contact')} value={card.contact} valueCls={statValueCls} />
+              {isPitcher || card.is_two_way ? (
+                <>
+                  <Stat label={t('card.velocity')} value={card.velocity} valueCls={statValueCls} />
+                  <Stat label={t('card.control')} value={card.control} valueCls={statValueCls} />
+                </>
+              ) : null}
+            </div>
+          </>
+        )}
       </div>
     </div>
   )
