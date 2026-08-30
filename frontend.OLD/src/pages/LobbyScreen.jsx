@@ -74,6 +74,17 @@ export const LobbyScreen = ({ user, onStartGame, onOpenMyTeam, onOpenShowcase, o
 
   const handleStartGame = () => {
     if (soundFx?.playGameStart) soundFx.playGameStart();
+    console.log('[DEBUG-LobbyScreen] handleStartGame llamado con:', {
+      mode: gameMode,
+      difficulty,
+      totalInnings,
+      playerPosition,
+      rival: currentRival,
+      rival_id: currentRival?.id,
+      rival_id_undefined: currentRival?.id === undefined,
+      rival_id_null: currentRival?.id === null,
+      currentRival_complete: JSON.stringify(currentRival)
+    });
     onStartGame({
       mode: gameMode,
       difficulty,

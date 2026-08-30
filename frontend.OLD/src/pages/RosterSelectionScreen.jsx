@@ -32,6 +32,15 @@ export const RosterSelectionScreen = ({ user, gameConfig, onRosterConfirmed, onB
     setCreatingGame(true);
     setError(null);
 
+    console.log('[DEBUG-RosterSelectionScreen] handleConfirmAndPlay iniciado');
+    console.log('[DEBUG-RosterSelectionScreen] gameConfig recibido:', {
+      gameConfig,
+      rival: gameConfig?.rival,
+      rival_id: gameConfig?.rival?.id,
+      rival_is_undefined: gameConfig?.rival === undefined,
+      rival_id_is_undefined: gameConfig?.rival?.id === undefined,
+    });
+
     try {
       // Extraer IDs de bateadores en orden
       const homeLineupIds = ['DH', '1B', '2B', '3B', 'SS', 'LF', 'CF', 'RF', 'C']
@@ -55,6 +64,14 @@ export const RosterSelectionScreen = ({ user, gameConfig, onRosterConfirmed, onB
         home_tactics_deck: ["t1", "t2", "t3", "t4", "t1"],
         away_tactics_deck: ["t1", "t2", "t3", "t4", "t1"],
       };
+
+      console.log('[DEBUG-RosterSelectionScreen] Payload ANTES de enviar:', {
+        away_user_id: payload.away_user_id,
+        away_user_id_is_undefined: payload.away_user_id === undefined,
+        away_user_id_is_null: payload.away_user_id === null,
+        away_user_id_is_string: typeof payload.away_user_id,
+        payload_complete: JSON.stringify(payload)
+      });
 
       // Si usuario es LOCAL (HOME), asigna su alineación como home
       if (gameConfig?.playerPosition === 'HOME') {
