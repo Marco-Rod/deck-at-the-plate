@@ -127,6 +127,16 @@ export default function OnboardingScreen({ userId, onComplete }) {
       console.log(`[DEBUG] selectedFranchise STATE ANTES DE ENVIAR: "${selectedFranchise}"`);
       console.log(`[DEBUG] Tipo de selectedFranchise: ${typeof selectedFranchise}`);
       console.log(`[DEBUG] Enviando starter pack con selectedFranchise=${selectedFranchise}`);
+
+      // 🔊 Persistir la franquicia favorita en el club del usuario ANTES de
+      //    reclamar el sobre, para que base_franchise coincida con el team_id.
+      if (selectedFranchise) {
+        await userApi.updateBaseFranchise(selectedFranchise);
+        console.log(`[DEBUG] base_franchise del club actualizado a: ${selectedFranchise}`);
+      } else {
+        throw new Error('Debes seleccionar una franquicia favorita.');
+      }
+
       const response = await shopApi.claimStarterPack(selectedFranchise);
       setClaimedCards(response.cards || []);
       setStep('PACK_UNBOX');

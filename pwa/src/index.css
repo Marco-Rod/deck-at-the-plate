@@ -34,3 +34,87 @@
       radial-gradient(60% 50% at 10% 60%, rgba(197, 160, 89, 0.06), transparent 70%);
   }
 }
+
+@property --glow-angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+
+@keyframes card-glow-spin {
+  to {
+    --glow-angle: 360deg;
+  }
+}
+
+@keyframes pack-shine {
+  0% {
+    transform: translateX(-100%) skewX(-12deg);
+  }
+  60%,
+  100% {
+    transform: translateX(400%) skewX(-12deg);
+  }
+}
+
+@layer utilities {
+  .card-glow {
+    position: relative;
+    border-radius: 0.75rem;
+    padding: 2px;
+    animation: card-glow-spin 5s linear infinite;
+  }
+  .card-glow-inner {
+    position: relative;
+    border-radius: 0.625rem;
+    overflow: hidden;
+  }
+  .card-glow-common {
+    background: conic-gradient(
+      from var(--glow-angle),
+      #4a5568,
+      #94a3b8,
+      #4a5568
+    );
+  }
+  .card-glow-bronze {
+    background: conic-gradient(
+      from var(--glow-angle),
+      #7a3f1d,
+      #cd7f32,
+      #f0b27a,
+      #cd7f32,
+      #7a3f1d
+    );
+  }
+  .card-glow-silver {
+    background: conic-gradient(
+      from var(--glow-angle),
+      #6b7280,
+      #c0c0c0,
+      #f3f4f6,
+      #c0c0c0,
+      #6b7280
+    );
+  }
+  .card-glow-gold {
+    background: conic-gradient(
+      from var(--glow-angle),
+      #8a6d3b,
+      #c5a059,
+      #ffd700,
+      #c5a059,
+      #8a6d3b
+    );
+  }
+  .card-glow-diamond {
+    background: conic-gradient(
+      from var(--glow-angle),
+      #0e7490,
+      #4fd9ff,
+      #a5f3fc,
+      #4fd9ff,
+      #0e7490
+    );
+  }
+}

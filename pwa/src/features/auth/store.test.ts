@@ -19,7 +19,11 @@ describe('useAuthStore', () => {
 
     const state = useAuthStore.getState()
     expect(state.token).toBe('jwt-token')
-    expect(state.user).toEqual({ userId: 'usr-1', username: 'Bateador33' })
+    expect(state.user).toEqual({
+      userId: 'usr-1',
+      username: 'Bateador33',
+      hasCompletedOnboarding: false,
+    })
     expect(selectIsAuthenticated(state)).toBe(true)
   })
 

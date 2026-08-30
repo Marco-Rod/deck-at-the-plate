@@ -348,6 +348,17 @@ export const user = {
   getTeam: () => _request('/api/v1/user/me/team'),
 
   /**
+   * Fija o cambia la franquicia favorita (base_franchise) del club del usuario.
+   * @param {string} franchiseId - ID de la franquicia MLB (ej. "LAD").
+   * @returns {Promise<Object>} - El club actualizado.
+   */
+  updateBaseFranchise: (franchiseId) =>
+    _request('/api/v1/user/me/team/franchise', {
+      method: 'PUT',
+      body: JSON.stringify({ base_franchise: franchiseId }),
+    }),
+
+  /**
    * Obtiene las métricas calculadas del equipo del usuario (Overall, Bateo, Pitcheo).
    * @param {string} [userId] - Ignorado.
    * @returns {Promise<{overall: number, batOvr: number, pitOvr: number}>}

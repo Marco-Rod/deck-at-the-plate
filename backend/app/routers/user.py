@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.schemas import UserProfileResponseSchema, UserInventoryResponseSchema, CreateTeamRequestSchema, UserTeamResponseSchema
+from app.schemas import UserProfileResponseSchema, UserInventoryResponseSchema, CreateTeamRequestSchema, UserTeamResponseSchema, UpdateBaseFranchiseRequestSchema
 from app.database import get_db
 from app.models import UserLineup, UserTeam
 from app.repositories import (
@@ -9,6 +9,7 @@ from app.repositories import (
     get_active_lineup,
     get_or_create_wallet,
     get_user_by_id,
+    get_team_by_id,
     get_user_team as repo_get_user_team,
 )
 from app.services.team_ratings import compute_lineup_ratings
@@ -43,7 +44,8 @@ def get_user_profile(
         "wallet": {
             "stamps": wallet.stamps,
             "gems": wallet.gems
-        }
+        },
+        "has_completed_onboarding": bool(user.has_completed_onboarding)
     }
 
 
@@ -152,6 +154,40 @@ def get_user_team(
     team = repo_get_user_team(db, current_user_id)
     if not team:
         raise HTTPException(status_code=404, detail="El usuario no ha fundado ningún club")
+    return team
+
+
+@router.put("/me/team/franchise", response_model=UserTeamResponseSchema)
+def update_user_team_franchise(
+    payload: UpdateBaseFranchiseRequestSchema,
+    db: Session = Depends(get_db),
+    current_user_id: str = Depends(get_current_user),
+):
+    """
+    Fija o cambia la franquicia favorita (base_franchise) del club del usuario.
+
+    Solo se permite elegir entre las franquicias de la liga disponibles
+    (equipos is_cpu=True, es decir los 30 equipos MLB en el juego).
+    """
+    _get_current_user_or_404(current_user_id, db)
+
+    team = repo_get_user_team(db, current_user_id)
+    if not team:
+        raise HTTPException(status_code=404, detail="El usuario no ha fundado ningún club")
+
+    franchise_id = payload.base_franchise.upper()
+
+    # Validar que la franquicia elegida exista en la liga (equipo is_cpu=True).
+    franchise = get_team_by_id(db, franchise_id)
+    if not franchise or not franchise.is_cpu:
+        raise HTTPException(
+            status_code=400,
+            detail=f"La franquicia '{franchise_id}' no está disponible para elegir.",
+        )
+
+    team.base_franchise = franchise_id
+    db.commit()
+    db.refresh(team)
     return team
 
 

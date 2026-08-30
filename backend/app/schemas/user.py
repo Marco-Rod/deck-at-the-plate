@@ -16,6 +16,7 @@ class UserProfileResponseSchema(BaseModel):
     username: str
     created_at: datetime
     wallet: WalletSchema
+    has_completed_onboarding: bool
 
 
 class InventoryItemSchema(BaseModel):
@@ -72,3 +73,8 @@ class UserTeamResponseSchema(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class UpdateBaseFranchiseRequestSchema(BaseModel):
+    """Payload para fijar/cambiar la franquicia favorita del club del usuario."""
+    base_franchise: str        # Ej. "LAD" o "NYY"

@@ -404,9 +404,9 @@ def seed_mlb_2026_data(db: Session):
         if existing_team:
             print(f"    ✓ Equipo ya existe en BD")
             team = existing_team
-            # Asegurar que el flag CPU quede consistente
-            if team.is_cpu is not False:
-                team.is_cpu = False
+            # Los 30 equipos MLB son franquicias de la liga (is_cpu=True)
+            if not team.is_cpu:
+                team.is_cpu = True
                 db.commit()
         else:
             # Crear equipo
@@ -416,7 +416,7 @@ def seed_mlb_2026_data(db: Session):
                 city=city,
                 primary_color=color,
                 secondary_color="#FFFFFF",
-                is_cpu=False,
+                is_cpu=True,
             )
             db.add(team)
             db.commit()

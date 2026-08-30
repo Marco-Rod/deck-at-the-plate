@@ -27,6 +27,7 @@ export function AuthPage() {
   const { t, i18n } = useTranslation()
   const navigate = useNavigate()
   const signIn = useAuthStore((state) => state.signIn)
+  const refreshProfile = useAuthStore((state) => state.refreshProfile)
 
   const [mode, setMode] = useState<AuthMode>('login')
   const [values, setValues] = useState<AuthFormValues>(initialValues)
@@ -65,6 +66,7 @@ export function AuthPage() {
       }
       const session = await login(values.username.trim(), values.password)
       signIn(session)
+      await refreshProfile()
       navigate('/lobby', { replace: true })
     } catch (error) {
       setSubmitError(error instanceof ApiError ? error.message : t('auth.error.generic'))

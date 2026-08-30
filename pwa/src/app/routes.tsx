@@ -8,6 +8,7 @@ import {
   CardShowcasePage,
   LobbyPage,
   MyTeamPage,
+  OnboardingPage,
   RosterSelectionPage,
   StadiumPage,
 } from './lazyPages'
@@ -21,6 +22,7 @@ export const routes: RouteObject[] = [
       {
         element: <ProtectedRoute />,
         children: [
+          { path: '/onboarding', element: <OnboardingPage /> },
           { path: '/lobby', element: <LobbyPage /> },
           { path: '/team', element: <MyTeamPage /> },
           { path: '/roster/:gameId', element: <RosterSelectionPage /> },
