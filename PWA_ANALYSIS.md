@@ -1111,7 +1111,7 @@ Start from Scratch:
 |------|-------------|--------|
 | 0 | Scaffold `pwa/` (Vite + React + TS estricto + Tailwind + Router) | [x] |
 | 1 | Infraestructura core (API client, auth, i18n) — *falta verif. E2E manual* | [ ] |
-| 2 | Lobby + Team + Cards | [ ] |
+| 2 | Lobby + Team + Cards — *verif. manual pendiente (onboarding real ya validado)* | [x] |
 | 3 | Game / Stadium (WebSocket + componentes) | [ ] |
 | 4 | PWA + Offline (manifest, SW, IndexedDB, sync) | [ ] |
 | 5 | Polish + Features restantes (shop, audio, i18n, perf) | [ ] |
@@ -1167,18 +1167,19 @@ de la plantilla), Tailwind CSS **v4** (config en CSS vía `@theme`, sin
 
 ---
 
-### FASE 2 — Lobby + Team + Cards
+### FASE 2 — Lobby + Team + Cards ✅ CÓDIGO COMPLETO (verif. manual pendiente)
 
 **Objetivo:** navegación y gestión de equipo funcionales con datos reales.
 
-- [ ] `features/lobby/store.ts`: config de partida (rival CPU, innings, difficulty)
-- [ ] `features/lobby/api.ts`: `get_cpu_teams`, `create_game`
-- [ ] `features/lobby/pages/LobbyPage.tsx`: migrar `LobbyScreen.jsx` (carrusel de franquicias, modos, settings)
-- [ ] `features/team/store.ts` + `api.ts`: lineup, roster, `get_user_team`, `get_user_inventory`
-- [ ] `features/team/pages/MyTeamPage.tsx`: migrar `MyTeamScreen.jsx` (roster + lineup)
-- [ ] `features/team/pages/RosterSelectionPage.tsx`: migrar `RosterSelectionScreen.jsx` (lineup + deck táctico pre-partida)
-- [ ] `features/cards/components/PlayerCard.tsx`: migrar `cards/PlayerCard.jsx` → TS con props tipadas
-- [ ] `shared/ui/` design system mínimo: Button, Modal, Spinner, Toast (base)
+- [x] `features/lobby/store.ts`: config de partida (rival CPU, innings, difficulty)
+- [x] `features/lobby/api.ts`: `get_cpu_teams`, `create_game`
+- [x] `features/lobby/pages/LobbyPage.tsx`: migrar `LobbyScreen.jsx` (carrusel de franquicias, modos, settings)
+- [x] `features/team/store.ts` + `api.ts`: lineup, roster, `get_user_team`, `get_user_inventory`
+- [x] `features/team/rosterStore.ts`: inventario, lineup y team-stats (carga en paralelo)
+- [x] `features/team/pages/MyTeamPage.tsx`: migrar `MyTeamScreen.jsx` (roster + lineup + OVR/BAT/PIT)
+- [x] `features/team/pages/RosterSelectionPage.tsx`: migrar `RosterSelectionScreen.jsx` (lineup + deck táctico pre-partida)
+- [x] `features/cards/components/PlayerCard.tsx`: migrar `cards/PlayerCard.jsx` → TS con props tipadas (variante presentacional reutilizable)
+- [x] `shared/ui/` design system mínimo: Button, Modal, Spinner, Toast (base)
 - [ ] **Verificación:** flujo Auth → Onboarding (franquicia + starter pack) → Lobby → Team → Showcase
 
 ---

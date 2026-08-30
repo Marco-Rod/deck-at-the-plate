@@ -5,9 +5,10 @@ from typing import List
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
 
-from app.models import CardRarity, PlayerCardModel
+from app.models import CardRarity, PlayerCardModel, UserLineup
 from app.core.enums import PITCHER_POSITIONS
 from app.engine.starter_pack import select_starter_cards
+from app.engine.lineup_builder import build_optimal_lineup
 from app.repositories import (
     add_inventory_item,
     find_cards_by_rarity,
@@ -15,6 +16,7 @@ from app.repositories import (
     find_cards_excluding_team,
     find_any_card,
     find_inventory_entry,
+    get_active_lineup,
     get_or_create_wallet,
     get_user_by_id,
     get_wallet_by_user_id,
@@ -132,6 +134,18 @@ class PackService:
         for card in selected_cards:
             if not find_inventory_entry(db, user_id, card.id):
                 add_inventory_item(db, user_id, card.id)
+
+        # ── PASO 9.5: Generar y persistir el lineup ideal inicial ─────────
+        # Asegura que el jugador tenga un lineup válido desde el primer día.
+        if not get_active_lineup(db, user_id):
+            slots = build_optimal_lineup(selected_cards)
+            if slots:
+                db.add(UserLineup(
+                    user_id=user_id,
+                    name="Lineup Principal",
+                    is_active=True,
+                    slots=slots,
+                ))
 
         # ── PASO 10: Actualizar estado usuario ────────────────────────────
         user.has_completed_onboarding = True

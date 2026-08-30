@@ -12,6 +12,8 @@ Este módulo NO importa SQLAlchemy ni FastAPI: solo trabaja sobre las entidades
 import random
 from typing import Collection, List, Sequence
 
+from app.core.enums import PITCHER_POSITIONS
+
 # Posiciones requeridas en el campo (la "P" se cubre con los pitchers del pack).
 REQUIRED_POSITIONS: Collection[str] = ["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "DH"]
 
@@ -22,6 +24,22 @@ TOTAL_CARDS = FAVORITE_TEAM_CARDS + OTHER_TEAMS_CARDS
 
 # Orden de rareza (de mayor a menor)
 TIER_PRIORITY: Sequence[str] = ["DIAMOND", "GOLD", "SILVER", "BRONZE", "COMMON"]
+
+
+def _is_pitcher(card: object) -> bool:
+    """Determina si una carta puede lanzar (posiciones de pitcher o two-way)."""
+    return card.position in PITCHER_POSITIONS or bool(getattr(card, "is_two_way", False))
+
+
+def _is_sacrificable(card: object, selected_cards: Sequence) -> bool:
+    """
+    True si eliminar ``card`` no deja sin cobertura ninguna posición requerida
+    (es decir, es una carta duplicada o un relleno sin posición requerida).
+    """
+    if card.position not in REQUIRED_POSITIONS:
+        return True
+    count = sum(1 for c in selected_cards if c.position == card.position)
+    return count > 1
 
 
 def _get_missing_positions(selected_cards: Sequence, required_positions=REQUIRED_POSITIONS) -> List[str]:
@@ -50,9 +68,12 @@ def select_starter_cards(
     Estrategia (compatible con la lógica legada de PackService):
       1. Equipo favorito (7 cartas): 1 carta del tier máximo + 6 de tiers
          inferiores (máximo 2 lanzadores SP en todo el pack).
-      2. Otros equipos (6 cartas): cubre posiciones faltantes con cartas COMMON
-         de esa posición y rellena los slots restantes con COMMON sin posición.
-      3. Devuelve la selección barajada.
+      2. Otros equipos (6 cartas): garantiza al menos 1 lanzador, cubre
+         posiciones faltantes con cartas COMMON de esa posición y rellena los
+         slots restantes con COMMON sin posición.
+      3. Fallback: si tras elegir no hubiera ningún lanzador, reemplaza una
+         carta no esencial por un lanzador disponible.
+      4. Devuelve la selección barajada.
 
     Args:
         team_cards: Cartas del equipo favorito del usuario.
@@ -117,12 +138,25 @@ def select_starter_cards(
     selected.extend(team_selected)
 
     # ── 2. Otros equipos ───────────────────────────────────────────────
-    missing_positions = _get_missing_positions(selected)
     cards_needed = TOTAL_CARDS - len(selected)
     other_selected = []
 
+    # FASE 0: garantizar al menos 1 lanzador (P) si aún no hay ninguno.
+    if cards_needed > 0 and not any(_is_pitcher(c) for c in selected):
+        pitcher_pool = [
+            c for c in other_team_cards
+            if c.id not in selected_set and _is_pitcher(c)
+        ]
+        if pitcher_pool:
+            card = rng.choice(pitcher_pool)
+            other_selected.append(card)
+            selected_set.add(card.id)
+
     # FASE 1: cubrir posiciones faltantes con cartas COMMON de la posición
+    missing_positions = _get_missing_positions([*selected, *other_selected])
     for pos in missing_positions:
+        if len(other_selected) >= cards_needed:
+            break
         common_cards = [
             c for c in other_team_cards
             if c.position == pos and c.rarity.name == "COMMON" and c.id not in selected_set
@@ -144,6 +178,22 @@ def select_starter_cards(
         selected_set.update(c.id for c in fillback)
 
     selected.extend(other_selected)
+
+    # ── 2.5 Fallback: garantizar lanzador reemplazando una carta no esencial ──
+    if not any(_is_pitcher(c) for c in selected):
+        pitcher_pool = [
+            c for c in [*team_cards, *other_team_cards]
+            if c.id not in selected_set and _is_pitcher(c)
+        ]
+        if pitcher_pool:
+            pitcher = rng.choice(pitcher_pool)
+            victim = next(
+                (c for c in reversed(selected) if _is_sacrificable(c, selected)),
+                None,
+            )
+            if victim is not None:
+                selected.remove(victim)
+                selected.append(pitcher)
 
     # ── 3. Barajar y retornar ──────────────────────────────────────────
     rng.shuffle(selected)
