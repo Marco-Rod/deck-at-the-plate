@@ -15,18 +15,21 @@ Uso (dentro del contenedor Docker):
     docker compose exec backend python -m app.seeds.seed_real_data_2025
 """
 
-from app.database import engine, Base, SessionLocal
+from app.database import SessionLocal, engine
 from app.models import PlayerCardModel, TacticCard, CardRarity
 from app.models.team import Team
 
 
 def seed_real_data():
     print("=== Seed: Datos reales MLB 2025 ===")
-    print(f"Tablas registradas: {list(Base.metadata.tables.keys())}")
-    print("Recreando tablas en la base de datos...")
+    print("Reconstruyendo esquema con Alembic (DROP SCHEMA + upgrade head)...")
 
-    Base.metadata.drop_all(bind=engine)
-    Base.metadata.create_all(bind=engine)
+    import subprocess, sys
+    from sqlalchemy import text
+    with engine.begin() as conn:
+        conn.execute(text("DROP SCHEMA public CASCADE"))
+        conn.execute(text("CREATE SCHEMA public"))
+    subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"], check=True)
 
     db = SessionLocal()
     try:

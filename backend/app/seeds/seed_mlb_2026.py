@@ -32,13 +32,13 @@ sys.path.insert(0, os.path.abspath(os.path.join(current_dir, "../")))
 from sqlalchemy.orm import Session
 
 try:
-    from app.database import SessionLocal, engine, Base
-    from app.models import PlayerCardModel, CardRarity, Team
+    from app.database import SessionLocal
+    from app.models import PlayerCardModel, Team
+    from app.core.enums import PITCHER_POSITIONS, Position
 except ModuleNotFoundError:
-    from database import SessionLocal, engine, Base
-    from models import PlayerCardModel, CardRarity, Team
-
-Base.metadata.create_all(bind=engine)
+    from database import SessionLocal
+    from models import PlayerCardModel, Team
+    from core.enums import PITCHER_POSITIONS, Position
 
 
 # Mapeo de equipos reales a nombres ficticios
@@ -253,6 +253,26 @@ class MLBSeedHelper:
 
 
     @staticmethod
+    def _normalize_pitcher_position(position: str) -> str:
+        """
+        Normaliza la abreviatura de un lanzador desde la API de MLB hacia
+        el vocabulario canónico del juego (core.enums.Position).
+
+        La API de MLB suele devolver "P" como abreviatura genérica; el juego
+        distingue SP/RP/SU/CP/CL/TWP. Si la posición ya es canónica se preserva;
+        si es "P", se asigna SP como valor por defecto.
+        """
+        normalized = position.upper()
+        if normalized in PITCHER_POSITIONS:
+            return normalized
+        if normalized in ("P",):
+            return Position.STARTER.value  # "SP"
+        # Cualquier otro valor (p. ej. variantes) cae a SP de forma segura
+        if normalized and normalized.isalpha():
+            return Position.STARTER.value
+        return normalized
+
+    @staticmethod
     def create_player_card(
         player_info: Dict[str, Any],
         team_id: str,
@@ -270,13 +290,13 @@ class MLBSeedHelper:
                 return None
 
             # ⭐ NORMALIZAR POSICIONES DE LANZADORES
+            # La API de MLB devuelve "P" como abreviatura genérica de lanzador,
+            # pero el juego distingue SP/RP/SU/CP/CL/TWP (ver core.enums.Position).
             if is_pitcher:
-                # Normalizar posiciones de lanzadores a SP/RP/CP para búsquedas
-                if position in ["P", "SP", "RP", "CP"]:
-                    # Clasificar como SP por defecto (se puede mejorar con apariciones)
-                    position = "SP"
-                elif position in ["RP", "CP", "SU"]:
-                    position = "RP"
+                position = MLBSeedHelper._normalize_pitcher_position(position)
+
+            # Detectar jugadores "two-way" (batean y lanzan)
+            is_two_way = is_pitcher and position == Position.TWO_WAY.value
 
             # Obtener stats del jugador
             player_stats = MLBSeedHelper.get_player_stats(player_id)
@@ -308,7 +328,13 @@ class MLBSeedHelper:
                 movement = 60
                 repertoire = None
 
-            # Crear tarjeta
+            # Para two-way players, también calcular atributos de bateo
+            if is_two_way:
+                batting_attrs = MLBSeedHelper.calculate_batting_attributes(player_stats)
+                contact = batting_attrs.get("contact", 70)
+                power = batting_attrs.get("power", 70)
+
+            # Crear tarjeta (la rareza se asigna con la regla canónica del modelo)
             card = PlayerCardModel(
                 id=f"card_{player_id}",
                 team_id=team_id,
@@ -316,13 +342,13 @@ class MLBSeedHelper:
                 number=number,
                 position=position,
                 overall=overall,
-                rarity=CardRarity.DIAMOND if overall >= 90 else CardRarity.GOLD if overall >= 85 else CardRarity.SILVER if overall >= 80 else CardRarity.BRONZE if overall >= 75 else CardRarity.COMMON,
+                rarity=PlayerCardModel.get_rarity_by_overall(overall),
                 contact=contact,
                 power=power,
                 velocity=velocity,
                 control=control,
                 movement=movement,
-                is_two_way=False,
+                is_two_way=is_two_way,
                 repertoire=repertoire,
             )
 
@@ -378,6 +404,10 @@ def seed_mlb_2026_data(db: Session):
         if existing_team:
             print(f"    ✓ Equipo ya existe en BD")
             team = existing_team
+            # Asegurar que el flag CPU quede consistente
+            if team.is_cpu is not False:
+                team.is_cpu = False
+                db.commit()
         else:
             # Crear equipo
             team = Team(
@@ -386,6 +416,7 @@ def seed_mlb_2026_data(db: Session):
                 city=city,
                 primary_color=color,
                 secondary_color="#FFFFFF",
+                is_cpu=False,
             )
             db.add(team)
             db.commit()
@@ -402,7 +433,9 @@ def seed_mlb_2026_data(db: Session):
 
         for player_info in roster:
             position = player_info.get("position", {}).get("abbreviation", "DH")
-            is_pitcher = position in ["SP", "RP", "CP", "P"]
+            # "P" es la abreviatura genérica de lanzador en la API de MLB;
+            # el juego la normaliza después a SP/RP/SU/CP/CL/TWP.
+            is_pitcher = position.upper() in ("P",) or position.upper() in PITCHER_POSITIONS
 
             card = MLBSeedHelper.create_player_card(player_info, fict_id, is_pitcher, db)
             if card:

@@ -11,8 +11,8 @@ Routers registrados:
     /api/v1/shop     → Tienda: starter pack y apertura de sobres.
     /ws/games        → WebSocket de eventos en tiempo real por partida.
 
-Las tablas se crean automáticamente con Base.metadata.create_all al iniciar
-(se recomienda migrar a Alembic para control de versiones del schema — ver TODO #13).
+El esquema de la BD se gestiona exclusivamente con migraciones Alembic
+(buscar en alembic/versions/ y ejecutar `alembic upgrade head`).
 """
 
 import logging
@@ -20,7 +20,6 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from app.database import engine, Base
 from app.routers import cards, games, gameplay, ws, user, shop, auth, teams
 
 # Configurar logging a nivel de aplicación
@@ -51,9 +50,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Crea las tablas en la DB si no existen (modo desarrollo)
-Base.metadata.create_all(bind=engine)
-
+# El esquema se crea/actualiza con Alembic, no con create_all (ver alembic/)
 app.include_router(auth.router)
 app.include_router(cards.router)
 app.include_router(gameplay.router)

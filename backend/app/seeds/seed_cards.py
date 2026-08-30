@@ -15,13 +15,11 @@ sys.path.insert(0, os.path.abspath(os.path.join(current_dir, "../")))
 
 from sqlalchemy.orm import Session
 try:
-    from app.database import SessionLocal, engine, Base
+    from app.database import SessionLocal
     from app.models import PlayerCardModel, CardRarity, Team
 except ModuleNotFoundError:
-    from database import SessionLocal, engine, Base
+    from database import SessionLocal
     from models import PlayerCardModel, CardRarity, Team
-
-Base.metadata.create_all(bind=engine)
 
 INITIAL_TEAMS = [
     {"id": "LAD", "name": "Dodgers", "city": "Los Angeles", "primary_color": "#005A9C", "secondary_color": "#FFFFFF"},
