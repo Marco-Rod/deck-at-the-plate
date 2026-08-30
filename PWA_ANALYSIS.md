@@ -1110,7 +1110,7 @@ Start from Scratch:
 | Fase | Descripción | Estado |
 |------|-------------|--------|
 | 0 | Scaffold `pwa/` (Vite + React + TS estricto + Tailwind + Router) | [x] |
-| 1 | Infraestructura core (API client, auth, i18n) | [ ] |
+| 1 | Infraestructura core (API client, auth, i18n) — *falta verif. E2E manual* | [ ] |
 | 2 | Lobby + Team + Cards | [ ] |
 | 3 | Game / Stadium (WebSocket + componentes) | [ ] |
 | 4 | PWA + Offline (manifest, SW, IndexedDB, sync) | [ ] |
@@ -1148,15 +1148,22 @@ de la plantilla), Tailwind CSS **v4** (config en CSS vía `@theme`, sin
 
 **Objetivo:** login de punta a punta contra el backend actual (`localhost:8000`).
 
-- [ ] `shared/api/client.ts`: Axios instance con base URL desde env
-- [ ] `shared/api/interceptors.ts`: inyección de JWT + retry con exponential backoff + error handler central
-- [ ] `shared/api/types.ts`: tipos para respuestas del backend (LoginResponse, GameSessionResponse, etc.)
-- [ ] `features/auth/store.ts`: Zustand con `persist` (user, token, login/logout) en localStorage
-- [ ] `features/auth/api.ts`: `register()` y `login()`
-- [ ] `features/auth/pages/AuthPage.tsx`: migrar `AuthScreen.jsx` (login + registro, validación)
-- [ ] Ruta protegida (`<ProtectedRoute>` redirige a `/auth` sin token)
-- [ ] i18n base: copiar `src/i18n.js` → `shared/lib/i18n.ts` (ES/EN, detector por localStorage)
-- [ ] **Verificación:** registrarse, cerrar sesión, volver a loguear; token sobrevive refresh
+> **Decisión de diseño (usuario):** las pantallas son 100% adaptables a móvil.
+> La PWA NO copia los diseños de `frontend/`; se generan desde cero con enfoque
+> mobile-first (touch targets ≥44px, `min-h-dvh`, safe-area, teclado, landscape).
+> AuthPage es un diseño totalmente nuevo (no una migración de `AuthScreen.jsx`).
+
+- [x] `shared/api/client.ts`: Axios instance con base URL desde env (`VITE_API_URL`, fallback `http://localhost:8000`)
+- [x] `shared/api/interceptors.ts`: inyección de JWT (desde el store) + retry con backoff exponencial (2 reintentos, 300/600ms) en errores de red/5xx + normalización central a `ApiError` (extrae `detail` de FastAPI) + `signOut()` automático en 401
+- [x] `shared/api/errors.ts` + `config.ts` + `types.ts`: `ApiError` (status/detail), `LoginResponse`, `RegisterRequest/Response`; los tipos de GameSession/etc. llegan en Fase 2-3
+- [x] `features/auth/store.ts`: Zustand + `persist` (`deck-atpl-auth`) con `token`/`user`, acciones `signIn`/`signOut`, selectores derivados (`selectIsAuthenticated`, `selectUser`)
+- [x] `features/auth/api.ts`: `register(username, password)` (JSON) y `login(username, password)` (OAuth2 form-urlencoded, contrato real del backend)
+- [x] `features/auth/pages/AuthPage.tsx`: **diseño nuevo mobile-first** — aurora background, toggle ES/EN, brand header, tabs INGRESAR/REGISTRO (role=tablist), validación en cliente con mensajes inline, confirmación de contraseña en registro, show/hide password (accesible), error de submit con `role="alert"`, loading con spinner, `autocomplete` correcto; tras login/registro → auto-login → `/lobby`
+- [x] `shared/ui/InputField.tsx` + `PasswordField.tsx`: inputs reutilizables, a11y (`aria-invalid`, `aria-describedby`, label htmlFor, focus-visible ring)
+- [x] Ruta protegida: `ProtectedRoute` (redirige a `/auth` sin token, guarda `state.from`) + `RootRedirect` (raíz → `/lobby` o `/auth` según sesión)
+- [x] i18n: `shared/lib/i18n.ts` con ES/EN + detector por localStorage; nuevas claves de auth/errores/loading
+- [x] Tests: `validation.test.ts` (8) + `store.test.ts` (2) + smoke `App.test.tsx` envuelto en `Providers`
+- [ ] **Verificación manual (pendiente):** con el backend en `:8000` probar registro → auto-login → lobby, cerrar sesión, relogin, y que el token sobreviva al refresh (requiere levantar `docker compose up`)
 
 ---
 

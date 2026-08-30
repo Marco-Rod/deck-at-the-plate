@@ -1,6 +1,8 @@
 import { Navigate } from 'react-router-dom'
 import type { RouteObject } from 'react-router-dom'
 import { RootLayout } from './RootLayout'
+import { ProtectedRoute } from './ProtectedRoute'
+import { RootRedirect } from './RootRedirect'
 import {
   AuthPage,
   CardShowcasePage,
@@ -14,14 +16,19 @@ export const routes: RouteObject[] = [
   {
     element: <RootLayout />,
     children: [
-      { index: true, element: <Navigate to="/auth" replace /> },
+      { index: true, element: <RootRedirect /> },
       { path: '/auth', element: <AuthPage /> },
-      { path: '/lobby', element: <LobbyPage /> },
-      { path: '/team', element: <MyTeamPage /> },
-      { path: '/roster/:gameId', element: <RosterSelectionPage /> },
-      { path: '/showcase', element: <CardShowcasePage /> },
-      { path: '/game/:gameId', element: <StadiumPage /> },
-      { path: '*', element: <Navigate to="/auth" replace /> },
+      {
+        element: <ProtectedRoute />,
+        children: [
+          { path: '/lobby', element: <LobbyPage /> },
+          { path: '/team', element: <MyTeamPage /> },
+          { path: '/roster/:gameId', element: <RosterSelectionPage /> },
+          { path: '/showcase', element: <CardShowcasePage /> },
+          { path: '/game/:gameId', element: <StadiumPage /> },
+        ],
+      },
+      { path: '*', element: <Navigate to="/" replace /> },
     ],
   },
 ]

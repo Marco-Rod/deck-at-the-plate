@@ -25,3 +25,12 @@
     @apply bg-koshien-dark font-body text-koshien-chalk antialiased;
   }
 }
+
+@layer utilities {
+  .auth-aurora {
+    background:
+      radial-gradient(70% 50% at 50% 0%, rgba(197, 160, 89, 0.12), transparent 70%),
+      radial-gradient(80% 60% at 80% 100%, rgba(45, 90, 63, 0.35), transparent 70%),
+      radial-gradient(60% 50% at 10% 60%, rgba(197, 160, 89, 0.06), transparent 70%);
+  }
+}
