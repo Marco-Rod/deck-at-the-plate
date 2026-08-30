@@ -1,0 +1,27 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-koshien-dark: #121619;
+  --color-koshien-green: #1a3323;
+  --color-koshien-light-green: #2d5a3f;
+  --color-koshien-cream: #e6dfd3;
+  --color-koshien-chalk: #f7f5f0;
+  --color-koshien-gold: #c5a059;
+  --color-koshien-border: #2c3e35;
+
+  --font-sports: 'Teko', sans-serif;
+  --font-vintage: 'Courier Prime', monospace;
+  --font-body: 'Inter', sans-serif;
+
+  --shadow-scoreboard: 0 4px 20px -2px rgba(0, 0, 0, 0.8), inset 0 1px 2px rgba(255, 255, 255, 0.1);
+  --shadow-vintage-card: 0 10px 25px -5px rgba(0, 0, 0, 0.9), 0 0 0 2px #c5a059;
+
+  --breakpoint-xs: 375px;
+  --breakpoint-4k: 2560px;
+}
+
+@layer base {
+  body {
+    @apply bg-koshien-dark font-body text-koshien-chalk antialiased;
+  }
+}

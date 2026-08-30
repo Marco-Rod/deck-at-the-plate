@@ -33,16 +33,17 @@ services:
       db:
         condition: service_healthy
 
-  frontend:
-    build: ./frontend
-    container_name: baseball_frontend
+  pwa:
+    build: ./pwa
+    container_name: baseball_pwa
     volumes:
-      - ./frontend:/app
+      - ./pwa:/app
       - /app/node_modules
     ports:
       - "5173:5173"
     environment:
       - VITE_API_URL=http://localhost:8000
+      - VITE_WS_URL=ws://localhost:8000
     depends_on:
       - backend
 
