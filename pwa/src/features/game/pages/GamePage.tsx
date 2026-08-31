@@ -547,34 +547,37 @@ function StrikeZone({ selectedZone, setSelectedZone }: StrikeZoneProps) {
       initial={{ opacity: 0, scale: 0.95 }}
       animate={{ opacity: 1, scale: 1 }}
       transition={{ duration: 0.3, delay: 0.35 }}
-      className="border border-koshien-border bg-koshien-dark/60 p-2 sm:p-3 lg:flex lg:flex-col lg:p-2"
+      className="border border-koshien-border bg-koshien-dark/60 p-2 sm:p-2 lg:p-1 flex flex-col h-full"
     >
-      <div className="mb-2 text-center font-vintage text-[10px] uppercase text-koshien-gold sm:text-xs lg:text-[9px]">
+      <div className="mb-1 sm:mb-2 lg:mb-1 text-center font-vintage text-[10px] uppercase text-koshien-gold sm:text-xs lg:text-[9px]">
         ZONA DE STRIKE
       </div>
 
-      <div className="grid flex-1 grid-cols-3 gap-1 lg:gap-0.5">
-        {zones.flat().map((zoneNum) => {
-          const isSelected = zoneNum === selectedZone
-          return (
-            <motion.button
-              key={zoneNum}
-              onClick={() => setSelectedZone(zoneNum)}
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              layoutId={`zone-${zoneNum}`}
-              className={`aspect-square rounded border transition-all focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-koshien-gold ${
-                isSelected
-                  ? 'border-2 border-koshien-red bg-koshien-red/20 shadow-[0_0_8px_rgba(255,85,79,0.4)]'
-                  : 'border border-koshien-grid bg-koshien-dark/40 hover:border-koshien-border'
-              }`}
-            >
-              <span className="font-sports text-xs font-bold text-koshien-chalk sm:text-sm lg:text-[9px]">
-                {zoneNum}
-              </span>
-            </motion.button>
-          )
-        })}
+      {/* Strike zone grid: always square with aspect-ratio */}
+      <div className="flex-1 flex items-center justify-center">
+        <div className="w-full aspect-square grid grid-cols-3 gap-1 lg:gap-0.5">
+          {zones.flat().map((zoneNum) => {
+            const isSelected = zoneNum === selectedZone
+            return (
+              <motion.button
+                key={zoneNum}
+                onClick={() => setSelectedZone(zoneNum)}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                layoutId={`zone-${zoneNum}`}
+                className={`rounded border transition-all focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-koshien-gold flex items-center justify-center ${
+                  isSelected
+                    ? 'border-2 border-koshien-red bg-koshien-red/20 shadow-[0_0_8px_rgba(255,85,79,0.4)]'
+                    : 'border border-koshien-grid bg-koshien-dark/40 hover:border-koshien-border'
+                }`}
+              >
+                <span className="font-sports text-xs font-bold text-koshien-chalk sm:text-sm lg:text-[9px]">
+                  {zoneNum}
+                </span>
+              </motion.button>
+            )
+          })}
+        </div>
       </div>
     </motion.div>
   )
@@ -660,55 +663,45 @@ function NextBatterPreview({ nextBatter }: NextBatterPreviewProps) {
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, delay: 0.45 }}
-      className="border border-koshien-green/30 bg-koshien-dark/40 p-2 sm:p-3 lg:p-2"
+      className="border border-koshien-green/30 bg-koshien-dark/40 p-1.5 sm:p-2 lg:p-1 flex flex-col justify-between h-full"
     >
-      <div className="flex h-full flex-col gap-1 sm:gap-2 lg:justify-between">
-        <div className="flex items-center justify-between">
-          <span className="font-vintage text-[9px] uppercase text-koshien-green sm:text-xs lg:text-[8px]">
-            SIGUIENTE
-          </span>
-          <motion.span
-            animate={{ x: [0, 3, 0] }}
-            transition={{ repeat: Infinity, duration: 1 }}
-            className="text-xs text-koshien-green lg:text-[9px]"
-          >
-            ▶
-          </motion.span>
-        </div>
+      <div className="flex items-center justify-between text-xs">
+        <span className="font-vintage text-[8px] uppercase text-koshien-green lg:text-[7px]">
+          SIG
+        </span>
+        <motion.span
+          animate={{ x: [0, 2, 0] }}
+          transition={{ repeat: Infinity, duration: 1 }}
+          className="text-[7px] text-koshien-green"
+        >
+          ▶
+        </motion.span>
+      </div>
 
-        <div className="flex items-baseline gap-1">
-          <span className="font-sports font-bold text-koshien-gold sm:text-sm lg:text-xs">
-            #{nextBatter.number}
-          </span>
-          <span className="truncate font-vintage text-xs font-bold uppercase text-koshien-chalk sm:text-sm lg:text-[9px]">
-            {nextBatter.name}
-          </span>
-        </div>
+      <div className="flex items-baseline gap-0.5">
+        <span className="font-sports font-bold text-koshien-gold text-[9px] lg:text-[8px]">
+          #{nextBatter.number}
+        </span>
+        <span className="truncate font-vintage text-[7px] font-bold uppercase text-koshien-chalk lg:text-[6px]">
+          {nextBatter.name}
+        </span>
+      </div>
 
-        <div className="grid grid-cols-3 gap-2 sm:gap-3 lg:gap-1">
-          {[
-            { label: 'CON', value: nextBatter.contact },
-            { label: 'PWR', value: nextBatter.power },
-            { label: 'SPD', value: nextBatter.speed },
-          ].map(({ label, value }) => (
-            <motion.div
-              key={label}
-              whileHover={{ scale: 1.05 }}
-              className="text-center"
-            >
-              <div className="font-vintage text-[8px] uppercase text-koshien-muted sm:text-[9px] lg:text-[7px]">
-                {label}
-              </div>
-              <div className="font-sports text-xs font-bold text-koshien-green sm:text-sm lg:text-[9px]">
-                {value}
-              </div>
-            </motion.div>
-          ))}
-        </div>
-
-        <div className="border-t border-koshien-green/20 pt-1 text-center font-vintage text-[8px] uppercase text-koshien-green/80 sm:text-[9px] lg:text-[7px]">
-          vs P: .{(nextBatter.vsPitcher.avg * 1000).toFixed(0)} {nextBatter.vsPitcher.hr}HR
-        </div>
+      <div className="grid grid-cols-3 gap-1 text-[7px] lg:text-[6px]">
+        {[
+          { label: 'C', value: nextBatter.contact },
+          { label: 'P', value: nextBatter.power },
+          { label: 'V', value: nextBatter.speed },
+        ].map(({ label, value }) => (
+          <div key={label} className="text-center">
+            <div className="font-vintage text-[6px] uppercase text-koshien-muted lg:text-[5px]">
+              {label}
+            </div>
+            <div className="font-sports font-bold text-koshien-green lg:text-[7px]">
+              {value}
+            </div>
+          </div>
+        ))}
       </div>
     </motion.div>
   )

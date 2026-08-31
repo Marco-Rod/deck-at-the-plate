@@ -1,9 +1,10 @@
 /* ============================================================================
-   GamePage - Responsive Grid Layout Styles
-   Mobile → Tablet → Desktop
+   GamePage - Responsive Grid Layout Styles (v1.2)
+   Mobile: 3-column Pitcher|Zone|Batter (always)
+   Desktop: Coordinated 5-row grid with clamp-based heights
    ============================================================================ */
 
-/* Container wrapper - for max-width on desktop only */
+/* Container wrapper - max-width on desktop only */
 .gameContainer {
   height: 100%;
   width: 100%;
@@ -16,55 +17,83 @@
   }
 }
 
-/* Base grid for all breakpoints */
+/* Base grid: Mobile has 3 columns (Pitcher | Zone | Batter) from the start */
 .gameGrid {
   display: grid;
   height: 100%;
   width: 100%;
-  gap: 0.5rem;
-  grid-template-columns: 1fr;
+  gap: 0.25rem;
+  
+  /* Mobile: 3 columns for Pitcher|Zone|Batter always */
+  grid-template-columns: 1fr 1.2fr 1fr;
   grid-auto-rows: auto;
+  
+  /* Mobile grid-template-areas: stacked header, score, situation, then 3-col matchup */
   grid-template-areas:
-    "header"
-    "score"
-    "situation"
-    "pitcher"
-    "zone"
-    "batter"
-    "next"
-    "cards"
-    "action";
+    "header header header"
+    "score  score  situation"
+    "pitcher zone batter"
+    "pitcher zone next"
+    "cards  cards  action";
 }
 
-/* Tablet and above: increase gap */
-@media (min-width: 768px) {
+/* Mobile: Increase gap slightly for breathing room */
+@media (min-width: 390px) {
   .gameGrid {
-    gap: 0.75rem;
+    gap: 0.375rem;
   }
 }
 
-/* Desktop: 3-column layout */
+@media (min-width: 430px) {
+  .gameGrid {
+    gap: 0.5rem;
+  }
+}
+
+/* Tablet and above */
+@media (min-width: 768px) {
+  .gameGrid {
+    gap: 0.5rem;
+  }
+}
+
+/* Desktop: Coordinated 5-row layout with clamp-based heights */
 @media (min-width: 1024px) {
   .gameGrid {
     grid-template-columns: 1fr 1.2fr 1fr;
-    grid-template-rows: auto auto 1fr auto auto;
+    
+    /* Row heights using clamp for fluid scaling */
+    grid-template-rows:
+      auto
+      auto
+      clamp(140px, 35vh, 260px)
+      clamp(56px, 12vh, 100px)
+      auto;
+    
     grid-template-areas:
-      "header header header"
-      "score score situation"
-      "pitcher zone batter"
-      "pitcher zone next"
-      "cards cards action";
-    gap: 0.75rem;
+      "header     header     header"
+      "score      score      situation"
+      "pitcher    zone       batter"
+      "pitcher    zone       next"
+      "cards      cards      action";
+    
+    gap: 0.5rem;
     height: 100%;
     width: 100%;
   }
 }
 
-/* Desktop Compact: smaller height */
+/* Desktop Compact: 1200px+ width AND height <= 800px */
 @media (min-width: 1200px) and (max-height: 800px) {
   .gameGrid {
-    grid-template-rows: auto auto 0.8fr auto auto;
-    gap: 0.5rem;
+    grid-template-rows:
+      auto
+      auto
+      clamp(110px, 30vh, 200px)
+      clamp(48px, 10vh, 80px)
+      auto;
+    
+    gap: 0.375rem;
   }
 }
 
@@ -130,4 +159,71 @@
 .areaAction {
   display: flex;
   flex-direction: column;
+}
+
+/* Pitcher card: spans 2 rows on desktop, flexible height on mobile */
+.areaPitcher {
+  grid-row: span 2;
+}
+
+/* Zone: centered, square aspect on all breakpoints */
+.areaZone {
+  /* Will handle square via aspect-ratio:1/1 on inner grid */
+}
+
+/* Batter card: flexible height */
+.areaBatter {
+  /* Default flex-col from area wrapper */
+}
+
+/* Mobile: reduce padding and font sizes */
+@media (max-width: 767px) {
+  .areaHeader,
+  .areaScore,
+  .areaSituation,
+  .areaPitcher,
+  .areaZone,
+  .areaBatter,
+  .areaNext,
+  .areaCards,
+  .areaAction {
+    gap: 0.25rem;
+  }
+  
+  .areaHeader {
+    padding: 0.5rem;
+  }
+  
+  .areaScore,
+  .areaSituation,
+  .areaPitcher,
+  .areaZone,
+  .areaBatter,
+  .areaNext {
+    padding: 0.5rem;
+  }
+  
+  .areaCards {
+    padding: 0.5rem;
+  }
+}
+
+/* Ensure Next Batter is compact and directly under Batter */
+.areaNext {
+  min-height: clamp(56px, 10vh, 72px);
+}
+
+/* Action region: flex row on desktop */
+@media (min-width: 1024px) {
+  .areaCards {
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 0.5rem;
+    flex: 1;
+  }
+  
+  .areaAction {
+    flex-direction: row;
+    flex: 0 0 auto;
+  }
 }
