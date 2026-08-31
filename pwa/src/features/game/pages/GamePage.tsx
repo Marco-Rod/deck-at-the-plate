@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
+import { motion } from 'framer-motion'
 import styles from './GamePage.module.css'
 
 // ============================================================================
@@ -127,116 +127,97 @@ export function GamePage() {
       >
         {/* GRID LAYOUT: Mobile vertical → Desktop 3-column */}
         <div className={styles.gameGrid}>
-
           {/* ============================================================
               HEADER
               ============================================================ */}
           <div className={styles.areaHeader}>
-            <AnimatePresence mode="wait">
-              <Header homeTeam={mockGame.homeTeam} />
-            </AnimatePresence>
+            <Header homeTeam={mockGame.homeTeam} />
           </div>
 
           {/* ============================================================
-              SCOREBOARD (score + away score + home score)
+              SCOREBOARD
               ============================================================ */}
           <div className={styles.areaScore}>
-            <AnimatePresence mode="wait">
-              <Scoreboard
-                homeTeam={mockGame.homeTeam}
-                awayTeam={mockGame.awayTeam}
-                innings={mockGame.innings}
-              />
-            </AnimatePresence>
+            <Scoreboard
+              homeTeam={mockGame.homeTeam}
+              awayTeam={mockGame.awayTeam}
+              innings={mockGame.innings}
+            />
           </div>
 
           {/* ============================================================
-              SITUATION (R/H/E + Inning + Bases) — Desktop: right column
+              SITUATION (R/H/E + Inning + Bases)
               ============================================================ */}
           <div className={styles.areaSituation}>
-            <AnimatePresence mode="wait">
-              <GameSituation
-                runs={mockGame.runs}
-                hits={mockGame.hits}
-                errors={mockGame.errors}
-                inning={mockGame.currentInning}
-                isTop={mockGame.isTop}
-                bases={mockGame.bases}
-              />
-            </AnimatePresence>
+            <GameSituation
+              runs={mockGame.runs}
+              hits={mockGame.hits}
+              errors={mockGame.errors}
+              inning={mockGame.currentInning}
+              isTop={mockGame.isTop}
+              bases={mockGame.bases}
+            />
           </div>
 
           {/* ============================================================
-              MATCHUP: Pitcher (area-pitcher)
+              PITCHER CARD
               ============================================================ */}
-          <div className={`${styles.areaPitcher}`}>
-            <AnimatePresence mode="wait">
-              <PitcherCard
-                pitcher={mockPitcher}
-                hoveredStat={hoveredPitchStat}
-                setHoveredStat={setHoveredPitchStat}
-              />
-            </AnimatePresence>
+          <div className={styles.areaPitcher}>
+            <PitcherCard
+              pitcher={mockPitcher}
+              hoveredStat={hoveredPitchStat}
+              setHoveredStat={setHoveredPitchStat}
+            />
           </div>
 
           {/* ============================================================
-              MATCHUP: Strike Zone (area-zone)
+              STRIKE ZONE
               ============================================================ */}
-          <div className={`${styles.areaZone}`}>
-            <AnimatePresence mode="wait">
-              <StrikeZone selectedZone={selectedZone} setSelectedZone={setSelectedZone} />
-            </AnimatePresence>
+          <div className={styles.areaZone}>
+            <StrikeZone selectedZone={selectedZone} setSelectedZone={setSelectedZone} />
           </div>
 
           {/* ============================================================
-              MATCHUP: Batter (area-batter)
+              BATTER CARD
               ============================================================ */}
-          <div className={`${styles.areaBatter}`}>
-            <AnimatePresence mode="wait">
-              <BatterCard
-                batter={mockBatter}
-                hoveredStat={hoveredBatterStat}
-                setHoveredStat={setHoveredBatterStat}
-              />
-            </AnimatePresence>
+          <div className={styles.areaBatter}>
+            <BatterCard
+              batter={mockBatter}
+              hoveredStat={hoveredBatterStat}
+              setHoveredStat={setHoveredBatterStat}
+            />
           </div>
 
           {/* ============================================================
-              NEXT BATTER (area-next) — Desktop: under Batter
+              NEXT BATTER
               ============================================================ */}
-          <div className={`${styles.areaNext}`}>
-            <AnimatePresence mode="wait">
-              <NextBatterPreview nextBatter={mockNextBatter} />
-            </AnimatePresence>
+          <div className={styles.areaNext}>
+            <NextBatterPreview nextBatter={mockNextBatter} />
           </div>
 
           {/* ============================================================
-              ACTION CARDS (area-cards)
+              ACTION CARDS
               ============================================================ */}
           <div className={styles.areaCards}>
-            <AnimatePresence mode="wait">
-              <ActionCardsSection
-                cards={mockActionCards}
-                selectedCardId={selectedActionCard}
-                setSelectedCardId={setSelectedActionCard}
-              />
-            </AnimatePresence>
+            <ActionCardsSection
+              cards={mockActionCards}
+              selectedCardId={selectedActionCard}
+              setSelectedCardId={setSelectedActionCard}
+            />
           </div>
 
           {/* ============================================================
-              LANZAR BUTTON (area-action) — Desktop: same row as cards
+              LANZAR BUTTON
               ============================================================ */}
           <div className={styles.areaAction}>
-            <AnimatePresence mode="wait">
-              <LanzarButton
-                chargePercent={chargePercent}
-                isCharging={isCharging}
-                onMouseDown={handleLanzarMouseDown}
-                onMouseUp={handleLanzarMouseUp}
-                onTouchStart={handleLanzarMouseDown}
-                onTouchEnd={handleLanzarMouseUp}
-              />
-            </AnimatePresence>
+            <LanzarButton
+              chargePercent={chargePercent}
+              isCharging={isCharging}
+              onMouseDown={handleLanzarMouseDown}
+              onMouseUp={handleLanzarMouseUp}
+              onTouchStart={handleLanzarMouseDown}
+              onTouchEnd={handleLanzarMouseUp}
+            />
           </div>
         </div>
       </div>
@@ -245,7 +226,7 @@ export function GamePage() {
 }
 
 // ============================================================================
-// SECTION COMPONENTS (sin cambios funcionales)
+// SECTION COMPONENTS
 // ============================================================================
 
 interface HeaderProps {
@@ -365,7 +346,6 @@ function GameSituation({
       className="border border-koshien-border bg-koshien-dark/40 p-3 sm:p-4 lg:flex lg:flex-col lg:gap-2 lg:p-2"
     >
       <div className="flex flex-col gap-3 lg:gap-2">
-        {/* Desktop: stack vertically compacto */}
         <div className="flex justify-around lg:justify-start lg:gap-3">
           {[
             { label: 'R', value: runs },
