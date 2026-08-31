@@ -120,7 +120,7 @@ export function GamePage() {
   }
 
   return (
-    <div className="bg-koshien-dark lg:h-dvh lg:overflow-hidden">
+    <div className="min-h-screen w-screen bg-koshien-dark lg:h-dvh lg:overflow-hidden">
       {/* Padding adaptable por breakpoint */}
       <div
         className={`${styles.gameContainer} px-3 py-2 sm:px-4 sm:py-3 lg:p-3`}
