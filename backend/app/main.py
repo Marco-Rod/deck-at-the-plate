@@ -16,7 +16,8 @@ El esquema de la BD se gestiona exclusivamente con migraciones Alembic
 """
 
 import logging
-from fastapi import FastAPI
+import os
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -36,15 +37,25 @@ app = FastAPI(
     description="API Backend para el juego de cartas de béisbol en tiempo real."
 )
 
-# Definir los orígenes explícitamente (puerto predeterminado de Vite)
-origins = [
+# Orígenes CORS permitidos. En desarrollo se habilitan los orígenes de Vite por
+# defecto; en producción se restringen vía la variable de entorno
+# CORS_ALLOWED_ORIGINS (lista separada por comas). TODO #12 resuelto: el valor
+# por defecto es SOLO desarrollo; nunca habilitar "*" con allow_credentials.
+_DEFAULT_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
 ]
 
+_cors_env = os.getenv("CORS_ALLOWED_ORIGINS")
+origins = (
+    [origin.strip() for origin in _cors_env.split(",") if origin.strip()]
+    if _cors_env
+    else _DEFAULT_ORIGINS
+)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,  # TODO #12: Restringir a dominios específicos en producción
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -99,6 +110,25 @@ async def validation_exception_handler(request, exc: RequestValidationError):
         status_code=422,
         content={"detail": "Error de validación en la solicitud"}
     )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    """
+    Convierte errores inesperados (500) en una respuesta genérica sin exponer
+    detalles internos al cliente. El detalle técnico se loguea con traceback.
+    """
+    logger.exception(
+        "Excepción no controlada en %s %s: %s",
+        request.method,
+        request.url.path,
+        exc,
+    )
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Ocurrió un error inesperado en el servidor."},
+    )
+
 
 @app.get("/")
 def read_root():

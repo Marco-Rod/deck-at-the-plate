@@ -1,10 +1,13 @@
 import random
+import logging
 from typing import Any, Dict
 
 from app.core.enums import Difficulty, PitchType, SwingType, PlayerRole
 from app.core.engine_types import PitchSelection, SwingSelection
 from app.engine.game_rules import MIN_PITCHES_TO_CHANGE
 from app.engine.turn_guard import expected_actor
+
+logger = logging.getLogger(__name__)
 
 # Tipos de picheo que deben coincidir con los usados en el repertorio de las cartas (seed data)
 # Orden de definición de PitchType: 4-SEAM, SLIDER, CHANGE, CURVE, SINKER, CUTTER, IBB
@@ -97,10 +100,10 @@ def get_cpu_pitcher_change_decision(
     change_prob = _CPU_CHANGE_PROBABILITY.get(difficulty, 0.75)
     decision = random.random() < change_prob
 
-    print(
-        f"🤖 [CPU PITCHER CHANGE DECISION] "
-        f"pitches={pitch_count}, fatigue={fatigue_level:.1f}%, "
-        f"threshold={threshold}%, prob={change_prob:.0%} → {'CHANGE' if decision else 'KEEP'}"
+    logger.debug(
+        "Decision cambio de pitcher CPU: pitches=%s, fatigue=%.1f%%, threshold=%.1f%%, prob=%.0f%% -> %s",
+        pitch_count, fatigue_level, threshold, change_prob * 100,
+        "CHANGE" if decision else "KEEP",
     )
     return decision
 

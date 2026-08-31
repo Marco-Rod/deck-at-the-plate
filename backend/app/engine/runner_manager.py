@@ -9,9 +9,12 @@ Retorna: (new_runners, runs_scored, event_adjusted)
 """
 from typing import Tuple
 import random
+import logging
 
 from app.core.enums import Event, RunnerBase
 from app.core.engine_types import Runners
+
+logger = logging.getLogger(__name__)
 
 
 def advance_runners(
@@ -93,7 +96,7 @@ def advance_runners(
             # ⭐ ESPECIAL: Si hay bases llenas, el doble play es automático (100%)
             if r1 is not None and r2 is not None and r3 is not None:
                 dp_chance = 1.0  # Bases llenas = doble play garantizado
-                print(f"⚾ [BASES LLENAS] Doble play automático (100% chance)")
+                logger.debug("Bases llenas: doble play automatico (100% chance)")
             else:
                 # Probabilidad base: ~75% en MLB para ground balls con runner en 1B
                 dp_chance = 0.75
@@ -108,7 +111,7 @@ def advance_runners(
                 # - Bateador → OUT en 1B
                 # - Corredor en 2B → Avanza a 3B (fuerza de 1B out)
                 # - Corredor en 3B → Anota (fuerza por out en 1B y 2B)
-                print(f"⚾ [DOUBLE PLAY] ¡Doble play! Corredor en 1B ({r1}) out en 2B + bateador out en 1B")
+                logger.debug("Doble play: corredor en 1B (%s) out en 2B + bateador out en 1B", r1)
                 event_adjusted = Event.DOUBLE_PLAY
                 
                 # Aplicar fuerza y anotación:

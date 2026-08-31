@@ -21,6 +21,7 @@ a ambos clientes conectados vía WebSocket.
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+import logging
 
 from app.auth import get_current_user
 from app.database import get_db
@@ -52,6 +53,8 @@ from app.repositories import get_card_by_id, get_game_by_id, get_tactic_card_by_
 from app.services.card_presenter import build_pitcher_payload
 
 router = APIRouter(prefix="/api/v1/games", tags=["Motor de Jugabilidad 1v1"])
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -182,11 +185,10 @@ async def select_pitch(
     su swing automáticamente y resuelve la jugada completa.
     """
     # ⭐ DEBUG: Verificar que los datos llegan correctamente
-    print(f"🎯 [DEBUG] Endpoint /pitch recibió:")
-    print(f"   game_id: {game_id}")
-    print(f"   payload.pitch_type: {payload.pitch_type}")
-    print(f"   payload.zone: {payload.zone}")
-    print(f"   current_user_id: {current_user_id}")
+    logger.debug(
+        "Endpoint /pitch recibio: game_id=%s pitch_type=%s zone=%s user_id=%s",
+        game_id, payload.pitch_type, payload.zone, current_user_id,
+    )
     
     game = get_game_by_id(db, game_id)
     if not game:
@@ -195,7 +197,7 @@ async def select_pitch(
     # ⭐ NUEVO: Validar que no haya cambio de pitcher pendiente
     state = dict(game.state_data or {})
     if state.get("awaiting_pitcher_change_acknowledgment"):
-        print(f"🚫 [PITCH BLOCKED] Cambio de pitcher del rival pendiente de confirmación")
+        logger.warning("Pitch bloqueado: cambio de pitcher del rival pendiente de confirmacion")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="El rival cambió de pitcher. Debes confirmar el cambio antes de continuar.",
@@ -204,19 +206,19 @@ async def select_pitch(
     _require_turn(game, current_user_id, required_role="PITCHER")
     active_pitcher_id = state.get("active_pitcher")
     
-    print(f"🎯 [DEBUG] active_pitcher_id: {active_pitcher_id}")
+    logger.debug("active_pitcher_id: %s", active_pitcher_id)
     
     if active_pitcher_id:
         pitcher_card = get_card_by_id(db, active_pitcher_id)
-        print(f"🎯 [DEBUG] pitcher_card: {pitcher_card.name if pitcher_card else 'NOT FOUND'}")
+        logger.debug("pitcher_card: %s", pitcher_card.name if pitcher_card else "NOT FOUND")
         
         if pitcher_card and payload.pitch_type != "IBB":
             # Validar que existe en repertorio
             pitch_stats = pitcher_card.get_pitch_stats(payload.pitch_type)
-            print(f"🎯 [DEBUG] pitch_stats para '{payload.pitch_type}': {pitch_stats}")
+            logger.debug("pitch_stats para '%s': %s", payload.pitch_type, pitch_stats)
             
             if not pitch_stats:
-                print(f"❌ [ERROR] El lanzador {pitcher_card.name} no tiene '{payload.pitch_type}' en repertorio")
+                logger.warning("El lanzador %s no tiene '%s' en repertorio", pitcher_card.name, payload.pitch_type)
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"El lanzador {pitcher_card.name} no tiene el picheo '{payload.pitch_type}' en su repertorio."
@@ -224,7 +226,7 @@ async def select_pitch(
             
             # ⭐ Validar que no exceda máximo de 4 pitcheos
             if not pitcher_card.validate_repertoire():
-                print(f"❌ [ERROR] Repertorio inválido para {pitcher_card.name}")
+                logger.warning("Repertorio inválido para %s", pitcher_card.name)
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"El lanzador {pitcher_card.name} tiene un repertorio inválido (máximo 4 pitcheos únicos)."
@@ -236,7 +238,7 @@ async def select_pitch(
     }
     game.state_data = state
     db.commit()
-    print(f"✅ [DEBUG] State guardado con pitch: {state['current_pitch']}")
+    logger.debug("State guardado con pitch: %s", state["current_pitch"])
 
     await manager.broadcast_to_game(game_id, {
         "type": "PITCH_COMMITTED",
@@ -274,14 +276,17 @@ async def execute_swing(
     En PvE, tras resolver la jugada del humano, la CPU genera su picheo
     automáticamente si le corresponde pichear en la siguiente media entrada.
     """
-    print(f"🎯 DEBUG swing: game_id={game_id}, user_id={current_user_id}")
+    logger.debug("DEBUG swing: game_id=%s, user_id=%s", game_id, current_user_id)
     
     game = get_game_by_id(db, game_id)
     if not game:
-        print(f"❌ ERROR: Juego no encontrado: {game_id}")
+        logger.warning("ERROR: Juego no encontrado: %s", game_id)
         raise HTTPException(status_code=404, detail="Sesión de juego no encontrada.")
 
-    print(f"   home_user_id={game.home_user_id}, away_user_id={game.away_user_id}, is_top_inning={game.is_top_inning}")
+    logger.debug(
+        "home_user_id=%s, away_user_id=%s, is_top_inning=%s",
+        game.home_user_id, game.away_user_id, game.is_top_inning,
+    )
     
     _require_turn(game, current_user_id, required_role="BATTER")
 
@@ -293,7 +298,7 @@ async def execute_swing(
     
     # ⭐ NUEVO: Validar que no haya cambio de pitcher pendiente
     if state.get("awaiting_pitcher_change_acknowledgment"):
-        print(f"🚫 [SWING BLOCKED] Cambio de pitcher del rival pendiente de confirmación")
+        logger.warning("Swing bloqueado: cambio de pitcher del rival pendiente de confirmacion")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="El rival cambió de pitcher. Debes confirmar el cambio antes de continuar.",
@@ -303,10 +308,10 @@ async def execute_swing(
     
     # ⭐ CRÍTICO: Si no hay picheo y debería haber CPU pitcher, ejecutar CPU response aquí
     if not current_pitch:
-        print(f"   ⚠️ No hay pitch. Verificando si CPU debería haber lanzado...")
+        logger.debug("No hay pitch. Verificando si CPU deberia haber lanzado...")
         
         if is_cpu_turn(game, state, "PITCHER"):
-            print(f"   🤖 CPU debería haber lanzado! Ejecutando trigger ahora...")
+            logger.debug("CPU deberia haber lanzado! Ejecutando trigger ahora...")
             await trigger_cpu_response(game, state, db, game_id)
             # La CPU pudo pichear/cambiar pitcher sin commitear: persistir antes de recargar.
             db.commit()
@@ -316,17 +321,17 @@ async def execute_swing(
             db.refresh(game)
             state = dict(game.state_data or {})
             current_pitch = state.get("current_pitch")
-            print(f"   ✅ Después de trigger, current_pitch = {bool(current_pitch)}")
+            logger.debug("Despues de trigger, current_pitch = %s", bool(current_pitch))
     
     if not current_pitch:
-        print(f"❌ ERROR: No hay picheo previo en state")
-        print(f"   State keys: {list(state.keys())}")
-        print(f"   is_top_inning: {game.is_top_inning}")
-        print(f"   active_pitcher_id: {state.get('active_pitcher')}")
-        print(f"   Game mode: {state.get('mode')}")
+        logger.warning(
+            "ERROR: No hay picheo previo en state: %s",
+            {"keys": list(state.keys()), "is_top": game.is_top_inning,
+             "active_pitcher": state.get("active_pitcher"), "mode": state.get("mode")},
+        )
         raise HTTPException(status_code=400, detail="El lanzador aún no ha realizado su picheo para este turno.")
 
-    print(f"   ✅ Swing válido, resolviendo jugada...")
+    logger.debug("Swing valido, resolviendo jugada...")
     event, description, inning_ended = await resolve_swing(
         game=game,
         state=state,
@@ -364,13 +369,11 @@ async def change_pitcher(
 
     Seguridad: la identidad del usuario se deriva del JWT.
     """
-    print(f"🔍 [CHANGE_PITCHER] Request recibido")
-    print(f"🔍 game_id: {game_id}")
-    print(f"🔍 new_pitcher_id: {payload.new_pitcher_id}")
+    logger.debug("CHANGE_PITCHER: request recibido (game_id=%s, new_pitcher_id=%s)", game_id, payload.new_pitcher_id)
 
     game = get_game_by_id(db, game_id)
     if not game:
-        print(f"❌ Juego NO encontrado: {game_id}")
+        logger.warning("CHANGE_PITCHER: juego NO encontrado: %s", game_id)
         raise HTTPException(status_code=404, detail="Sesión de juego no encontrada.")
 
     # Solo usuarios involucrados en la partida pueden hacer cambios.
@@ -408,8 +411,12 @@ async def change_pitcher(
     new_pitcher = get_card_by_id(db, payload.new_pitcher_id)
     old_pitcher = get_card_by_id(db, old_pitcher_id)
 
-    print(f"🔄 [CHANGE_PITCHER] Cambiando {'HOME' if is_home_user else 'AWAY'} pitcher")
-    print(f"   {old_pitcher.name if old_pitcher else 'OLD PITCHER'} ({old_pitcher_id}) → {new_pitcher.name} ({payload.new_pitcher_id})")
+    logger.debug(
+        "CHANGE_PITCHER: cambiando %s pitcher: %s (%s) -> %s (%s)",
+        "HOME" if is_home_user else "AWAY",
+        old_pitcher.name if old_pitcher else "OLD PITCHER", old_pitcher_id,
+        new_pitcher.name, payload.new_pitcher_id,
+    )
 
     game.state_data = state
     db.commit()
@@ -424,7 +431,7 @@ async def change_pitcher(
         fatigue_level=0.0,
     )
 
-    print(f"✅ [PITCHER CHANGE] {old_pitcher_id} → {payload.new_pitcher_id} ({new_pitcher.name})")
+    logger.debug("PITCHER CHANGE: %s -> %s (%s)", old_pitcher_id, payload.new_pitcher_id, new_pitcher.name)
 
     # ⭐ NUEVO: Broadcast del cambio vía WebSocket (state_data sanitizado por destinatario)
     await manager.broadcast_to_game_view(game_id, lambda u: {
@@ -461,7 +468,7 @@ def get_rival_available_pitchers(
       4. Excluir el pitcher actualmente activo
       5. Retornar la lista
     """
-    print(f"🔍 [GET_RIVAL_AVAILABLE_PITCHERS] game_id={game_id}")
+    logger.debug("GET_RIVAL_AVAILABLE_PITCHERS: game_id=%s", game_id)
 
     game = get_game_by_id(db, game_id)
     if not game:
@@ -503,20 +510,23 @@ def get_available_pitchers(
 
     Seguridad: la identidad del usuario se deriva del JWT.
     """
-    print(f"\n🔍 [GET_AVAILABLE_PITCHERS] game_id={game_id}, user_id={current_user_id}")
+    logger.debug("GET_AVAILABLE_PITCHERS: game_id=%s, user_id=%s", game_id, current_user_id)
 
     game = get_game_by_id(db, game_id)
     if not game:
-        print(f"❌ Game not found: {game_id}")
+        logger.warning("GET_AVAILABLE_PITCHERS: game not found: %s", game_id)
         raise HTTPException(status_code=404, detail="Sesión de juego no encontrada.")
 
     # ── Validar que el user del token corresponde a un jugador humano del juego ────
     if current_user_id not in (game.home_user_id, game.away_user_id):
-        print(f"❌ User {current_user_id} not in game. home={game.home_user_id}, away={game.away_user_id}")
+        logger.warning(
+            "GET_AVAILABLE_PITCHERS: user %s not in game (home=%s, away=%s)",
+            current_user_id, game.home_user_id, game.away_user_id,
+        )
         raise HTTPException(status_code=403, detail="El usuario no pertenece a este juego.")
 
     if current_user_id == "CPU_BOT":
-        print(f"❌ CPU_BOT cannot change pitcher")
+        logger.warning("GET_AVAILABLE_PITCHERS: CPU_BOT cannot change pitcher")
         raise HTTPException(status_code=400, detail="El CPU no puede cambiar pitcher manualmente.")
 
     state = dict(game.state_data or {})
@@ -551,15 +561,17 @@ async def acknowledge_pitcher_change(
     state = dict(game.state_data or {})
     
     if not acknowledge_pending_pitcher_change(state):
-        print(f"⚠️  [ACK PITCHER CHANGE] No hay cambio pendiente para confirmar")
+        logger.debug("ACK PITCHER CHANGE: no hay cambio pendiente para confirmar")
         return {
             "status": "ok",
             "message": "No hay cambio de pitcher pendiente",
         }
     
-    print(f"✅ [ACK PITCHER CHANGE] Usuario confirmó cambio de pitcher")
-    print(f"   old_pitcher: {state.get('pending_pitcher_change', {}).get('old_pitcher_id')}")
-    print(f"   new_pitcher: {state.get('pending_pitcher_change', {}).get('new_pitcher_id')}")
+    logger.debug(
+        "ACK PITCHER CHANGE: usuario confirmo cambio de pitcher (old=%s new=%s)",
+        state.get("pending_pitcher_change", {}).get("old_pitcher_id"),
+        state.get("pending_pitcher_change", {}).get("new_pitcher_id"),
+    )
     
     game.state_data = state
     db.commit()
@@ -573,7 +585,7 @@ async def acknowledge_pitcher_change(
             "state_data": _player_state_for(game, u),
         })
     except Exception as e:  # noqa: BLE001 - el broadcast no debe romper el flujo
-        print(f"⚠️ No se pudo emitir el broadcast de ack de cambio de pitcher: {e}")
+        logger.warning("No se pudo emitir el broadcast de ack de cambio de pitcher: %s", e)
     
     return {
         "status": "ok",

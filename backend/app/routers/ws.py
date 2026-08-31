@@ -1,6 +1,7 @@
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException, Query
 from sqlalchemy.orm import Session
 import asyncio
+import logging
 
 from app.database import SessionLocal
 from app.repositories import get_game_by_id
@@ -9,6 +10,8 @@ from app.engine.fog_of_war import sanitize_state_for_player
 from app.auth import authenticate_ws_token
 
 router = APIRouter(tags=["WebSockets"])
+
+logger = logging.getLogger(__name__)
 
 @router.websocket("/ws/games/{game_id}")
 async def websocket_endpoint(
@@ -70,19 +73,22 @@ async def websocket_endpoint(
                     "user_role": "HOME" if user_id == game.home_user_id else "AWAY",  # ⭐ NUEVO
                 }
             })
-            print(f"[WS] Conexión establecida: game={game_id}, user={user_id}")
+            logger.info("WS conexion establecida: game=%s user=%s", game_id, user_id)
             
             # ⭐ ARREGLADO: Ejecutar trigger_cpu_response si es necesario
             # En caso de que la CPU deba actuar en el primer turn (ej. usuario es AWAY en TOP)
-            print(f"[WS] Verificando si CPU debe actuar al conectar...")
+            logger.debug("WS verificando si CPU debe actuar al conectar...")
             from app.engine.game_actions import trigger_cpu_response
             state = dict(game.state_data or {})
-            print(f"[WS] State before trigger: current_pitch={state.get('current_pitch')}, is_top={game.is_top_inning}, mode={state.get('mode')}")
+            logger.debug(
+                "WS state before trigger: current_pitch=%s, is_top=%s, mode=%s",
+                state.get("current_pitch"), game.is_top_inning, state.get("mode"),
+            )
             try:
                 await trigger_cpu_response(game, state, db, game_id)
-                print(f"[WS] ✅ trigger_cpu_response completed successfully")
+                logger.debug("WS trigger_cpu_response completed successfully")
             except Exception as e:
-                print(f"[WS] ❌ Error en trigger_cpu_response: {e}")
+                logger.error("WS error en trigger_cpu_response: %s", e)
                 import traceback
                 traceback.print_exc()
             
@@ -91,11 +97,14 @@ async def websocket_endpoint(
             db.commit()
             # Recargar game desde DB para sincronizar
             db.refresh(game)
-            print(f"[WS] State after trigger: current_pitch={game.state_data.get('current_pitch') if game.state_data else None}")
+            logger.debug(
+                "WS state after trigger: current_pitch=%s",
+                game.state_data.get("current_pitch") if game.state_data else None,
+            )
             
             # ⭐ Si la CPU lanzó en el inicio, enviar el estado actualizado al cliente
-            if game.state_data and game.state_data.get('current_pitch'):
-                print(f"[WS] CPU lanzó en el inicio, enviando INIT_GAME_STATE actualizado...")
+            if game.state_data and game.state_data.get("current_pitch"):
+                logger.debug("WS CPU lanzo en el inicio, enviando INIT_GAME_STATE actualizado...")
                 sanitized_state = sanitize_state_for_player(
                     state_data=game.state_data,
                     requesting_user_id=user_id,
@@ -123,7 +132,7 @@ async def websocket_endpoint(
                 "type": "ERROR",
                 "message": f"Partida '{game_id}' no encontrada."
             })
-            print(f"[WS ERROR] Partida no encontrada: {game_id}")
+            logger.warning("WS partida no encontrada: %s", game_id)
             return
 
         # ⭐ ARREGLADO: En lugar de bloquearse esperando receive_text(),
@@ -132,22 +141,22 @@ async def websocket_endpoint(
             try:
                 # Esperar messages con timeout para permitir que se procesen otros eventos
                 data = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
-                print(f"[WS] Mensaje del cliente {user_id}: {data}")
+                logger.debug("WS mensaje del cliente %s: %s", user_id, data)
             except asyncio.TimeoutError:
                 # Timeout es normal, simplemente mantenemos la conexión viva
                 continue
             except WebSocketDisconnect:
-                print(f"[WS] Desconexión: game={game_id}, user={user_id}")
+                logger.info("WS desconexion: game=%s user=%s", game_id, user_id)
                 manager.disconnect(websocket, game_id)
                 break
             except Exception as e:
-                print(f"[WS ERROR] Recibiendo mensaje: {e}")
+                logger.error("WS error recibiendo mensaje: %s", e)
                 manager.disconnect(websocket, game_id)
                 break
 
     except Exception as e:
         # Capturar errores inesperados para que no cierren silenciosamente la conexión
-        print(f"[WS ERROR] game={game_id} user={user_id}: {e}")
+        logger.error("WS error: game=%s user=%s: %s", game_id, user_id, e)
         manager.disconnect(websocket, game_id)
     finally:
         db.close()

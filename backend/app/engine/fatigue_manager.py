@@ -1,4 +1,7 @@
+import logging
 from typing import Dict
+
+logger = logging.getLogger(__name__)
 
 # ⭐ MEJORADO: Umbrales más bajos para fatiga MÁS AGRESIVA
 # Estos son los puntos donde comienza la fatiga (threshold)
@@ -99,11 +102,10 @@ def apply_pitcher_fatigue(
     pitch_threshold = get_pitch_threshold(total_innings)
     
     # ⭐ DEBUG: Log de aplicación de fatiga
-    print(f"⚙️ [APPLY PITCHER FATIGUE - AGGRESSIVE]")
-    print(f"   Pitch Count: {pitch_count}")
-    print(f"   Total Innings: {total_innings}")
-    print(f"   Pitch Threshold: {pitch_threshold}")
-    print(f"   Exceeds Threshold: {pitch_count > pitch_threshold}")
+    logger.debug(
+        "Aplicando fatiga: pitch_count=%s innings=%s threshold=%s excede=%s",
+        pitch_count, total_innings, pitch_threshold, pitch_count > pitch_threshold,
+    )
 
     if pitch_count > pitch_threshold:
         extra_pitches = pitch_count - pitch_threshold
@@ -112,18 +114,22 @@ def apply_pitcher_fatigue(
         # Sin cap en penalty_factor, permite llegar a fatiga 100%
         penalty_factor = 1.0 - (0.10 * extra_pitches)
         
-        print(f"   Extra Pitches: {extra_pitches}")
-        print(f"   Penalty Factor (uncapped): {penalty_factor:.2f}")
-        print(f"   Degradation: {max(0, (1.0 - penalty_factor) * 100):.1f}%")
-        print(f"   Original Stats: VEL={pitcher_attrs.get('velocidad')}, CTR={pitcher_attrs.get('control')}, MOV={pitcher_attrs.get('movimiento')}")
+        logger.debug(
+            "Fatiga: extra_pitches=%s penalty_factor=%.2f degradacion=%.1f%% stats_orig=(VEL=%s CTR=%s MOV=%s)",
+            extra_pitches, penalty_factor, max(0, (1.0 - penalty_factor) * 100.0),
+            pitcher_attrs.get("velocidad"), pitcher_attrs.get("control"), pitcher_attrs.get("movimiento"),
+        )
 
         # Aplicar penalización pero asegurar mínimo de 1 en cada stat
         modified_attrs["velocidad"] = max(1, int(modified_attrs.get("velocidad", 50) * penalty_factor))
         modified_attrs["control"] = max(1, int(modified_attrs.get("control", 50) * penalty_factor))
         modified_attrs["movimiento"] = max(1, int(modified_attrs.get("movimiento", 50) * penalty_factor))
         
-        print(f"   Modified Stats: VEL={modified_attrs['velocidad']}, CTR={modified_attrs['control']}, MOV={modified_attrs['movimiento']}")
+        logger.debug(
+            "Fatiga aplicada: VEL=%s CTR=%s MOV=%s",
+            modified_attrs["velocidad"], modified_attrs["control"], modified_attrs["movimiento"],
+        )
     else:
-        print(f"   No fatigue applied (pitch_count <= threshold)")
+        logger.debug("No se aplico fatiga (pitch_count <= threshold)")
 
     return modified_attrs

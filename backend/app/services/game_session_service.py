@@ -1,7 +1,7 @@
 """
-Servicio de aplicacion: sesiones de juego
+Servicio de aplicación: sesiones de juego
 ==========================================
-Centraliza la creacion e inicializacion de una sesion 1v1 (el orquestador
+Centraliza la creación e inicialización de una sesión 1v1 (el orquestador
 aplicativo que antes vivia en ``routers/games.py``). El router queda con la
 capa HTTP (auth y mapeo de errores); este modulo con las reglas de dominio y
 la persistencia.
@@ -38,7 +38,7 @@ class GameSessionService:
     @staticmethod
     def create(db: Session, payload: CreateGameRequest) -> GameSession:
         """
-        Crea una nueva sesion de juego 1v1 e inicializa:
+        Crea una nueva sesión de juego 1v1 e inicializa:
         - Marcador 0-0, Inning 1 Alta.
         - Lineups de 9 bateadores por equipo.
         - Mazos tacticos mezclados con mano inicial de 3 cartas.
@@ -76,7 +76,7 @@ class GameSessionService:
         home_pitcher_id = None
         away_pitcher_id = None
 
-        # Determinar lineup y pitcher del usuario humano segun su posicion
+        # Determinar lineup y pitcher del usuario humano según su posición
         if human_is_home:
             home_lineup_ids = payload.home_lineup or []
             home_pitcher_id = payload.home_pitcher_id
@@ -137,7 +137,7 @@ class GameSessionService:
         pitchers = [c for c in cpu_cards if c.is_pitcher]
         batters = [c for c in cpu_cards if c.is_batter]
 
-        # Asignar cartas CPU segun su posicion
+        # Asignar cartas CPU según su posición
         if human_is_home:
             # CPU es visitante (away)
             if not away_pitcher_id and pitchers:

@@ -1098,6 +1098,175 @@ Start from Scratch:
 
 ---
 
+## ⚙️ REGLAS DE DESARROLLO Y ESTÁNDARES DE CÓDIGO (BACKEND)
+
+> Convenciones obligatorias para todo código de `backend/`. El backend se desarrolla
+> siguiendo los principios **SOLID** y una **arquitectura por capas** (HTTP → Aplicación →
+> Dominio → Infraestructura). Estas reglas son el contrato que toda línea de código nueva
+> debe cumplir. Cualquier excepción requiere decisión explícita Y documentación.
+
+### 0. Arquitectura por capas (resumen del contrato)
+
+```
+routers/       → Capa HTTP únicamente: auth, schemas (Pydantic), mapeo a HTTPException, Unit of Work (commit). NUNCA reglas de negocio.
+services/      → Capa de aplicación: orquesta casos de uso, coordina repos/engine/presenters. Puede lanzar HTTPException.
+engine/        → Dominio puro: reglas del juego SIN dependencias de FastAPI/SQLAlchemy. Funciones puras sobre state.
+core/          → Vocabulario canónico (enums, tipos) = single source of truth de strings mágicos.
+repositories/  → Data Access Layer (DAL): encapsula queries ORM. Devuelven entidades o None. NO lanzan HTTPException.
+schemas/       → Contratos Pydantic de entrada/salida de la API.
+models/        → Modelos SQLAlchemy (persistencia). Esquema gestionado EXCLUSIVAMENTE con Alembic.
+```
+
+Dirección de dependencias (DIP): `routers → services → (engine + repositories)`, y `engine`
+es puro (no importa `fastapi` ni la BD). La infraestructura depende del dominio, nunca al revés.
+
+### 1. Principios SOLID (cómo se aplican a este codebase)
+
+| # | Regla |
+|---|-------|
+| 1.1 | **SRP**: cada módulo tiene UNA responsabilidad. Router = HTTP; engine = reglas de juego; repos = acceso a datos; presenter = formato de salida. No mezclarlas. |
+| 1.2 | **OCP**: agregar un evento/acción/regla NO debe exigir editar comparaciones de strings en N archivos. Definir el valor en `app/core/enums.py` y reutilizarlo. |
+| 1.3 | **LSP/LoD**: los que componen deben poder sustituirse; los módulos no deben conocer el interior de otros. Evitar encadenar atributos profundos de objetos externos. |
+| 1.4 | **ISP**: cuando un módulo expone muchas responsabilidades con dependencias opcionales, dividirlo. Los `*_manager.py` del engine deben ser cohesivos y de tamaño manejable. |
+| 1.5 | **DIP**: depender de abstracciones. Los routers dependen de `engine` y `repositories`, NO de la BD directa. El engine puro NO debe importar `fastapi`, `sqlalchemy` ni la sesión. |
+| 1.6 | **Unit of Work**: el módulo que inicia la acción humana (router) es dueño de la transacción (`db.commit()`). El engine (`resolve_swing`, `trigger_cpu_response`) NUNCA commitea — solo muta el estado en memoria. |
+
+### 2. Tipado y estructura de código
+
+| # | Regla |
+|---|-------|
+| 2.1 | Tipar SIEMPRE: parámetros, retornos, y usar `dict[str, Any]`/`Sequence[...]`/`X | None` explícitos. Nada de `dict` sin tipo si se puede tipar. |
+| 2.2 | Prohibido `Any` sin necesidad; usar `TYPE_CHECKING` + imports bajo `if TYPE_CHECKING:` para tipos de solo compilación (evita acoplar el engine a ORM/FastAPI). |
+| 2.3 | Naming: funciones/módulos en `snake_case`; clases y Enums en `PascalCase`; constantes en `UPPER_SNAKE_CASE`. Enums de `str, enum.Enum`. |
+| 2.4 | Todos los strings mágicos de dominio (eventos, posiciones, dificultad, tipos de picheo) viven en `app/core/enums.py`. Nunca literales sueltos en routers/engine. |
+| 2.5 | Constantes de gameplay (umbrales, mínimos) en `app/engine/game_rules.py` (fuente única de balance), no inline. |
+| 2.6 | Docstring en cada módulo y función pública explicando responsabilidad, args y retorno. Docstring de módulo al inicio describe la capa SOLID. |
+| 2.7 | Mantener módulos pequeños y cohesivos (criterio SRP/ISP). Si una función >~100 líneas o un archivo >~400 líneas, dividir en partes con responsabilidad única. |
+| 2.8 | `__init__.py` de paquetes: re-exportar el API público (como `repositories/__init__.py` y `models/__init__.py`) para que los consumidores importen de un punto único y SQLAlchemy registre los modelos. |
+
+### 3. Patrones de capa (qué va dónde)
+
+| # | Regla |
+|---|-------|
+| 3.1 | **Routers**: solo auth (JWT), validación de acceso/ownership, mapeo de decisiones del dominio a HTTPException, construcción de la respuesta HTTP y `commit`. |
+| 3.2 | **Repositories**: encapsulan QUERIES ORM. Retornan entidades o `None`. **Prohibido** lanzar `HTTPException` (eso es del router/handler). Prohibido `commit` (lo decide la capa aplicativa). |
+| 3.3 | **Services**: orquestan casos de uso (auth, crear sesión, starter pack, ratings). Pueden lanzar `HTTPException` en la frontera HTTP. Coordinan repos + engine + presenters. |
+| 3.4 | **Engine (dominio)**: reglas de juego puras (state, calculator, turnos, CPU, fatiga, tácticas, robos, fog of war, websocket manager). Sin dependencias HTTP. Mutan `state` y `GameSession` en memoria. |
+| 3.5 | **Presenters** (`services/*_presenter.py`): convierten ORM → dict JSON para el cliente. Centralizan el formato de los payloads (evita duplicación en routers). |
+| 3.6 | **Fog of War**: TODA respuesta HTTP y TODO broadcast WS de una partida debe sanitizarse con `sanitize_state_for_player` por destinatario. Nunca devolver `state_data` crudo al cliente. |
+| 3.7 | **Broadcast WS**: usar `manager.broadcast_to_game_view(game_id, lambda u: {...})` para enviar vistas sanitizadas por usuario. Los payloads de juego se construyen en una función única (p. ej. `build_play_resolved_payload`). |
+
+### 4. Estado de partida (`state_data`)
+
+| # | Regla |
+|---|-------|
+| 4.1 | Toda key de `state_data` que represente un valor canónico (posición, evento, tipo) se escribe usando los enums de `core` cuando se compara; no duplicar literales. |
+| 4.2 | Las mutaciones de `state_data` se hacen sobre una copia (`state = dict(game.state_data or {})`), se modifican las keys y se vuelve a asignar `game.state_data = state`. |
+| 4.3 | La transición de estado del at-bat es responsabilidad ÚNICA de `engine/state_manager.process_at_bat_transition`. No duplicar esa lógica en routers ni en otros managers. |
+| 4.4 | El cambio de media entrada (`end_half_inning`) es fuente única compartida por el flujo normal y el steal; cualquier nuevo fin de media entrada debe reutilizarla. |
+| 4.5 | Agregar un nuevo evento ⇒ agregar su descripción en `_DESCRIPTIONS` de `state_manager` y su clasificación en `Event` de `core/enums` (Open/Closed). |
+| 4.6 | `state_data` es JSON (sin validación en BD): los schemas Pydantic y los enums son quienes validan. Usar Pydantic para request/response, nunca `dict` sin tipar en la firma de un endpoint. |
+| 4.7 | Los datos derivados que usa el cliente (box score, strikeouts, carreras por inning, fatiga) se calculan en UNA función fuente y se inyectan al payload — evitar recalcular el mismo valor en N sitios (riesgo de inconsistencia). |
+
+### 5. Base de datos y migraciones
+
+| # | Regla |
+|---|-------|
+| 5.1 | El esquema se gestiona EXCLUSIVAMENTE con **Alembic**. Prohibido `Base.metadata.create_all` en código de app, seeds o routers (causa esquemas inconsistentes). |
+| 5.2 | Al modificar un modelo: (1) editar `app/models/*.py`, (2) `alembic revision --autogenerate -m "..."`, (3) revisar/ajustar el archivo generado, (4) `alembic upgrade head`. |
+| 5.3 | La sesión de BD se inyecta vía `Depends(get_db)` en routers HTTP. En handlers WebSocket async usar `SessionLocal()` manualmente (documentado: `Depends(get_db)` es poco fiable en WS). |
+| 5.4 | Usar `db.flush()` en lugar de `commit` intermedio cuando se necesita un ID dentro de la misma transacción (p. ej. crear usuario + wallet). El `commit` final resume la unidad de trabajo. |
+| 5.5 | Evitar el problema N+1: usar queries con `join` (como `find_inventory_with_cards`) en lugar de pedir cada entidad por separado en un loop. |
+| 5.6 | Los seeds no crean el esquema; solo poblan datos. Los seeds de debug/one-off van en `app/seeds/` y no forman parte del flujo de producción. |
+
+### 6. Seguridad y autenticación
+
+| # | Regla |
+|---|-------|
+| 6.1 | La identidad del usuario se deriva SIEMPRE del JWT (`get_current_user`), nunca de query params, path ni body en acciones sensibles. |
+| 6.2 | Validar ownership: solo los usuarios de la partida (`home_user_id`/`away_user_id`) pueden consultarla o actuar en ella. Verificar en CADA endpoint de juego. |
+| 6.3 | Validar el turno activo con `_require_turn`/`turn_guard` (rol PITCHER/BATTER + media entrada) antes de procesar acción. La CPU (`CPU_BOT`) se considera "en turno" mediante bypass explícito. |
+| 6.4 | `JWT_SECRET_KEY` SIEMPRE del entorno; el módulo `auth` debe fallar al arrancar si no está definida (sin fallbacks hardcodeados). |
+| 6.5 | Contraseñas con bcrypt (passlib), nunca en texto plano ni devueltas en respuestas. |
+| 6.6 | Rate limiting en login/register (limitado en memoria actualmente: documentar si se escala a Redis/nginx). No omitirlo en endpoints sensibles. |
+| 6.7 | CORS restringido a orígenes conocidos con `allow_credentials=True`; **TODO #12** de `main.py` (limitar a dominios de prod) debe resolverse antes de desplegar. |
+| 6.8 | Validación de entrada: usar schemas Pydantic con restricciones (min/max, patterns). Nunca confiar en el cliente para reglas de negocio; el servidor es la fuente de verdad. |
+
+### 7. Logging y depuración
+
+| # | Regla |
+|---|-------|
+| 7.1 | Usar el módulo estándar `logging` (`logger = logging.getLogger(__name__)`) configurado en `main.py`. **Prohibido** `print()` para logs de aplicación. |
+| 7.2 | Los `print` de depuración existentes (`🎯 [DEBUG]`, `🤖 [CPU...]`, `🚫`, etc.) deben ir migrándose a `logger.debug/info` — se eliminan de código que toque una nueva feature. |
+| 7.3 | No loguear secretos, tokens ni datos sensibles (contraseñas, hashes, JWT). |
+| 7.4 | Logs estructurados y con contexto (game_id, user_id) para facilitar el diagnóstico de partidas. |
+| 7.5 | Los mensajes de error de usuario se comunican vía HTTPException con `detail` legible; los logs de error técnicos van al logger. |
+
+### 8. Manejo de errores
+
+| # | Regla |
+|---|-------|
+| 8.1 | Errores esperados de dominio → `HTTPException` con código correcto (400/403/404/409). Los repos devuelven `None`, y el router decide el 404. |
+| 8.2 | Validación Pydantic → el handler global de `main.py` (`validation_exception_handler`) la convierte en `detail` amigable. No duplicar esta lógica por endpoint. |
+| 8.3 | Errores inesperados → no romper el flujo WS ni dejar la DB con transacciones a medias: el router hace `commit` solo al final; en caso de excepción NO commitea (se revierte). |
+| 8.4 | Los broadcasts WS no deben tumbar una acción: envolver el envío en try/except cuando el fallo del envío no debe anular la jugada (pero NUNCA silenciar errores de lógica sin loguearlos). |
+| 8.5 | No exponer stack traces ni detalles internos en las respuestas HTTP; enviar `detail` genérico + loguear lo técnico. |
+
+### 9. Convenciones FastAPI / API
+
+| # | Regla |
+|---|-------|
+| 9.1 | Prefijos consistentes: `/api/v1/...`. Agrupar por dominio con `tags` (Autenticación, Gestión de Sesión 1v1, Motor de Jugabilidad 1v1, Shop & Packs, User & Inventory). |
+| 9.2 | Cada endpoint declara `summary`, `response_model=...` (cuando aplique) y status code explícito (`201_CREATED`, etc.). Evitar devolver `dict` crudo sin schema cuando haya un `response_model` definido. |
+| 9.3 | Los request/response se validan con schemas Pydantic en `app/schemas/`. Prohibido `payload: dict` en firmas de endpoint (tipar con un schema). |
+| 9.4 | Estructura del paquete de schemas por feature (`schemas/game.py`, `schemas/cards.py`, etc.) y re-export en `schemas/__init__.py` (patrón ya usado con `schemas.py`/`models.py` de compatibilidad). |
+| 9.5 | Prefix de routers: `games.py` (creación/lectura) vs `gameplay.py` (acciones) se separan por responsabilidad — mantener esa separación. |
+
+### 10. WebSockets
+
+| # | Regla |
+|---|-------|
+| 10.1 | Autenticar el token ANTES de aceptar la conexión (`authenticate_ws_token`) y validar ownership del game antes de enviar estado. |
+| 10.2 | Nuevos eventos WS se definen con un `type` descriptivo (`PITCH_COMMITTED`, `PLAY_RESOLVED`, `PITCHER_CHANGED`, `STEAL_RESOLVED`, `PITCHER_CHANGE_ACKNOWLEDGED`, `INIT_GAME_STATE`). Documentar el contrato de cada uno. |
+| 10.3 | Todo evento de partida lleva `state_data` sanitizado por destinatario (Fog of War); el broadcast usa `broadcast_to_game_view` con lambda por usuario. |
+| 10.4 | Mantener la conexión viva sin bloquear otros eventos (usar `asyncio.wait_for(receive_text(), timeout)` y limpiar con `manager.disconnect`).
+| 10.5 | `websocket_manager` es la única vía de broadcast; no abrir sockets crudos en routers/engine. |
+
+### 11. Testing
+
+| # | Regla |
+|---|-------|
+| 11.1 | Framework: **pytest**. Correr desde `backend/` con `pytest` (config en `pytest.ini`). |
+| 11.2 | `conftest.py` define `DATABASE_URL=sqlite://` y `JWT_SECRET_KEY` test antes de importar `app.database`. Mantener tests sin servicios externos (sin Postgres real). |
+| 11.3 | Cada módulo del engine con lógica pura (calculator, state_manager, bullpen, fatigue, runner, tactics, cpu_ai, game_over) tiene su suite de tests (`tests/test_*.py`). |
+| 11.4 | Probar comportamiento (eventos, transiciones, turnos), no implementación. Estructura `describe`/`it` al estilo: `def test_cuando_..._entonces_...()`. |
+| 11.5 | Ninguna feature/arreglo se da por cerrado sin su test (o justificación escrita). Los tests deben quedar verdes antes de commit. |
+| 11.6 | Los routers que dependen de lógica compleja se prueban vía el engine cuando sea posible; pruebas de integración con TestClient para flujos clave cuando requieran la BD. |
+
+### 12. Git / Flujo de trabajo
+
+| # | Regla |
+|---|-------|
+| 12.1 | Conventional Commits: `feat:`, `fix:`, `refactor:`, `docs:`, `test:`, `chore:`, `perf:` (+ `breaking:`). |
+| 12.2 | Commits atómicos y pequeños; UNA feature por PR; rama `main` protegida. |
+| 12.3 | Mensajes en Español o Inglés (elegir uno y mantenerlo). |
+| 12.4 | Antes de commit: `pytest` verde. Si hay lint/typecheck configurado, también verde. |
+| 12.5 | No commitear `.env*`, `*.pyc`, `.venv/`, `__pycache__/`; actualizar `.gitignore` según lo nuevo. |
+| 12.6 | Todo cambio de modelo EXIGE su migración Alembic en el mismo commit. |
+
+### 13. Deuda técnica prioritaria a resolver
+
+| # | Item | Ubicación |
+|---|-------|-----------|
+| 13.1 | **TODO #12 CORS** — restringir orígenes a dominios de producción | `app/main.py` |
+| 13.2 | **Migrar `print()` de debug a `logging`** (hay muchos dispersos en gameplay.py, game_actions.py, ws.py, cpu_ai.py, state_manager.py) | engine + routers |
+| 13.3 | **Tipar endpoints sin schema** (`save_user_lineup` recibe `payload: dict`; el router `user.py` y algunos retornos de `dict`) | `routers/user.py` y otros |
+| 13.4 | **Typos en docstrings** (`game_session_service.py` usa acentos incompletos: "aplicacion", "creacion") — normalizar ortografía | `services/game_session_service.py` |
+| 13.5 | **Error handler global** para errores inesperados (500) que no sean de validación | `app/main.py` |
+| 13.6 | **Rate limiting** documentado para escala multi-instancia (Redis/nginx) — actualmente en memoria | `routers/auth.py` |
+
+---
+
 ## 📋 CONTROL DE FASES (PWA) — CHECKLIST DE AVANCE
 
 > **Cómo usar:** marca cada tarea `- [ ]` → `- [x]` conforme se finalice y actualiza

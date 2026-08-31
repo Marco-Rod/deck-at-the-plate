@@ -25,6 +25,7 @@ logs de cambio de media entrada usan únicamente los ids del state_data.
 """
 from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Dict, Tuple
+import logging
 
 from app.core.enums import Event, PitchType, RunnerBase
 from app.core.engine_types import AtBatResult, Runners
@@ -34,6 +35,8 @@ from app.engine.deck_manager import draw_card
 
 if TYPE_CHECKING:
     from app.models import GameSession
+
+logger = logging.getLogger(__name__)
 
 # Descripciones por evento (Open/Closed: agregar evento = añadir entrada aquí).
 _DESCRIPTIONS: Dict[Any, str] = {
@@ -91,8 +94,7 @@ def end_half_inning(game: "GameSession", state: Dict[str, Any]) -> None:
         away_lineup = state.get("away_lineup", [])
         if away_lineup:
             state["active_batter"] = away_lineup[away_idx]
-        print(f"🔄 [INNING CHANGE] → ALTA de Inning {game.current_inning}")
-        print(f"   HOME pitcher al montículo: {home_pitcher}")
+        logger.debug("Cambio de entrada -> ALTA de Inning %s (HOME pitcher al monticulo: %s)", game.current_inning, home_pitcher)
     else:
         away_pitcher = state.get("away_pitcher_id") or state.get("active_pitcher")
         state["active_pitcher"] = away_pitcher
@@ -100,8 +102,7 @@ def end_half_inning(game: "GameSession", state: Dict[str, Any]) -> None:
         home_lineup = state.get("home_lineup", [])
         if home_lineup:
             state["active_batter"] = home_lineup[home_idx]
-        print(f"🔄 [INNING CHANGE] → BAJA de Inning {game.current_inning}")
-        print(f"   AWAY pitcher al montículo: {away_pitcher}")
+        logger.debug("Cambio de entrada -> BAJA de Inning %s (AWAY pitcher al monticulo: %s)", game.current_inning, away_pitcher)
 
     # Ghost runner en extra innings (a partir de total_innings+1).
     # El corredor es el último bateador que hizo out en la media entrada anterior.

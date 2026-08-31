@@ -18,6 +18,8 @@ Beneficios SOLID:
       `fastapi` en ningún punto).
 """
 
+import logging
+
 from app.engine.attribute_mapper import (
     map_card_to_batter_attrs,
     map_card_to_pitcher_attrs,
@@ -52,6 +54,8 @@ from app.repositories import (
     record_game_event,
 )
 from app.services.card_presenter import build_batter_payload, build_pitcher_payload
+
+logger = logging.getLogger(__name__)
 
 
 def build_play_resolved_payload(game: GameSession, event: str, description: str, inning_completed: bool = False, user_id: str = None, db=None) -> dict:
@@ -119,7 +123,7 @@ def build_play_resolved_payload(game: GameSession, event: str, description: str,
                 inning_runs[f"{i}_false"] = score_history.get(f"{i}_false", 0)
 
         except Exception as e:
-            print(f"⚠️ [STATS] Error obteniendo box score: {e}")
+            logger.warning("Error obteniendo box score: %s", e)
     
     
     # ⭐ NUEVO: Obtener datos del pitcher y bateador activos para mostrar en la tarjeta
@@ -371,21 +375,22 @@ async def execute_cpu_pitcher_change(
     # Obtener el team_id del pitcher del CPU de referencia
     ref_pitcher_id = state.get(cpu_pitcher_field)
     if not ref_pitcher_id:
-        print(f"🤖 [CPU PITCHER CHANGE] ❌ No reference pitcher found (field={cpu_pitcher_field})")
+        logger.warning("CPU pitcher change: pitcher de referencia no encontrado (field=%s)", cpu_pitcher_field)
         return False
     
     ref_pitcher = get_card_by_id(db, ref_pitcher_id)
     if not ref_pitcher:
-        print(f"🤖 [CPU PITCHER CHANGE] ❌ Reference pitcher not found in DB: {ref_pitcher_id}")
+        logger.warning("CPU pitcher change: pitcher de referencia no encontrado en DB: %s", ref_pitcher_id)
         return False
     
     cpu_team_id = ref_pitcher.team_id
     
-    print(f"🤖 [CPU PITCHER CHANGE] Iniciando cambio de lanzador:")
-    print(f"   - CPU Position: {'HOME' if cpu_is_home else 'AWAY'}")
-    print(f"   - CPU Team ID: {cpu_team_id} | Team: {ref_pitcher.team.name if ref_pitcher.team else 'UNKNOWN'}")
-    print(f"   - Current Pitcher: {ref_pitcher.name} (ID: {active_pitcher_id})")
-    print(f"   - Already Used Pitchers: {used_pitcher_ids}")
+    logger.debug(
+        "CPU pitcher change: iniciando; posicion=%s team_id=%s team=%s pitcher_actual=%s (%s) usados=%s",
+        "HOME" if cpu_is_home else "AWAY", cpu_team_id,
+        ref_pitcher.team.name if ref_pitcher.team else "UNKNOWN",
+        ref_pitcher.name, active_pitcher_id, used_pitcher_ids,
+    )
     
     # Buscar pitchers disponibles en el equipo de la CPU (no usados, no el activo)
     available = find_pitchers_for_team(
@@ -395,19 +400,27 @@ async def execute_cpu_pitcher_change(
         excluded_id=active_pitcher_id,
     )
     
-    print(f"   - Available Pitchers: {len(available)}")
+    logger.debug("CPU pitcher change: %s disponibles", len(available))
     for pitcher in available:
-        print(f"      ✓ {pitcher.name} (ID: {pitcher.id}) | Team: {pitcher.team.name if pitcher.team else 'UNKNOWN'} | OVR: {pitcher.overall} | Pos: {pitcher.position}")
+        logger.debug(
+            "   %s (ID: %s) | Team: %s | OVR: %s | Pos: %s",
+            pitcher.name, pitcher.id,
+            pitcher.team.name if pitcher.team else "UNKNOWN",
+            pitcher.overall, pitcher.position,
+        )
     
     if not available:
-        print(f"🤖 [CPU PITCHER CHANGE] ❌ No hay relevistas disponibles para el CPU")
+        logger.warning("CPU pitcher change: no hay relevistas disponibles para el CPU")
         return False
     
     # Seleccionar al relevista con mayor OVR (mejor preparado)
     new_pitcher = max(available, key=lambda p: p.overall)
-    print(f"🤖 [CPU PITCHER CHANGE] ✅ Seleccionado nuevo pitcher: {new_pitcher.name} (OVR {new_pitcher.overall})")
-    print(f"   - Team: {new_pitcher.team.name if new_pitcher.team else 'UNKNOWN'} (ID: {new_pitcher.team_id})")
-    print(f"   - Position: {new_pitcher.position} | Rarity: {new_pitcher.rarity}")
+    logger.debug(
+        "CPU pitcher change: seleccionado %s (OVR %s) | Team: %s (%s) | Pos: %s | Rarity: %s",
+        new_pitcher.name, new_pitcher.overall,
+        new_pitcher.team.name if new_pitcher.team else "UNKNOWN",
+        new_pitcher.team_id, new_pitcher.position, new_pitcher.rarity,
+    )
     
     # Ejecutar el cambio en state (regla compartida humano/CPU)
     old_pitcher_id = perform_pitcher_change(state, new_pitcher.id, is_home=cpu_is_home)
