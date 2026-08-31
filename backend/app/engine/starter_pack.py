@@ -195,6 +195,55 @@ def select_starter_cards(
                 selected.remove(victim)
                 selected.append(pitcher)
 
+    # ── 2.6 Garantizar cobertura de todas las posiciones de campo ──────
+    required = set(REQUIRED_POSITIONS)
+    covered = {c.position for c in selected if c.position in required}
+    pitcher_count = sum(1 for c in selected if _is_pitcher(c))
+    favorite_team_id = team_cards[0].team_id if team_cards else None
+
+    def _sacrificable_keep_pitcher(card):
+        if not _is_sacrificable(card, selected):
+            return False
+        return not (_is_pitcher(card) and pitcher_count <= 1)
+
+    for pos in sorted(required - covered):
+        # Intercambiar dentro de la misma procedencia para conservar el split
+        # favorito (7) / otros (6).
+        for replacement_pool, is_favorite_pool in (
+            (team_cards, True),
+            (other_team_cards, False),
+        ):
+            candidates = [
+                c for c in replacement_pool
+                if c.position == pos and c.id not in selected_set
+            ]
+            if not candidates:
+                continue
+            if is_favorite_pool:
+                victims = [
+                    c for c in selected
+                    if favorite_team_id is not None and c.team_id == favorite_team_id
+                ]
+            else:
+                victims = [
+                    c for c in selected
+                    if favorite_team_id is None or c.team_id != favorite_team_id
+                ]
+            victim = next((c for c in reversed(victims) if _sacrificable_keep_pitcher(c)), None)
+            if victim is None:
+                continue
+            replacement = rng.choice(candidates)
+            selected.remove(victim)
+            selected.append(replacement)
+            selected_set.remove(victim.id)
+            selected_set.add(replacement.id)
+            covered.add(pos)
+            if _is_pitcher(victim):
+                pitcher_count -= 1
+            if _is_pitcher(replacement):
+                pitcher_count += 1
+            break
+
     # ── 3. Barajar y retornar ──────────────────────────────────────────
     rng.shuffle(selected)
     return selected
