@@ -424,31 +424,36 @@ function BasesDiamond({ bases }: BasesDiamondProps) {
         stroke="#F2A13A"
         strokeWidth="1"
       />
+      {/* Third base */}
       <motion.circle
         cx="30"
         cy="10"
-        r="2"
+        r={2}
         fill={bases.third ? '#F2A13A' : 'none'}
-        animate={bases.third ? { r: [2, 3.5, 2] } : {}}
-        transition={{ repeat: Infinity, duration: 1 }}
+        animate={bases.third ? { r: [2, 3.5, 2] } : { r: 2 }}
+        transition={{ repeat: bases.third ? Infinity : 0, duration: 1 }}
       />
+      {/* First base */}
       <motion.circle
         cx="50"
         cy="30"
-        r="2"
+        r={2}
         fill={bases.first ? '#F2A13A' : 'none'}
-        animate={bases.first ? { r: [2, 3.5, 2] } : {}}
-        transition={{ repeat: Infinity, duration: 1, delay: 0.2 }}
+        animate={bases.first ? { r: [2, 3.5, 2] } : { r: 2 }}
+        transition={{ repeat: bases.first ? Infinity : 0, duration: 1, delay: 0.2 }}
       />
+      {/* Home plate */}
       <circle cx="30" cy="50" r="2" fill="none" />
+      {/* Second base */}
       <motion.circle
         cx="10"
         cy="30"
-        r="2"
+        r={2}
         fill={bases.second ? '#F2A13A' : 'none'}
-        animate={bases.second ? { r: [2, 3.5, 2] } : {}}
-        transition={{ repeat: Infinity, duration: 1, delay: 0.1 }}
+        animate={bases.second ? { r: [2, 3.5, 2] } : { r: 2 }}
+        transition={{ repeat: bases.second ? Infinity : 0, duration: 1, delay: 0.1 }}
       />
+      {/* Center diamond */}
       <circle cx="30" cy="30" r="1.5" fill="#F2A13A" opacity="0.5" />
     </svg>
   )
