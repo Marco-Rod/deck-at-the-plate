@@ -3,6 +3,19 @@
    Mobile → Tablet → Desktop
    ============================================================================ */
 
+/* Container wrapper - for max-width on desktop only */
+.gameContainer {
+  height: 100%;
+  width: 100%;
+  margin: 0 auto;
+}
+
+@media (min-width: 1024px) {
+  .gameContainer {
+    max-width: min(94vw, 1600px);
+  }
+}
+
 /* Base grid for all breakpoints */
 .gameGrid {
   display: grid;
