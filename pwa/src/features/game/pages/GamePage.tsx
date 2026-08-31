@@ -123,7 +123,7 @@ export function GamePage() {
     <div className="bg-koshien-dark lg:h-dvh lg:overflow-hidden">
       {/* Padding adaptable por breakpoint */}
       <div
-        className="mx-auto h-full px-3 py-2 sm:px-4 sm:py-3 lg:flex lg:w-min lg:max-w-6xl lg:flex-col lg:p-3"
+        className="mx-auto h-full w-full px-3 py-2 sm:px-4 sm:py-3 lg:p-3"
         style={{
           /* Desktop: centrado con max-width */
           maxWidth: 'min(94vw, 1600px)',
