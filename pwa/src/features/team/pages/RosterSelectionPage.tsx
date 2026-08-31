@@ -31,12 +31,18 @@ export function RosterSelectionPage() {
   }, [load])
 
   const batters = useMemo(
-    () => (inventory ?? []).filter((i) => i.card.position !== 'SP' && i.card.position !== 'RP'),
+    () =>
+      (inventory ?? [])
+        .filter((i) => i.card.position !== 'SP' && i.card.position !== 'RP')
+        .sort((a, b) => b.card.overall - a.card.overall),
     [inventory],
   )
 
   const pitchers = useMemo(
-    () => (inventory ?? []).filter((i) => i.card.position === 'SP' || i.card.position === 'RP'),
+    () =>
+      (inventory ?? [])
+        .filter((i) => i.card.position === 'SP' || i.card.position === 'RP')
+        .sort((a, b) => b.card.overall - a.card.overall),
     [inventory],
   )
 
