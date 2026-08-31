@@ -1,0 +1,108 @@
+/* ============================================================================
+   GamePage - Responsive Grid Layout Styles
+   Mobile → Tablet → Desktop
+   ============================================================================ */
+
+/* Base grid for all breakpoints */
+.gameGrid {
+  display: grid;
+  height: 100%;
+  width: 100%;
+  gap: 0.5rem;
+  grid-template-columns: 1fr;
+  grid-auto-rows: auto;
+  grid-template-areas:
+    "header"
+    "score"
+    "situation"
+    "matchup"
+    "next"
+    "cards"
+    "action";
+}
+
+/* Tablet and above: increase gap */
+@media (min-width: 768px) {
+  .gameGrid {
+    gap: 0.75rem;
+  }
+}
+
+/* Desktop: 3-column layout */
+@media (min-width: 1024px) {
+  .gameGrid {
+    grid-template-columns: 1fr 1.2fr 1fr;
+    grid-template-rows: auto auto 1fr auto auto;
+    grid-template-areas:
+      "header header header"
+      "score score situation"
+      "pitcher zone batter"
+      "pitcher zone next"
+      "cards cards action";
+    gap: 0.75rem;
+  }
+}
+
+/* Desktop Compact: smaller height */
+@media (min-width: 1200px) and (max-height: 800px) {
+  .gameGrid {
+    grid-template-rows: auto auto 0.8fr auto auto;
+    gap: 0.5rem;
+  }
+}
+
+/* Grid area assignments */
+.areaHeader {
+  grid-area: header;
+}
+
+.areaScore {
+  grid-area: score;
+}
+
+.areaSituation {
+  grid-area: situation;
+}
+
+.areaPitcher {
+  grid-area: pitcher;
+  min-width: 0;
+}
+
+.areaZone {
+  grid-area: zone;
+  min-width: 0;
+}
+
+.areaBatter {
+  grid-area: batter;
+  min-width: 0;
+}
+
+.areaNext {
+  grid-area: next;
+  min-width: 0;
+}
+
+.areaCards {
+  grid-area: cards;
+}
+
+.areaAction {
+  grid-area: action;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+@media (min-width: 1024px) {
+  .areaAction {
+    justify-content: flex-end;
+  }
+}
+
+/* Flex wrapper for child elements */
+.gameGrid > * {
+  display: flex;
+  flex-direction: column;
+}

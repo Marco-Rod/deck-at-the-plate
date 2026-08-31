@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import styles from './GamePage.module.css'
 
 // ============================================================================
 // GAME PAGE - Responsive Design: Mobile-First → Desktop Grid
@@ -129,72 +130,12 @@ export function GamePage() {
         }}
       >
         {/* GRID LAYOUT: Mobile vertical → Desktop 3-column */}
-        <div
-          className="game-grid grid h-full w-full gap-2 sm:gap-3 lg:gap-3"
-          style={{
-            display: 'grid',
-            gridTemplateColumns: '1fr',
-            gridAutoRows: 'auto',
-            gridTemplateAreas: `
-              "header"
-              "score"
-              "situation"
-              "matchup"
-              "next"
-              "cards"
-              "action"
-            `,
-            /* Desktop: 3 columns */
-            /* @media (min-width: 1024px) se aplica vía className */
-          }}
-        >
-          {/* ============================================================
-              BREAKPOINT STYLES: Inyectadas globalmente
-              ============================================================ */}
-          <style>{`
-            @media (min-width: 1024px) {
-              .game-grid {
-                grid-template-columns: 1fr 1.2fr 1fr;
-                grid-template-rows: auto auto 1fr auto auto;
-                grid-template-areas:
-                  "header header header"
-                  "score score situation"
-                  "pitcher zone batter"
-                  "pitcher zone next"
-                  "cards cards action";
-              }
-            }
-
-            /* Desktop Compact: ancho >= 1200px, altura <= 800px */
-            @media (min-width: 1200px) and (max-height: 800px) {
-              .game-grid {
-                grid-template-rows: auto auto 0.8fr auto auto;
-                gap: 0.5rem;
-              }
-            }
-
-            /* Area assignments */
-            .area-header { grid-area: header; }
-            .area-score { grid-area: score; }
-            .area-situation { grid-area: situation; }
-            .area-pitcher { grid-area: pitcher; }
-            .area-zone { grid-area: zone; }
-            .area-batter { grid-area: batter; }
-            .area-next { grid-area: next; }
-            .area-cards { grid-area: cards; }
-            .area-action { grid-area: action; }
-
-            /* Flex centering para ítems en grid */
-            .game-grid > * {
-              display: flex;
-              flex-direction: column;
-            }
-          `}</style>
+        <div className={styles.gameGrid}>
 
           {/* ============================================================
               HEADER
               ============================================================ */}
-          <div className="area-header">
+          <div className={styles.areaHeader}>
             <AnimatePresence mode="wait">
               <Header homeTeam={mockGame.homeTeam} />
             </AnimatePresence>
@@ -203,7 +144,7 @@ export function GamePage() {
           {/* ============================================================
               SCOREBOARD (score + away score + home score)
               ============================================================ */}
-          <div className="area-score">
+          <div className={styles.areaScore}>
             <AnimatePresence mode="wait">
               <Scoreboard
                 homeTeam={mockGame.homeTeam}
@@ -216,7 +157,7 @@ export function GamePage() {
           {/* ============================================================
               SITUATION (R/H/E + Inning + Bases) — Desktop: right column
               ============================================================ */}
-          <div className="area-situation">
+          <div className={styles.areaSituation}>
             <AnimatePresence mode="wait">
               <GameSituation
                 runs={mockGame.runs}
@@ -232,7 +173,7 @@ export function GamePage() {
           {/* ============================================================
               MATCHUP: Pitcher (area-pitcher)
               ============================================================ */}
-          <div className="area-pitcher min-w-0">
+          <div className={`${styles.areaPitcher}`}>
             <AnimatePresence mode="wait">
               <PitcherCard
                 pitcher={mockPitcher}
@@ -245,7 +186,7 @@ export function GamePage() {
           {/* ============================================================
               MATCHUP: Strike Zone (area-zone)
               ============================================================ */}
-          <div className="area-zone min-w-0">
+          <div className={`${styles.areaZone}`}>
             <AnimatePresence mode="wait">
               <StrikeZone selectedZone={selectedZone} setSelectedZone={setSelectedZone} />
             </AnimatePresence>
@@ -254,7 +195,7 @@ export function GamePage() {
           {/* ============================================================
               MATCHUP: Batter (area-batter)
               ============================================================ */}
-          <div className="area-batter min-w-0">
+          <div className={`${styles.areaBatter}`}>
             <AnimatePresence mode="wait">
               <BatterCard
                 batter={mockBatter}
@@ -267,7 +208,7 @@ export function GamePage() {
           {/* ============================================================
               NEXT BATTER (area-next) — Desktop: under Batter
               ============================================================ */}
-          <div className="area-next min-w-0">
+          <div className={`${styles.areaNext}`}>
             <AnimatePresence mode="wait">
               <NextBatterPreview nextBatter={mockNextBatter} />
             </AnimatePresence>
@@ -276,7 +217,7 @@ export function GamePage() {
           {/* ============================================================
               ACTION CARDS (area-cards)
               ============================================================ */}
-          <div className="area-cards">
+          <div className={styles.areaCards}>
             <AnimatePresence mode="wait">
               <ActionCardsSection
                 cards={mockActionCards}
@@ -289,7 +230,7 @@ export function GamePage() {
           {/* ============================================================
               LANZAR BUTTON (area-action) — Desktop: same row as cards
               ============================================================ */}
-          <div className="area-action flex items-end justify-center lg:justify-end">
+          <div className={styles.areaAction}>
             <AnimatePresence mode="wait">
               <LanzarButton
                 chargePercent={chargePercent}
