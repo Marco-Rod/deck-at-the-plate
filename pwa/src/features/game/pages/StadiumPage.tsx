@@ -1,7 +1,5 @@
-import { RoutePlaceholder } from '@/shared/ui/RoutePlaceholder'
+import { GamePage } from './GamePage'
 
 export function StadiumPage() {
-  return (
-    <RoutePlaceholder title="Estadio" description="/game/:gameId — Fase 3: WebSocket y gameplay" />
-  )
+  return <GamePage />
 }
