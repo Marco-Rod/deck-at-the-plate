@@ -2,8 +2,8 @@ import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 
 // ============================================================================
-// GAME PAGE - Deck at the Plate Gameplay Screen
-// Following UI Spec V1: HUD minimalista, oscuro, técnico y orientado a decisión
+// GAME PAGE - Responsive Design: Mobile-First → Desktop Grid
+// Following UI Spec V1 + Desktop Responsive Guidelines
 // ============================================================================
 
 export function GamePage() {
@@ -119,53 +119,196 @@ export function GamePage() {
   }
 
   return (
-    <div className="min-h-screen w-full bg-koshien-dark px-4 py-2 sm:px-4 sm:py-3">
-      <AnimatePresence mode="wait">
-        <Header homeTeam={mockGame.homeTeam} />
-        <Scoreboard
-          homeTeam={mockGame.homeTeam}
-          awayTeam={mockGame.awayTeam}
-          innings={mockGame.innings}
-        />
-        <GameSituation
-          runs={mockGame.runs}
-          hits={mockGame.hits}
-          errors={mockGame.errors}
-          inning={mockGame.currentInning}
-          isTop={mockGame.isTop}
-          bases={mockGame.bases}
-        />
-        <CoreGameplay
-          pitcher={mockPitcher}
-          batter={mockBatter}
-          selectedZone={selectedZone}
-          setSelectedZone={setSelectedZone}
-          hoveredPitchStat={hoveredPitchStat}
-          setHoveredPitchStat={setHoveredPitchStat}
-          hoveredBatterStat={hoveredBatterStat}
-          setHoveredBatterStat={setHoveredBatterStat}
-        />
-        <NextBatterPreview nextBatter={mockNextBatter} />
-        <ActionCardsSection
-          cards={mockActionCards}
-          selectedCardId={selectedActionCard}
-          setSelectedCardId={setSelectedActionCard}
-        />
-        <LanzarButton
-          chargePercent={chargePercent}
-          isCharging={isCharging}
-          onMouseDown={handleLanzarMouseDown}
-          onMouseUp={handleLanzarMouseUp}
-          onTouchStart={handleLanzarMouseDown}
-          onTouchEnd={handleLanzarMouseUp}
-        />
-      </AnimatePresence>
+    <div className="bg-koshien-dark lg:h-dvh lg:overflow-hidden">
+      {/* Padding adaptable por breakpoint */}
+      <div
+        className="mx-auto h-full px-3 py-2 sm:px-4 sm:py-3 lg:flex lg:w-min lg:max-w-6xl lg:flex-col lg:p-3"
+        style={{
+          /* Desktop: centrado con max-width */
+          maxWidth: 'min(94vw, 1600px)',
+        }}
+      >
+        {/* GRID LAYOUT: Mobile vertical → Desktop 3-column */}
+        <div
+          className="game-grid grid h-full w-full gap-2 sm:gap-3 lg:gap-3"
+          style={{
+            display: 'grid',
+            gridTemplateColumns: '1fr',
+            gridAutoRows: 'auto',
+            gridTemplateAreas: `
+              "header"
+              "score"
+              "situation"
+              "matchup"
+              "next"
+              "cards"
+              "action"
+            `,
+            /* Desktop: 3 columns */
+            /* @media (min-width: 1024px) se aplica vía className */
+          }}
+        >
+          {/* ============================================================
+              BREAKPOINT STYLES: Inyectadas globalmente
+              ============================================================ */}
+          <style>{`
+            @media (min-width: 1024px) {
+              .game-grid {
+                grid-template-columns: 1fr 1.2fr 1fr;
+                grid-template-rows: auto auto 1fr auto auto;
+                grid-template-areas:
+                  "header header header"
+                  "score score situation"
+                  "pitcher zone batter"
+                  "pitcher zone next"
+                  "cards cards action";
+              }
+            }
+
+            /* Desktop Compact: ancho >= 1200px, altura <= 800px */
+            @media (min-width: 1200px) and (max-height: 800px) {
+              .game-grid {
+                grid-template-rows: auto auto 0.8fr auto auto;
+                gap: 0.5rem;
+              }
+            }
+
+            /* Area assignments */
+            .area-header { grid-area: header; }
+            .area-score { grid-area: score; }
+            .area-situation { grid-area: situation; }
+            .area-pitcher { grid-area: pitcher; }
+            .area-zone { grid-area: zone; }
+            .area-batter { grid-area: batter; }
+            .area-next { grid-area: next; }
+            .area-cards { grid-area: cards; }
+            .area-action { grid-area: action; }
+
+            /* Flex centering para ítems en grid */
+            .game-grid > * {
+              display: flex;
+              flex-direction: column;
+            }
+          `}</style>
+
+          {/* ============================================================
+              HEADER
+              ============================================================ */}
+          <div className="area-header">
+            <AnimatePresence mode="wait">
+              <Header homeTeam={mockGame.homeTeam} />
+            </AnimatePresence>
+          </div>
+
+          {/* ============================================================
+              SCOREBOARD (score + away score + home score)
+              ============================================================ */}
+          <div className="area-score">
+            <AnimatePresence mode="wait">
+              <Scoreboard
+                homeTeam={mockGame.homeTeam}
+                awayTeam={mockGame.awayTeam}
+                innings={mockGame.innings}
+              />
+            </AnimatePresence>
+          </div>
+
+          {/* ============================================================
+              SITUATION (R/H/E + Inning + Bases) — Desktop: right column
+              ============================================================ */}
+          <div className="area-situation">
+            <AnimatePresence mode="wait">
+              <GameSituation
+                runs={mockGame.runs}
+                hits={mockGame.hits}
+                errors={mockGame.errors}
+                inning={mockGame.currentInning}
+                isTop={mockGame.isTop}
+                bases={mockGame.bases}
+              />
+            </AnimatePresence>
+          </div>
+
+          {/* ============================================================
+              MATCHUP: Pitcher (area-pitcher)
+              ============================================================ */}
+          <div className="area-pitcher min-w-0">
+            <AnimatePresence mode="wait">
+              <PitcherCard
+                pitcher={mockPitcher}
+                hoveredStat={hoveredPitchStat}
+                setHoveredStat={setHoveredPitchStat}
+              />
+            </AnimatePresence>
+          </div>
+
+          {/* ============================================================
+              MATCHUP: Strike Zone (area-zone)
+              ============================================================ */}
+          <div className="area-zone min-w-0">
+            <AnimatePresence mode="wait">
+              <StrikeZone selectedZone={selectedZone} setSelectedZone={setSelectedZone} />
+            </AnimatePresence>
+          </div>
+
+          {/* ============================================================
+              MATCHUP: Batter (area-batter)
+              ============================================================ */}
+          <div className="area-batter min-w-0">
+            <AnimatePresence mode="wait">
+              <BatterCard
+                batter={mockBatter}
+                hoveredStat={hoveredBatterStat}
+                setHoveredStat={setHoveredBatterStat}
+              />
+            </AnimatePresence>
+          </div>
+
+          {/* ============================================================
+              NEXT BATTER (area-next) — Desktop: under Batter
+              ============================================================ */}
+          <div className="area-next min-w-0">
+            <AnimatePresence mode="wait">
+              <NextBatterPreview nextBatter={mockNextBatter} />
+            </AnimatePresence>
+          </div>
+
+          {/* ============================================================
+              ACTION CARDS (area-cards)
+              ============================================================ */}
+          <div className="area-cards">
+            <AnimatePresence mode="wait">
+              <ActionCardsSection
+                cards={mockActionCards}
+                selectedCardId={selectedActionCard}
+                setSelectedCardId={setSelectedActionCard}
+              />
+            </AnimatePresence>
+          </div>
+
+          {/* ============================================================
+              LANZAR BUTTON (area-action) — Desktop: same row as cards
+              ============================================================ */}
+          <div className="area-action flex items-end justify-center lg:justify-end">
+            <AnimatePresence mode="wait">
+              <LanzarButton
+                chargePercent={chargePercent}
+                isCharging={isCharging}
+                onMouseDown={handleLanzarMouseDown}
+                onMouseUp={handleLanzarMouseUp}
+                onTouchStart={handleLanzarMouseDown}
+                onTouchEnd={handleLanzarMouseUp}
+              />
+            </AnimatePresence>
+          </div>
+        </div>
+      </div>
     </div>
   )
 }
 
 // ============================================================================
-// SECTION COMPONENTS
+// SECTION COMPONENTS (sin cambios funcionales)
 // ============================================================================
 
 interface HeaderProps {
@@ -178,18 +321,18 @@ function Header({ homeTeam }: HeaderProps) {
       initial={{ opacity: 0, y: -10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3 }}
-      className="mb-2 flex items-center justify-between"
+      className="mb-2 flex items-center justify-between lg:mb-0"
     >
-      <h1 className="font-sports text-2xl font-bold uppercase tracking-wider text-koshien-chalk sm:text-3xl">
+      <h1 className="font-sports text-2xl font-bold uppercase tracking-wider text-koshien-chalk sm:text-3xl lg:text-2xl">
         {homeTeam.shortName} VS CPU
       </h1>
       <motion.button
         whileHover={{ scale: 1.05, borderColor: '#FF554F' }}
         whileTap={{ scale: 0.95 }}
-        className="rounded border border-koshien-red bg-koshien-dark px-4 py-2 text-sm font-bold uppercase text-koshien-red transition-all focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-koshien-red sm:px-6 sm:py-2.5"
+        className="rounded border border-koshien-red bg-koshien-dark px-4 py-2 text-sm font-bold uppercase text-koshien-red transition-all focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-koshien-red sm:px-6 sm:py-2.5 lg:px-4 lg:py-2 lg:text-xs"
         aria-label="Finalizar partida"
       >
-        <span className="text-xs sm:text-sm">🎬 FINALIZAR</span>
+        <span className="text-xs sm:text-sm lg:text-xs">🎬 FINALIZAR</span>
       </motion.button>
     </motion.div>
   )
@@ -207,24 +350,24 @@ function Scoreboard({ homeTeam, awayTeam, innings }: ScoreboardProps) {
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, delay: 0.1 }}
-      className="mb-2 border border-koshien-border bg-koshien-dark/40 p-3 sm:p-4"
+      className="border border-koshien-border bg-koshien-dark/40 p-3 sm:p-4 lg:p-2"
     >
-      <div className="mb-2 grid grid-cols-[1fr_repeat(5,1fr)] gap-2 sm:gap-3">
-        <div className="text-xs font-bold uppercase text-koshien-muted sm:text-sm">
+      <div className="mb-2 grid grid-cols-[1fr_repeat(5,1fr)] gap-2 sm:gap-3 lg:gap-1">
+        <div className="text-xs font-bold uppercase text-koshien-muted sm:text-sm lg:text-[10px]">
           {homeTeam.shortName}
         </div>
         {innings.map((_, idx) => (
           <div
             key={`inning-${idx}`}
-            className="text-center font-vintage text-xs font-bold text-koshien-gold sm:text-sm"
+            className="text-center font-vintage text-xs font-bold text-koshien-gold sm:text-sm lg:text-[9px]"
           >
             {idx + 1}
           </div>
         ))}
       </div>
 
-      <div className="mb-2 grid grid-cols-[1fr_repeat(5,1fr)] gap-2 border-b border-koshien-border/30 pb-2 sm:gap-3">
-        <div className="truncate text-xs font-bold uppercase text-koshien-chalk sm:text-sm">
+      <div className="mb-2 grid grid-cols-[1fr_repeat(5,1fr)] gap-2 border-b border-koshien-border/30 pb-2 sm:gap-3 lg:gap-1">
+        <div className="truncate text-xs font-bold uppercase text-koshien-chalk sm:text-sm lg:text-[10px]">
           {awayTeam.name}
         </div>
         {innings.map((inning, idx) => (
@@ -233,15 +376,15 @@ function Scoreboard({ homeTeam, awayTeam, innings }: ScoreboardProps) {
             initial={{ scale: 0.8, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             transition={{ delay: idx * 0.05 }}
-            className="text-center font-sports text-sm font-bold text-koshien-chalk sm:text-base"
+            className="text-center font-sports text-sm font-bold text-koshien-chalk sm:text-base lg:text-xs"
           >
             {inning.away}
           </motion.div>
         ))}
       </div>
 
-      <div className="grid grid-cols-[1fr_repeat(5,1fr)] gap-2 sm:gap-3">
-        <div className="truncate text-xs font-bold uppercase text-koshien-chalk sm:text-sm">
+      <div className="grid grid-cols-[1fr_repeat(5,1fr)] gap-2 sm:gap-3 lg:gap-1">
+        <div className="truncate text-xs font-bold uppercase text-koshien-chalk sm:text-sm lg:text-[10px]">
           {homeTeam.shortName}
         </div>
         {innings.map((inning, idx) => (
@@ -250,7 +393,7 @@ function Scoreboard({ homeTeam, awayTeam, innings }: ScoreboardProps) {
             initial={{ scale: 0.8, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             transition={{ delay: idx * 0.05 + 0.25 }}
-            className="text-center font-sports text-sm font-bold text-koshien-chalk sm:text-base"
+            className="text-center font-sports text-sm font-bold text-koshien-chalk sm:text-base lg:text-xs"
           >
             {inning.home}
           </motion.div>
@@ -282,10 +425,11 @@ function GameSituation({
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, delay: 0.2 }}
-      className="mb-2 border border-koshien-border bg-koshien-dark/40 p-3 sm:p-4"
+      className="border border-koshien-border bg-koshien-dark/40 p-3 sm:p-4 lg:flex lg:flex-col lg:gap-2 lg:p-2"
     >
-      <div className="grid grid-cols-[auto_1fr_auto] gap-4 sm:gap-6">
-        <div className="flex gap-3 sm:gap-4">
+      <div className="flex flex-col gap-3 lg:gap-2">
+        {/* Desktop: stack vertically compacto */}
+        <div className="flex justify-around lg:justify-start lg:gap-3">
           {[
             { label: 'R', value: runs },
             { label: 'H', value: hits },
@@ -298,11 +442,11 @@ function GameSituation({
             >
               <motion.div
                 animate={{ scale: value > 0 ? 1.1 : 1 }}
-                className="font-sports text-lg font-bold text-koshien-chalk sm:text-2xl"
+                className="font-sports text-lg font-bold text-koshien-chalk sm:text-2xl lg:text-base"
               >
                 {value}
               </motion.div>
-              <div className="font-vintage text-[9px] uppercase text-koshien-gold sm:text-xs">
+              <div className="font-vintage text-[9px] uppercase text-koshien-gold sm:text-xs lg:text-[8px]">
                 {label}
               </div>
             </motion.div>
@@ -312,19 +456,17 @@ function GameSituation({
         <motion.div
           animate={{ scale: [1, 1.05, 1] }}
           transition={{ repeat: Infinity, duration: 2 }}
-          className="flex items-center justify-center"
+          className="text-center"
         >
-          <div className="text-center">
-            <div className="font-sports text-lg font-bold text-koshien-chalk sm:text-2xl">
-              {inning}/3
-            </div>
-            <div className="font-vintage text-[9px] uppercase text-koshien-gold sm:text-xs">
-              {isTop ? 'TOP' : 'BOT'}
-            </div>
+          <div className="font-sports text-lg font-bold text-koshien-chalk sm:text-2xl lg:text-base">
+            {inning}/3
+          </div>
+          <div className="font-vintage text-[9px] uppercase text-koshien-gold sm:text-xs lg:text-[8px]">
+            {isTop ? 'TOP' : 'BOT'}
           </div>
         </motion.div>
 
-        <div className="flex items-center justify-center">
+        <div className="flex justify-center lg:justify-start">
           <BasesDiamond bases={bases} />
         </div>
       </div>
@@ -338,7 +480,7 @@ interface BasesDiamondProps {
 
 function BasesDiamond({ bases }: BasesDiamondProps) {
   return (
-    <svg viewBox="0 0 60 60" className="h-12 w-12 sm:h-14 sm:w-14">
+    <svg viewBox="0 0 60 60" className="h-12 w-12 sm:h-14 sm:w-14 lg:h-10 lg:w-10">
       <path
         d="M 30 10 L 50 30 L 30 50 L 10 30 Z"
         fill="none"
@@ -375,44 +517,6 @@ function BasesDiamond({ bases }: BasesDiamondProps) {
   )
 }
 
-interface CoreGameplayProps {
-  pitcher: any
-  batter: any
-  selectedZone: number
-  setSelectedZone: (zone: number) => void
-  hoveredPitchStat: string | null
-  setHoveredPitchStat: (stat: string | null) => void
-  hoveredBatterStat: string | null
-  setHoveredBatterStat: (stat: string | null) => void
-}
-
-function CoreGameplay({
-  pitcher,
-  batter,
-  selectedZone,
-  setSelectedZone,
-  hoveredPitchStat,
-  setHoveredPitchStat,
-  hoveredBatterStat,
-  setHoveredBatterStat,
-}: CoreGameplayProps) {
-  return (
-    <div className="mb-2 grid grid-cols-3 gap-2 sm:gap-3">
-      <PitcherCard
-        pitcher={pitcher}
-        hoveredStat={hoveredPitchStat}
-        setHoveredStat={setHoveredPitchStat}
-      />
-      <StrikeZone selectedZone={selectedZone} setSelectedZone={setSelectedZone} />
-      <BatterCard
-        batter={batter}
-        hoveredStat={hoveredBatterStat}
-        setHoveredStat={setHoveredBatterStat}
-      />
-    </div>
-  )
-}
-
 interface PitcherCardProps {
   pitcher: any
   hoveredStat: string | null
@@ -425,13 +529,13 @@ function PitcherCard({ pitcher, hoveredStat, setHoveredStat }: PitcherCardProps)
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, delay: 0.3 }}
-      className="border border-koshien-purple bg-koshien-dark/60 p-2 sm:p-3"
+      className="border border-koshien-purple bg-koshien-dark/60 p-2 sm:p-3 lg:p-2"
     >
       <div className="mb-2 flex items-center justify-between border-b border-white/10 pb-1">
-        <span className="font-vintage text-[9px] uppercase text-koshien-muted sm:text-xs">
+        <span className="font-vintage text-[9px] uppercase text-koshien-muted sm:text-xs lg:text-[8px]">
           PITCHER
         </span>
-        <span className="font-sports text-xs font-bold text-koshien-gold sm:text-sm">
+        <span className="font-sports text-xs font-bold text-koshien-gold sm:text-sm lg:text-[9px]">
           {pitcher.overall}
         </span>
       </div>
@@ -439,16 +543,16 @@ function PitcherCard({ pitcher, hoveredStat, setHoveredStat }: PitcherCardProps)
       <motion.div
         animate={{ scale: 1 }}
         initial={{ scale: 0.8 }}
-        className="mb-2 text-center font-sports text-2xl font-bold text-koshien-purple sm:text-3xl"
+        className="mb-2 text-center font-sports text-2xl font-bold text-koshien-purple sm:text-3xl lg:text-xl"
       >
         #{pitcher.number}
       </motion.div>
 
-      <div className="mb-2 truncate text-center font-vintage text-[10px] font-bold uppercase text-koshien-chalk sm:text-xs">
+      <div className="mb-2 truncate text-center font-vintage text-[10px] font-bold uppercase text-koshien-chalk sm:text-xs lg:text-[8px]">
         {pitcher.name}
       </div>
 
-      <div className="mb-2 grid grid-cols-3 gap-1">
+      <div className="mb-2 grid grid-cols-3 gap-1 lg:gap-0.5">
         {[
           { label: 'VEL', value: pitcher.velocity },
           { label: 'CTRL', value: pitcher.control },
@@ -465,12 +569,12 @@ function PitcherCard({ pitcher, hoveredStat, setHoveredStat }: PitcherCardProps)
                 : 'border-koshien-purple/40 bg-koshien-dark'
             } p-1 text-center`}
           >
-            <div className="font-vintage text-[8px] uppercase text-koshien-muted sm:text-[9px]">
+            <div className="font-vintage text-[8px] uppercase text-koshien-muted sm:text-[9px] lg:text-[7px]">
               {label}
             </div>
             <motion.div
               animate={{ scale: hoveredStat === label ? 1.1 : 1 }}
-              className="font-sports text-xs font-bold text-koshien-purple sm:text-sm"
+              className="font-sports text-xs font-bold text-koshien-purple sm:text-sm lg:text-[9px]"
             >
               {value}
             </motion.div>
@@ -480,14 +584,14 @@ function PitcherCard({ pitcher, hoveredStat, setHoveredStat }: PitcherCardProps)
 
       <div className="mb-2 border-t border-white/10 pt-1">
         <div className="mb-1 flex items-center justify-between">
-          <span className="font-vintage text-[8px] uppercase text-koshien-muted sm:text-[9px]">
+          <span className="font-vintage text-[8px] uppercase text-koshien-muted sm:text-[9px] lg:text-[7px]">
             ⚡ STAMINA
           </span>
-          <span className="font-sports text-xs font-bold text-koshien-green sm:text-sm">
+          <span className="font-sports text-xs font-bold text-koshien-green sm:text-sm lg:text-[9px]">
             {pitcher.stamina}%
           </span>
         </div>
-        <div className="h-1 w-full overflow-hidden rounded bg-koshien-dark/50">
+        <div className="h-1 w-full overflow-hidden rounded bg-koshien-dark/50 lg:h-0.5">
           <motion.div
             initial={{ width: 0 }}
             animate={{ width: `${pitcher.stamina}%` }}
@@ -497,8 +601,8 @@ function PitcherCard({ pitcher, hoveredStat, setHoveredStat }: PitcherCardProps)
         </div>
       </div>
 
-      <div className="text-center font-vintage text-[8px] uppercase text-koshien-muted sm:text-[9px]">
-        ⚾ {pitcher.pitchCount} LANZAMIENTOS
+      <div className="text-center font-vintage text-[8px] uppercase text-koshien-muted sm:text-[9px] lg:text-[7px]">
+        ⚾ {pitcher.pitchCount} LANZ.
       </div>
     </motion.div>
   )
@@ -521,13 +625,13 @@ function StrikeZone({ selectedZone, setSelectedZone }: StrikeZoneProps) {
       initial={{ opacity: 0, scale: 0.95 }}
       animate={{ opacity: 1, scale: 1 }}
       transition={{ duration: 0.3, delay: 0.35 }}
-      className="border border-koshien-border bg-koshien-dark/60 p-2 sm:p-3"
+      className="border border-koshien-border bg-koshien-dark/60 p-2 sm:p-3 lg:flex lg:flex-col lg:p-2"
     >
-      <div className="mb-2 text-center font-vintage text-[10px] uppercase text-koshien-gold sm:text-xs">
+      <div className="mb-2 text-center font-vintage text-[10px] uppercase text-koshien-gold sm:text-xs lg:text-[9px]">
         ZONA DE STRIKE
       </div>
 
-      <div className="grid grid-cols-3 gap-1">
+      <div className="grid flex-1 grid-cols-3 gap-1 lg:gap-0.5">
         {zones.flat().map((zoneNum) => {
           const isSelected = zoneNum === selectedZone
           return (
@@ -543,7 +647,7 @@ function StrikeZone({ selectedZone, setSelectedZone }: StrikeZoneProps) {
                   : 'border border-koshien-grid bg-koshien-dark/40 hover:border-koshien-border'
               }`}
             >
-              <span className="font-sports text-xs font-bold text-koshien-chalk sm:text-sm">
+              <span className="font-sports text-xs font-bold text-koshien-chalk sm:text-sm lg:text-[9px]">
                 {zoneNum}
               </span>
             </motion.button>
@@ -566,13 +670,13 @@ function BatterCard({ batter, hoveredStat, setHoveredStat }: BatterCardProps) {
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, delay: 0.4 }}
-      className="border border-koshien-purple bg-koshien-dark/60 p-2 sm:p-3"
+      className="border border-koshien-purple bg-koshien-dark/60 p-2 sm:p-3 lg:p-2"
     >
       <div className="mb-2 flex items-center justify-between border-b border-white/10 pb-1">
-        <span className="font-vintage text-[9px] uppercase text-koshien-muted sm:text-xs">
+        <span className="font-vintage text-[9px] uppercase text-koshien-muted sm:text-xs lg:text-[8px]">
           BATTER
         </span>
-        <span className="font-sports text-xs font-bold text-koshien-gold sm:text-sm">
+        <span className="font-sports text-xs font-bold text-koshien-gold sm:text-sm lg:text-[9px]">
           {batter.overall}
         </span>
       </div>
@@ -580,16 +684,16 @@ function BatterCard({ batter, hoveredStat, setHoveredStat }: BatterCardProps) {
       <motion.div
         animate={{ scale: 1 }}
         initial={{ scale: 0.8 }}
-        className="mb-2 text-center font-sports text-2xl font-bold text-koshien-purple sm:text-3xl"
+        className="mb-2 text-center font-sports text-2xl font-bold text-koshien-purple sm:text-3xl lg:text-xl"
       >
         #{batter.number}
       </motion.div>
 
-      <div className="mb-2 truncate text-center font-vintage text-[10px] font-bold uppercase text-koshien-chalk sm:text-xs">
+      <div className="mb-2 truncate text-center font-vintage text-[10px] font-bold uppercase text-koshien-chalk sm:text-xs lg:text-[8px]">
         {batter.name}
       </div>
 
-      <div className="mb-2 grid grid-cols-3 gap-1">
+      <div className="mb-2 grid grid-cols-3 gap-1 lg:gap-0.5">
         {[
           { label: 'CON', value: batter.contact },
           { label: 'PWR', value: batter.power },
@@ -606,12 +710,12 @@ function BatterCard({ batter, hoveredStat, setHoveredStat }: BatterCardProps) {
                 : 'border-koshien-purple/40 bg-koshien-dark'
             } p-1 text-center`}
           >
-            <div className="font-vintage text-[8px] uppercase text-koshien-muted sm:text-[9px]">
+            <div className="font-vintage text-[8px] uppercase text-koshien-muted sm:text-[9px] lg:text-[7px]">
               {label}
             </div>
             <motion.div
               animate={{ scale: hoveredStat === label ? 1.1 : 1 }}
-              className="font-sports text-xs font-bold text-koshien-purple sm:text-sm"
+              className="font-sports text-xs font-bold text-koshien-purple sm:text-sm lg:text-[9px]"
             >
               {value}
             </motion.div>
@@ -634,32 +738,32 @@ function NextBatterPreview({ nextBatter }: NextBatterPreviewProps) {
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, delay: 0.45 }}
-      className="mb-2 border border-koshien-green/30 bg-koshien-dark/40 p-2 sm:p-3"
+      className="border border-koshien-green/30 bg-koshien-dark/40 p-2 sm:p-3 lg:p-2"
     >
-      <div className="flex flex-col gap-1 sm:gap-2">
+      <div className="flex h-full flex-col gap-1 sm:gap-2 lg:justify-between">
         <div className="flex items-center justify-between">
-          <span className="font-vintage text-[9px] uppercase text-koshien-green sm:text-xs">
-            SIGUIENTE BATEADOR
+          <span className="font-vintage text-[9px] uppercase text-koshien-green sm:text-xs lg:text-[8px]">
+            SIGUIENTE
           </span>
           <motion.span
             animate={{ x: [0, 3, 0] }}
             transition={{ repeat: Infinity, duration: 1 }}
-            className="text-xs text-koshien-green"
+            className="text-xs text-koshien-green lg:text-[9px]"
           >
             ▶
           </motion.span>
         </div>
 
         <div className="flex items-baseline gap-1">
-          <span className="font-sports font-bold text-koshien-gold sm:text-sm">
+          <span className="font-sports font-bold text-koshien-gold sm:text-sm lg:text-xs">
             #{nextBatter.number}
           </span>
-          <span className="truncate font-vintage text-xs font-bold uppercase text-koshien-chalk sm:text-sm">
+          <span className="truncate font-vintage text-xs font-bold uppercase text-koshien-chalk sm:text-sm lg:text-[9px]">
             {nextBatter.name}
           </span>
         </div>
 
-        <div className="grid grid-cols-3 gap-2 sm:gap-3">
+        <div className="grid grid-cols-3 gap-2 sm:gap-3 lg:gap-1">
           {[
             { label: 'CON', value: nextBatter.contact },
             { label: 'PWR', value: nextBatter.power },
@@ -670,18 +774,18 @@ function NextBatterPreview({ nextBatter }: NextBatterPreviewProps) {
               whileHover={{ scale: 1.05 }}
               className="text-center"
             >
-              <div className="font-vintage text-[8px] uppercase text-koshien-muted sm:text-[9px]">
+              <div className="font-vintage text-[8px] uppercase text-koshien-muted sm:text-[9px] lg:text-[7px]">
                 {label}
               </div>
-              <div className="font-sports text-xs font-bold text-koshien-green sm:text-sm">
+              <div className="font-sports text-xs font-bold text-koshien-green sm:text-sm lg:text-[9px]">
                 {value}
               </div>
             </motion.div>
           ))}
         </div>
 
-        <div className="border-t border-koshien-green/20 pt-1 text-center font-vintage text-[8px] uppercase text-koshien-green sm:text-[9px]">
-          VS P: .{(nextBatter.vsPitcher.avg * 1000).toFixed(0)} {nextBatter.vsPitcher.hr}HR
+        <div className="border-t border-koshien-green/20 pt-1 text-center font-vintage text-[8px] uppercase text-koshien-green/80 sm:text-[9px] lg:text-[7px]">
+          vs P: .{(nextBatter.vsPitcher.avg * 1000).toFixed(0)} {nextBatter.vsPitcher.hr}HR
         </div>
       </div>
     </motion.div>
@@ -711,13 +815,13 @@ function ActionCardsSection({
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, delay: 0.5 }}
-      className="mb-3 border border-koshien-border bg-koshien-dark/40 p-2 sm:p-3"
+      className="border border-koshien-border bg-koshien-dark/40 p-2 sm:p-3 lg:flex lg:flex-col lg:p-2"
     >
-      <div className="mb-2 text-center font-vintage text-xs uppercase text-koshien-gold sm:text-sm">
-        CARTAS DE ACCIÓN
+      <div className="mb-2 text-center font-vintage text-xs uppercase text-koshien-gold sm:text-sm lg:text-[9px]">
+        ACCIONES
       </div>
 
-      <div className="grid grid-cols-4 gap-1 sm:gap-2">
+      <div className="grid grid-cols-4 gap-1 sm:gap-2 lg:flex lg:gap-1">
         {cards.map((card, idx) => {
           const isSelected = card.id === selectedCardId
           const borderColor = colorMap[card.colorToken] || 'border-koshien-border'
@@ -731,7 +835,7 @@ function ActionCardsSection({
               initial={{ opacity: 0, scale: 0.8 }}
               animate={{ opacity: 1, scale: 1 }}
               transition={{ delay: idx * 0.05 + 0.5 }}
-              className={`flex flex-col items-center justify-center rounded border p-1.5 text-center transition-all focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-koshien-gold sm:p-2 ${
+              className={`flex flex-1 flex-col items-center justify-center rounded border p-1.5 text-center transition-all focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-koshien-gold sm:p-2 lg:p-1.5 ${
                 isSelected
                   ? `${borderColor} border-2 bg-koshien-dark/80 shadow-[0_0_12px_rgba(255,85,79,0.3)]`
                   : `${borderColor} border bg-koshien-dark/40 hover:bg-koshien-dark/60`
@@ -739,16 +843,16 @@ function ActionCardsSection({
             >
               <motion.div
                 animate={{ scale: isSelected ? 1.2 : 1 }}
-                className="mb-1 text-lg sm:text-2xl"
+                className="mb-1 text-lg sm:text-2xl lg:text-base"
               >
                 {card.icon}
               </motion.div>
 
-              <div className="mb-0.5 font-vintage text-[7px] font-bold uppercase text-koshien-chalk sm:text-[8px]">
+              <div className="mb-0.5 font-vintage text-[7px] font-bold uppercase text-koshien-chalk sm:text-[8px] lg:text-[6px]">
                 {card.name}
               </div>
 
-              <div className="font-vintage text-[7px] text-koshien-muted sm:text-[8px]">
+              <div className="font-vintage text-[7px] text-koshien-muted sm:text-[8px] lg:text-[6px]">
                 {card.cost}
               </div>
             </motion.button>
@@ -781,39 +885,37 @@ function LanzarButton({
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, delay: 0.65 }}
-      className="fixed bottom-6 left-1/2 -translate-x-1/2 transform sm:relative sm:bottom-auto sm:left-auto sm:translate-x-0"
+      className="flex flex-col items-center gap-2 lg:gap-1"
     >
-      <div className="flex flex-col items-center gap-2">
-        <motion.button
-          onMouseDown={onMouseDown}
-          onMouseUp={onMouseUp}
-          onTouchStart={onTouchStart}
-          onTouchEnd={onTouchEnd}
-          whileHover={{ scale: isCharging ? 1 : 1.05 }}
-          whileTap={{ scale: 0.98 }}
-          className={`relative flex min-h-[64px] min-w-[150px] flex-col items-center justify-center rounded border-2 border-koshien-orange text-center font-sports text-2xl font-bold uppercase tracking-wider text-koshien-chalk transition-all sm:min-h-[78px] sm:min-w-[190px] sm:text-3xl ${
-            isCharging
-              ? 'bg-koshien-orange/20 shadow-[0_0_20px_rgba(242,161,58,0.6)]'
-              : 'bg-koshien-dark/80 shadow-[0_0_12px_rgba(242,161,58,0.3)] hover:shadow-[0_0_16px_rgba(242,161,58,0.5)]'
-          }`}
-        >
-          {isCharging && (
-            <motion.div
-              initial={{ width: 0 }}
-              animate={{ width: `${chargePercent}%` }}
-              className="absolute inset-0 z-0 rounded bg-koshien-orange/30"
-            />
-          )}
+      <motion.button
+        onMouseDown={onMouseDown}
+        onMouseUp={onMouseUp}
+        onTouchStart={onTouchStart}
+        onTouchEnd={onTouchEnd}
+        whileHover={{ scale: isCharging ? 1 : 1.05 }}
+        whileTap={{ scale: 0.98 }}
+        className={`relative flex min-h-[64px] min-w-[150px] flex-col items-center justify-center rounded border-2 border-koshien-orange text-center font-sports text-2xl font-bold uppercase tracking-wider text-koshien-chalk transition-all sm:min-h-[78px] sm:min-w-[190px] sm:text-3xl lg:min-h-[56px] lg:min-w-[140px] lg:text-xl ${
+          isCharging
+            ? 'bg-koshien-orange/20 shadow-[0_0_20px_rgba(242,161,58,0.6)]'
+            : 'bg-koshien-dark/80 shadow-[0_0_12px_rgba(242,161,58,0.3)] hover:shadow-[0_0_16px_rgba(242,161,58,0.5)]'
+        }`}
+      >
+        {isCharging && (
+          <motion.div
+            initial={{ width: 0 }}
+            animate={{ width: `${chargePercent}%` }}
+            className="absolute inset-0 z-0 rounded bg-koshien-orange/30"
+          />
+        )}
 
-          <div className="relative z-10 flex flex-col items-center gap-0.5">
-            <span>🔥 LANZAR</span>
-          </div>
-        </motion.button>
+        <div className="relative z-10 flex flex-col items-center gap-0.5">
+          <span>🔥 LANZAR</span>
+        </div>
+      </motion.button>
 
-        <span className="font-vintage text-[9px] uppercase text-koshien-orange sm:text-xs">
-          {isCharging ? `${Math.round(chargePercent)}%` : 'MANTÉN PARA CARGAR'}
-        </span>
-      </div>
+      <span className="font-vintage text-[9px] uppercase text-koshien-orange sm:text-xs lg:text-[8px]">
+        {isCharging ? `${Math.round(chargePercent)}%` : 'MANTÉN'}
+      </span>
     </motion.div>
   )
 }
