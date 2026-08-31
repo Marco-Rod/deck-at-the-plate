@@ -28,7 +28,7 @@ export function FranchiseCarousel({ teams, selectedTeamId, onSelectTeam }: Props
         role="listbox"
         aria-label="Franquicias de la liga"
         tabIndex={0}
-        className="flex snap-x snap-mandatory gap-3 overflow-x-auto scroll-smooth scroll-px-2 sm:scroll-px-4"
+        className="flex snap-x snap-mandatory gap-3 overflow-x-auto scroll-smooth scroll-px-2 no-scrollbar sm:scroll-px-4"
       >
         {teams.map((team) => {
           const selected = team.id === selectedTeamId

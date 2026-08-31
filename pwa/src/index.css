@@ -27,6 +27,13 @@
 }
 
 @layer utilities {
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
   .auth-aurora {
     background:
       radial-gradient(70% 50% at 50% 0%, rgba(197, 160, 89, 0.12), transparent 70%),
