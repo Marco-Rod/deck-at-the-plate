@@ -51,9 +51,17 @@ export function GameIntroModal({
       exit={{ opacity: 0 }}
       transition={{ duration: 0.5 }}
     >
-      <div className="absolute inset-0 bg-gradient-to-b from-koshien-dark via-[#0F1419] to-black" />
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(197,160,89,0.15),transparent_60%)]" />
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
+      <div
+        className="absolute inset-0 bg-cover bg-center"
+        style={{ backgroundImage: "url('/start-mobile.png')" }}
+      />
+      <div
+        className="absolute inset-0 hidden bg-cover bg-center desktop:block"
+        style={{ backgroundImage: "url('/start-desktop.png')" }}
+      />
+      <div className="absolute inset-0 bg-gradient-to-b from-black/70 via-black/45 to-black/75" />
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(197,160,89,0.12),transparent_60%)]" />
+      <div className="absolute inset-0 bg-black/25 backdrop-blur-[2px]" />
 
       <motion.div
         className="relative z-10 flex h-screen w-full items-center justify-between px-4 py-6"
@@ -167,6 +175,15 @@ export function GameIntroModal({
             type="button"
             onClick={handlePlayBall}
             className="cursor-pointer border-2 border-koshien-gold bg-koshien-green px-8 py-4 font-sports text-3xl uppercase tracking-wider text-koshien-gold shadow-2xl transition-all hover:bg-[#2D5A3F]"
+            animate={{
+              scale: [1, 1.05, 1],
+              boxShadow: [
+                '0 0 20px rgba(197,160,89,0.5)',
+                '0 0 40px rgba(197,160,89,0.8)',
+                '0 0 20px rgba(197,160,89,0.5)',
+              ],
+            }}
+            transition={{ duration: 2, repeat: Infinity }}
             whileHover={{ scale: 1.05, boxShadow: '0 0 30px rgba(197,160,89,0.6)' }}
             whileTap={{ scale: 0.95 }}
           >

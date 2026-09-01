@@ -46,15 +46,8 @@ export function RosterSelectionPage() {
     [inventory],
   )
 
-  // Auto-seleccionar el primer pitcher si no hay seleccionado
-  useEffect(() => {
-    if (!selectedPitcherId && pitchers.length > 0) {
-      const firstPitcher = pitchers[0]
-      if (firstPitcher) {
-        setSelectedPitcherId(firstPitcher.card.id)
-      }
-    }
-  }, [pitchers, selectedPitcherId])
+  // Auto-seleccionar el primer pitcher si no hay seleccionado (valor derivado)
+  const effectivePitcherId = selectedPitcherId ?? pitchers[0]?.card.id ?? null
 
   if (!hasLoaded || loading) {
     return <Spinner label={t('common.loading')} className="min-h-screen py-20" />
@@ -114,7 +107,7 @@ export function RosterSelectionPage() {
       return
     }
 
-    if (!selectedPitcherId && pitchers.length > 0) {
+    if (!effectivePitcherId && pitchers.length > 0) {
       setError('Debes seleccionar un pitcher')
       return
     }
@@ -134,14 +127,14 @@ export function RosterSelectionPage() {
         difficulty: config.difficulty,
         total_innings: config.innings,
         player_position: config.playerPosition,
-        home_pitcher_id: selectedPitcherId || undefined,
+        home_pitcher_id: effectivePitcherId || undefined,
         home_lineup: homeLineup,
         home_tactics_deck: deck,
       }
 
       const game = await createGame(payload)
       navigate(`/game/${game.id}`)
-    } catch (error) {
+    } catch {
       setError(t('roster.error_generic'))
     } finally {
       setSubmitting(false)
@@ -209,7 +202,7 @@ export function RosterSelectionPage() {
         <div className="space-y-2">
           {batters.map((item) => {
             const inLineup = Object.values(lineup).includes(item.card.id)
-            const spot = Object.entries(lineup).find(([_, id]) => id === item.card.id)?.[0]
+            const spot = Object.entries(lineup).find((entry) => entry[1] === item.card.id)?.[0]
             return (
               <button
                 key={item.inventory_id}
@@ -260,11 +253,11 @@ export function RosterSelectionPage() {
             {t('roster.pitcher') || 'Pitcher'}
           </h2>
           <p className="mb-3 font-vintage text-xs uppercase tracking-widest text-koshien-cream/60">
-            Selecciona tu lanzador titular {selectedPitcherId ? '(seleccionado)' : ''}
+            Selecciona tu lanzador titular {effectivePitcherId ? '(seleccionado)' : ''}
           </p>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
             {pitchers.map((item) => {
-              const isSelected = selectedPitcherId === item.card.id
+              const isSelected = effectivePitcherId === item.card.id
               return (
                 <button
                   key={item.inventory_id}
