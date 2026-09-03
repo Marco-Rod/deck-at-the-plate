@@ -3,6 +3,7 @@ import type { GameStateWS } from '@/shared/api/types'
 const GAME_STATE_KEY = 'game_state_persistence'
 const GAME_METADATA_KEY = 'game_metadata'
 const GAME_SESSION_KEY = 'deck_at_plate_active_game'
+const INTRO_SHOWN_KEY = 'deck_at_plate_intro_shown'
 
 interface GameMetadata {
   gameId: string
@@ -141,4 +142,35 @@ export function getGameSession(): GameSessionData | null {
 
 export function clearGameSession(): void {
   localStorage.removeItem(GAME_SESSION_KEY)
+}
+
+/**
+ * Persiste que el modal de previa ("Play Ball") ya se mostró para un gameId
+ * concreto. Así, al recargar/pedir un partido en curso, el juego salta directo
+ * al campo en vez de volver a pedir "Play Ball". Se asocia al gameId para que
+ * una partida nueva (otro id) sí vuelva a mostrar la previa.
+ */
+export function markIntroShown(gameId: string): void {
+  try {
+    localStorage.setItem(INTRO_SHOWN_KEY, JSON.stringify({ gameId, shown: true }))
+  } catch (err) {
+    console.error('[PERSISTENCE] Error guardando introShown:', err)
+  }
+}
+
+/**
+ * Indica si la previa ya se mostró para el gameId dado. Devuelve true solo
+ * cuando coincide con la partida actual; si es otro gameId (partida nueva),
+ * devuelve false para volver a enseñar el modal.
+ */
+export function isIntroShown(gameId: string): boolean {
+  try {
+    const raw = localStorage.getItem(INTRO_SHOWN_KEY)
+    if (!raw) return false
+    const data = JSON.parse(raw) as { gameId?: string; shown?: boolean }
+    return data.shown === true && data.gameId === gameId
+  } catch (err) {
+    console.error('[PERSISTENCE] Error leyendo introShown:', err)
+    return false
+  }
 }

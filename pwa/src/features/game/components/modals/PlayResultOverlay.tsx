@@ -230,7 +230,10 @@ export function PlayResultOverlay({
   const [currentText, setCurrentText] = useState('')
 
   useEffect(() => {
-    if (!resultText || !resultTs) return
+    if (!resultText || !resultTs) {
+      setVisible(false)
+      return
+    }
     const eventKey = resultEvent?.toUpperCase() ?? ''
     const theme = EVENT_THEMES[eventKey] ?? DEFAULT_THEME
 

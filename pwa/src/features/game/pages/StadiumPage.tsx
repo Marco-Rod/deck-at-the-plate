@@ -7,6 +7,7 @@ import { useGameStore } from '@/features/game/store'
 import { useGameSocket } from '@/features/game/hooks/useGameSocket'
 import { useEventSequencer } from '@/features/game/hooks/useEventSequencer'
 import { normalizeEventName } from '@/features/game/lib/eventNormalizer'
+import { isIntroShown, markIntroShown } from '@/features/game/lib/persistence'
 import { getTeam } from '@/features/team/api'
 import { getCard } from '@/features/cards/api'
 import { PitchSelectorPanel } from '@/features/game/components/pitch/PitchSelectorPanel'
@@ -204,7 +205,7 @@ export function StadiumPage() {
   const [userTeamName, setUserTeamName] = useState<string>('MI EQUIPO')
   const [userLineup, setUserLineup] = useState<IntroPlayer[]>([])
   const [cpuLineup, setCpuLineup] = useState<IntroPlayer[]>([])
-  const [showIntro, setShowIntro] = useState(true)
+  const [showIntro, setShowIntro] = useState(() => !isIntroShown(gameId))
   const [resolvedPitcher, setResolvedPitcher] = useState<PlayerGameData | null>(null)
   const [resolvedBatter, setResolvedBatter] = useState<PlayerGameData | null>(null)
   const [selectedZone, setSelectedZone] = useState<number>(5)
@@ -449,12 +450,15 @@ export function StadiumPage() {
           userLineup={userLineup}
           cpuTeamName={game.rivalTeamName ?? 'RIVAL'}
           cpuPitcher={
-            game.active_pitcher
-              ? { name: game.active_pitcher.name, number: game.active_pitcher.number, overall: game.active_pitcher.overall }
+            activePitcher
+              ? { name: activePitcher.name, number: activePitcher.number, overall: activePitcher.overall }
               : undefined
           }
           cpuLineup={cpuLineup}
-          onPlayBall={() => setShowIntro(false)}
+          onPlayBall={() => {
+            markIntroShown(gameId)
+            setShowIntro(false)
+          }}
         />
       )}
 
