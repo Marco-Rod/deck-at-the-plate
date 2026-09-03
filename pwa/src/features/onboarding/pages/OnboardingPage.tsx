@@ -14,6 +14,7 @@ import { useAuthStore } from '@/features/auth/store'
 import type { Franchise, PlayerCard as PlayerCardData, UserTeam } from '@/shared/api/types'
 import { FranchiseCarousel } from '../components/FranchiseCarousel'
 import { PlayerCardReveal } from '../components/PlayerCardReveal'
+import { PremiumStarterPack } from '../components/PremiumStarterPack'
 
 type Step = 'CREATE_TEAM' | 'SELECT_FRANCHISE' | 'PACK_UNBOX' | 'SHOW_CARDS'
 
@@ -359,7 +360,7 @@ export function OnboardingPage() {
             key="pack"
             exit={{ opacity: 0, scale: 1.15, rotate: 6, transition: { duration: 0.45, ease: 'easeIn' } }}
           >
-            <div className="mx-auto flex w-full max-w-md flex-col items-center justify-center gap-6 pt-10 text-center">
+            <div className="mx-auto flex w-full max-w-4xl flex-col items-center justify-center gap-6 text-center">
               <span className="animate-pulse font-vintage text-xs uppercase tracking-[0.28em] text-koshien-gold">
                 {t('onboarding.pack.welcome')}
               </span>
@@ -367,53 +368,12 @@ export function OnboardingPage() {
                 {t('onboarding.pack.title', { team: teamForm.name })}
               </h1>
 
-              <motion.button
-                type="button"
-                aria-label={t('onboarding.pack.click_to_open')}
+              {/* Nuevo componente Premium Starter Pack */}
+              <PremiumStarterPack
+                cardCount={claimedCards.length}
                 onClick={() => setStep('SHOW_CARDS')}
-                className="group relative mt-4 cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-8 focus-visible:outline-koshien-gold"
-                animate={{ y: [0, -14, 0], scale: [1, 1.035, 1] }}
-                transition={{ y: { duration: 2.6, repeat: Infinity, ease: 'easeInOut' }, scale: { duration: 2.6, repeat: Infinity, ease: 'easeInOut' } }}
-                whileHover={{ scale: 1.08 }}
-                whileTap={{ scale: 0.95 }}
-              >
-                {/* Brillo de barrido */}
-                <span
-                  aria-hidden
-                  className="pointer-events-none absolute inset-y-0 z-10 w-1/3 -skew-x-12 bg-gradient-to-r from-transparent via-white/50 to-transparent"
-                  style={{ left: '-40%', animation: 'pack-shine 2.4s linear infinite' }}
-                />
-                <motion.div
-                  className="flex h-80 w-60 flex-col items-center justify-between rounded-2xl border-4 border-koshien-chalk bg-gradient-to-br from-[#d4af37] via-[#c5a059] to-[#8a6d3b] p-6"
-                  animate={{
-                    boxShadow: [
-                      '0 0 60px rgba(197,160,89,0.5)',
-                      '0 0 100px rgba(212,175,55,0.9)',
-                      '0 0 60px rgba(197,160,89,0.5)',
-                    ],
-                  }}
-                  transition={{ duration: 2.6, repeat: Infinity, ease: 'easeInOut' }}
-                >
-                  <span className="relative z-10 rounded-full bg-gradient-to-r from-white to-yellow-200 px-4 py-1 font-vintage text-[10px] font-bold uppercase tracking-widest text-[#1a1a00]">
-                    {t('onboarding.pack.badge')}
-                  </span>
-                  <motion.span
-                    className="relative z-10 text-8xl"
-                    animate={{ rotate: 360 }}
-                    transition={{ duration: 3, repeat: Infinity, ease: 'linear' }}
-                  >
-                    ⚾
-                  </motion.span>
-                  <div className="relative z-10 text-center">
-                    <span className="block font-sports text-4xl font-bold uppercase tracking-wider text-white drop-shadow-lg">
-                      {t('onboarding.pack.cards_count', { count: claimedCards.length })}
-                    </span>
-                    <span className="mt-2 block font-vintage text-[11px] uppercase tracking-widest text-koshien-chalk">
-                      {t('onboarding.pack.click_to_open')}
-                    </span>
-                  </div>
-                </motion.div>
-              </motion.button>
+                teamName={teamForm.name}
+              />
 
               <p className="animate-pulse font-vintage text-xs uppercase tracking-[0.18em] text-koshien-gold">
                 {t('onboarding.pack.hint')}
