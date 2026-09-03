@@ -88,6 +88,11 @@ export function AuthPage() {
 
       <div className="relative mx-auto flex w-full max-w-sm flex-1 flex-col justify-center py-10">
         <header className="mb-8 text-center">
+          <img
+            src="/logo-mark.png"
+            alt=""
+            className="mx-auto mb-4 h-auto w-24 sm:w-28"
+          />
           <span className="inline-block rounded-full border border-koshien-gold/40 bg-koshien-green/60 px-4 py-1 font-vintage text-[10px] uppercase tracking-[0.28em] text-koshien-gold">
             {t('app.tradition')}
           </span>

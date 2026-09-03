@@ -11,9 +11,10 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.svg'],
+      includeAssets: ['favicon.png'],
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,png,webp,avif,woff2}'],
+        maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
       },
       manifest: {
         name: 'Deck at the Plate',

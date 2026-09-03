@@ -236,3 +236,403 @@
     );
   }
 }
+
+/* ─── Pack Opening / Card Reveal (spec v1.0) ─────────────────────────── */
+
+@layer components {
+  .pack-screen {
+    position: relative;
+    min-height: 100dvh;
+    background-color: #0a0c0b;
+  }
+
+  .pack-screen__bg {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    background-image: url('/open-pack.png');
+  }
+
+  @media (max-width: 767px) {
+    .pack-screen__bg {
+      background-image: url('/open-pack-mobile.png');
+    }
+  }
+
+  .pack-screen::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: 1;
+    background: radial-gradient(
+      circle at 50% 40%,
+      rgba(210, 160, 80, 0.06),
+      rgba(0, 0, 0, 0.3) 52%,
+      rgba(0, 0, 0, 0.62) 100%
+    );
+    pointer-events: none;
+  }
+
+  .pack-screen__content {
+    position: relative;
+    z-index: 2;
+  }
+
+  /* Header */
+  .pack-header {
+    text-align: center;
+    margin-bottom: 28px;
+  }
+  .pack-title {
+    font-size: clamp(28px, 2.5vw, 44px);
+    letter-spacing: 0.02em;
+  }
+  .pack-subtitle {
+    margin-top: 8px;
+    font-size: 11px;
+    letter-spacing: 0.28em;
+    opacity: 0.62;
+  }
+
+  /* Button REVELAR TODAS */
+  .reveal-all-button {
+    min-height: 38px;
+    padding: 0 18px;
+    border: 1px solid rgba(197, 154, 76, 0.45);
+    border-radius: 4px;
+    background: rgba(26, 38, 29, 0.92);
+    color: #d7b56d;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    cursor: pointer;
+  }
+  .reveal-all-button:hover:not(:disabled) {
+    border-color: rgba(215, 181, 109, 0.9);
+    box-shadow: 0 0 14px rgba(215, 181, 109, 0.1);
+  }
+  .reveal-all-button:disabled {
+    opacity: 0.45;
+    cursor: default;
+  }
+
+  /* Grid responsive */
+  .pack-grid {
+    width: 100%;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  @media (min-width: 768px) and (max-width: 1199px) {
+    .pack-grid {
+      width: min(92vw, 900px);
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 18px;
+    }
+  }
+
+  @media (min-width: 1200px) {
+    .pack-grid {
+      width: min(88vw, 1320px);
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: clamp(22px, 2vw, 34px);
+    }
+  }
+
+  @media (max-width: 767px) {
+    .pack-grid {
+      width: calc(100% - 24px);
+      gap: 12px;
+    }
+    .pack-title {
+      font-size: clamp(22px, 7vw, 30px);
+      line-height: 1.05;
+    }
+    .pack-subtitle {
+      font-size: 9px;
+      letter-spacing: 0.18em;
+    }
+  }
+
+  /* Card base */
+  .pack-card {
+    position: relative;
+    display: block;
+    width: 100%;
+    perspective: 1200px;
+    aspect-ratio: 0.72 / 1;
+  }
+
+  .pack-card__inner {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    transform-style: preserve-3d;
+    transition: transform 0.62s cubic-bezier(0.2, 0.72, 0.2, 1), filter 0.3s ease;
+  }
+
+  .pack-card.is-revealed .pack-card__inner {
+    transform: rotateY(180deg);
+  }
+
+  .pack-card__face {
+    position: absolute;
+    inset: 0;
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
+  }
+
+  .pack-card__front {
+    transform: rotateY(180deg);
+    background: linear-gradient(160deg, rgba(18, 22, 20, 0.98), rgba(12, 16, 14, 0.99));
+    border: 1px solid color-mix(in srgb, var(--rarity-color) 35%, #303733);
+    border-radius: 6px;
+    padding: 14px;
+  }
+
+  /* Card back premium */
+  .pack-card__back {
+    border: 1px solid rgba(189, 146, 74, 0.45);
+    border-radius: 6px;
+    background:
+      radial-gradient(circle at 50% 42%, rgba(194, 145, 70, 0.08), transparent 45%),
+      linear-gradient(160deg, #151817, #0f1211 62%, #0a0c0b);
+    box-shadow:
+      0 14px 24px rgba(0, 0, 0, 0.35),
+      inset 0 0 0 1px rgba(255, 255, 255, 0.025);
+  }
+
+  .pack-card__back-logo {
+    width: 40%;
+    margin: 0 auto;
+  }
+
+  /* Revealed card content (spec) */
+  .card-front-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+    align-items: start;
+  }
+  .card-front-name {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+  }
+  .card-ovr-badge {
+    min-width: 46px;
+    min-height: 46px;
+    display: grid;
+    place-items: center;
+    border: 1px solid rgba(117, 171, 120, 0.25);
+    border-radius: 6px;
+    background: rgba(26, 47, 34, 0.62);
+  }
+  .card-ovr-value {
+    font-size: 22px;
+    font-weight: 900;
+  }
+  .card-ovr-label {
+    font-size: 8px;
+    opacity: 0.55;
+  }
+
+  .card-player-identity {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 0;
+    text-align: center;
+  }
+  .card-player-name {
+    font-size: clamp(11px, 0.9vw, 15px);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    max-width: 100%;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .card-player-number {
+    margin-top: 8px;
+    font-size: clamp(44px, 4vw, 72px);
+    line-height: 0.85;
+    font-weight: 900;
+  }
+
+  .rarity-badge {
+    display: inline-flex;
+    align-items: center;
+    min-height: 22px;
+    padding: 0 10px;
+    border: 1px solid color-mix(in srgb, var(--rarity-color) 58%, transparent);
+    border-radius: 999px;
+    color: var(--rarity-color);
+    font-size: 9px;
+    letter-spacing: 0.1em;
+  }
+
+  .card-stats {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .card-stat {
+    min-height: 38px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 10px;
+    border: 1px solid rgba(83, 133, 91, 0.28);
+    border-radius: 5px;
+    background: rgba(24, 43, 31, 0.48);
+  }
+
+  @media (max-width: 767px) {
+    .pack-card__front {
+      padding: 9px;
+    }
+    .card-player-name {
+      font-size: 9px;
+    }
+    .card-player-number {
+      font-size: clamp(34px, 13vw, 50px);
+    }
+    .card-ovr-badge {
+      min-width: 38px;
+      min-height: 38px;
+    }
+    .card-ovr-value {
+      font-size: 17px;
+    }
+    .card-stats {
+      gap: 5px;
+    }
+    .card-stat {
+      min-height: 32px;
+      padding: 0 7px;
+    }
+    .card-stat__label {
+      font-size: 7px;
+    }
+    .card-stat__value {
+      font-size: 12px;
+    }
+  }
+
+  @media (min-width: 1200px) {
+    .pack-card__front {
+      padding: 14px;
+    }
+  }
+
+  /* Hover / active closed card */
+  @media (hover: hover) {
+    .pack-card:not(.is-revealed):hover {
+      transform: translateY(-3px);
+    }
+    .pack-card:not(.is-revealed):hover .pack-card__inner {
+      filter: brightness(1.06);
+    }
+  }
+  .pack-card:active {
+    transform: scale(0.985);
+  }
+
+  /* Anticipation by rarity */
+  .rarity-bronze.is-revealing {
+    filter: drop-shadow(0 0 8px rgba(183, 122, 75, 0.18));
+  }
+  .rarity-silver.is-revealing {
+    filter: brightness(1.08) drop-shadow(0 0 10px rgba(185, 194, 200, 0.2));
+  }
+  .rarity-gold.is-revealing {
+    filter: brightness(1.1) drop-shadow(0 0 14px rgba(211, 171, 82, 0.28));
+  }
+  .rarity-diamond.is-revealing {
+    animation: diamond-anticipation 0.42s ease;
+  }
+  @keyframes diamond-anticipation {
+    0% {
+      transform: scale(1);
+      filter: brightness(1);
+    }
+    45% {
+      transform: scale(0.985);
+    }
+    75% {
+      filter: brightness(1.15) drop-shadow(0 0 16px rgba(97, 200, 207, 0.38));
+    }
+    100% {
+      transform: scale(1);
+    }
+  }
+
+  /* Settle final */
+  @keyframes card-settle {
+    0% {
+      transform: scale(0.97);
+    }
+    60% {
+      transform: scale(1.025);
+    }
+    100% {
+      transform: scale(1);
+    }
+  }
+  .pack-card.reveal-complete {
+    animation: card-settle 280ms ease-out;
+  }
+
+  /* Rarity color variables */
+  .rarity-common {
+    --rarity-color: #8b918d;
+  }
+  .rarity-bronze {
+    --rarity-color: #b77a4b;
+  }
+  .rarity-silver {
+    --rarity-color: #b9c2c8;
+  }
+  .rarity-gold {
+    --rarity-color: #d3ab52;
+  }
+  .rarity-diamond {
+    --rarity-color: #61c8cf;
+  }
+
+  /* En el contexto pack-card la rareza no emite glow permanente sobre la carta cerrada
+     (la rareza solo se manifiesta en la cara frontal y durante el reveal). Se neutraliza
+     el glow neon de @layer utilities que sí se usa en otros contextos (StadiumPage). */
+  .pack-card.rarity-common,
+  .pack-card.rarity-bronze,
+  .pack-card.rarity-silver,
+  .pack-card.rarity-gold,
+  .pack-card.rarity-diamond,
+  .pack-card.rarity-common.is-revealing,
+  .pack-card.rarity-bronze.is-revealing,
+  .pack-card.rarity-silver.is-revealing,
+  .pack-card.rarity-gold.is-revealing,
+  .pack-card.rarity-diamond.is-revealing {
+    border: none;
+    box-shadow: none;
+  }
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .pack-card__inner,
+  .pack-card,
+  .particle {
+    animation: none !important;
+    transition-duration: 0.01ms !important;
+  }
+}

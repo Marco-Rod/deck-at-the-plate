@@ -211,8 +211,6 @@ export function StadiumPage() {
   const [pitchSelectorOpen, setPitchSelectorOpen] = useState(false)
   const [selectedTacticalId, setSelectedTacticalId] = useState<string | null>(null)
   const [selectedPitch, setSelectedPitch] = useState<string>('')
-  const [chargePercent, setChargePercent] = useState(0)
-  const [isCharging, setIsCharging] = useState(false)
   const [hoveredPitchStat, setHoveredPitchStat] = useState<string | null>(null)
   const [hoveredBatterStat, setHoveredBatterStat] = useState<string | null>(null)
   const [showQuit, setShowQuit] = useState(false)
@@ -372,8 +370,7 @@ export function StadiumPage() {
     }
   }, [inningTransition, isConnected, modalResult])
 
-  const handlePlayRelease = () => {
-    setIsCharging(false)
+  const handlePlay = () => {
     if (role === 'PITCHER') {
       setPitchSelectorOpen(false)
     }
@@ -673,13 +670,7 @@ export function StadiumPage() {
               >
                 <LanzarButton
                   label={t('game.tactic_pitch')}
-                  chargePercent={chargePercent}
-                  isCharging={isCharging}
-                  setChargePercent={setChargePercent}
-                  onMouseDown={() => !modalResult && setIsCharging(true)}
-                  onMouseUp={handlePlayRelease}
-                  onTouchStart={() => !modalResult && setIsCharging(true)}
-                  onTouchEnd={handlePlayRelease}
+                  onClick={() => !modalResult && handlePlay()}
                 />
               </motion.div>
             </div>
@@ -710,13 +701,7 @@ export function StadiumPage() {
               >
                 <LanzarButton
                   label={t('game.tactic_bat')}
-                  chargePercent={chargePercent}
-                  isCharging={isCharging}
-                  setChargePercent={setChargePercent}
-                  onMouseDown={() => !modalResult && setIsCharging(true)}
-                  onMouseUp={handlePlayRelease}
-                  onTouchStart={() => !modalResult && setIsCharging(true)}
-                  onTouchEnd={handlePlayRelease}
+                  onClick={() => !modalResult && handlePlay()}
                 />
               </motion.div>
             </div>
@@ -1238,9 +1223,9 @@ function StrikeZone({
   disabled,
 }: StrikeZoneProps) {
   const zones = [
-    [31, 22, 23],
-    [24, 25, 26],
-    [27, 28, 29],
+    [1, 2, 3],
+    [4, 5, 6],
+    [7, 8, 9],
   ]
 
   return (
@@ -1298,39 +1283,10 @@ function StrikeZone({
 
 interface LanzarButtonProps {
   label: string
-  chargePercent: number
-  isCharging: boolean
-  setChargePercent: (p: number | ((prev: number) => number)) => void
-  onMouseDown: () => void
-  onMouseUp: () => void
-  onTouchStart: () => void
-  onTouchEnd: () => void
+  onClick: () => void
 }
 
-function LanzarButton({
-  label,
-  chargePercent,
-  isCharging,
-  setChargePercent,
-  onMouseDown,
-  onMouseUp,
-  onTouchStart,
-  onTouchEnd,
-}: LanzarButtonProps) {
-  useEffect(() => {
-    if (!isCharging) return
-    const interval = setInterval(() => {
-      setChargePercent((prev) => {
-        if (prev >= 100) {
-          clearInterval(interval)
-          return 100
-        }
-        return prev + 2
-      })
-    }, 20)
-    return () => clearInterval(interval)
-  }, [isCharging, setChargePercent])
-
+function LanzarButton({ label, onClick }: LanzarButtonProps) {
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -1338,35 +1294,12 @@ function LanzarButton({
       transition={{ duration: 0.3, delay: 0.65 }}
       className="flex flex-col items-center gap-2 lg:gap-1"
     >
-      <motion.button
-        onMouseDown={onMouseDown}
-        onMouseUp={onMouseUp}
-        onTouchStart={onTouchStart}
-        onTouchEnd={onTouchEnd}
-        whileHover={{ scale: isCharging ? 1 : 1.05 }}
-        whileTap={{ scale: 0.98 }}
-        className={`relative flex min-h-[64px] min-w-[150px] flex-col items-center justify-center rounded border-2 border-koshien-orange text-center font-sports text-2xl font-bold uppercase tracking-wider text-koshien-chalk transition-all sm:min-h-[78px] sm:min-w-[190px] sm:text-3xl lg:min-h-[56px] lg:min-w-[140px] lg:text-xl ${
-          isCharging
-            ? 'bg-koshien-orange/20 shadow-[0_0_20px_rgba(242,161,58,0.6)]'
-            : 'bg-koshien-dark/80 shadow-[0_0_12px_rgba(242,161,58,0.3)] hover:shadow-[0_0_16px_rgba(242,161,58,0.5)]'
-        }`}
-      >
-        {isCharging && (
-          <motion.div
-            initial={{ width: 0 }}
-            animate={{ width: `${chargePercent}%` }}
-            className="absolute inset-0 z-0 rounded bg-koshien-orange/30"
-          />
-        )}
-
-        <div className="relative z-10 flex flex-col items-center gap-0.5">
-          <span>{label}</span>
-        </div>
-      </motion.button>
-
-      <span className="font-vintage text-[9px] uppercase text-koshien-orange sm:text-xs lg:text-[8px]">
-        {isCharging ? `${Math.round(chargePercent)}%` : 'MANTÉN'}
-      </span>
+      <button
+        type="button"
+        onClick={onClick}
+        className="relative flex min-h-[64px] min-w-[150px] flex-col items-center justify-center rounded border-2 border-koshien-orange bg-koshien-dark/80 text-center font-sports text-2xl font-bold uppercase tracking-wider text-koshien-chalk shadow-[0_0_12px_rgba(242,161,58,0.3)] transition-all hover:shadow-[0_0_16px_rgba(242,161,58,0.5)] hover:bg-koshien-orange/10 active:scale-[0.98] sm:min-h-[78px] sm:min-w-[190px] sm:text-3xl lg:min-h-[56px] lg:min-w-[140px] lg:text-xl">
+        <span>{label}</span>
+      </button>
     </motion.div>
   )
 }

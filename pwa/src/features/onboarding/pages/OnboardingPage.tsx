@@ -350,7 +350,9 @@ export function OnboardingPage() {
   const cardsRevealed = sortedCards.length > 0 && sortedCards.every((card) => revealedIds.has(card.id))
 
   return (
-    <main className="min-h-dvh bg-koshien-dark px-4 pb-[max(2rem,calc(env(safe-area-inset-bottom)+1rem))] pt-[max(1.5rem,env(safe-area-inset-top))]">
+    <main className="pack-screen min-h-dvh px-4 pb-[max(2rem,calc(env(safe-area-inset-bottom)+1rem))] pt-[max(1.5rem,env(safe-area-inset-top))]">
+      <div aria-hidden className="pack-screen__bg" />
+      <div className="pack-screen__content">
       <AnimatePresence mode="wait">
         {step === 'PACK_UNBOX' ? (
           <motion.div
@@ -424,32 +426,33 @@ export function OnboardingPage() {
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1, transition: { duration: 0.3, ease: 'easeOut' } }}
           >
-            <div className="mx-auto w-full max-w-4xl">
-              <header className="mb-6 text-center">
-                <h1 className="font-sports text-3xl font-bold uppercase leading-none tracking-wide text-koshien-gold">
+            <div className="mx-auto w-full">
+              <header className="pack-header">
+                <h1 className="pack-title font-sports font-bold uppercase text-koshien-gold">
                   {t('onboarding.cards.title')}
                 </h1>
-                <p className="mt-2 font-vintage text-xs uppercase tracking-[0.18em] text-koshien-cream/70">
+                <p className="pack-subtitle font-vintage uppercase text-koshien-cream">
                   {t('onboarding.cards.subtitle')}
                 </p>
               </header>
 
-              <div className="mb-6 flex justify-center">
-                <Button
+              <div className="mb-8 flex justify-center">
+                <button
                   type="button"
-                  variant="secondary"
-                  size="sm"
                   disabled={cardsRevealed}
                   onClick={() => {
                     setRevealAll(true)
                     setRevealedIds(new Set(sortedCards.map((card) => card.id)))
                   }}
+                  className="reveal-all-button font-vintage uppercase tracking-[0.06em]"
                 >
-                  {t('onboarding.cards.reveal_all')}
-                </Button>
+                  {cardsRevealed
+                    ? t('onboarding.cards.revealed_all')
+                    : t('onboarding.cards.reveal_all')}
+                </button>
               </div>
 
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+              <div className="pack-grid">
                 {sortedCards.map((card, index) => (
                   <motion.div
                     key={card.id}
@@ -474,7 +477,7 @@ export function OnboardingPage() {
                 ))}
               </div>
 
-              <div className="mt-8 flex justify-center">
+              <div className="mt-10 flex justify-center">
                 <Button
                   type="button"
                   size="lg"
@@ -491,6 +494,7 @@ export function OnboardingPage() {
           </motion.div>
         )}
       </AnimatePresence>
+      </div>
     </main>
   )
 }

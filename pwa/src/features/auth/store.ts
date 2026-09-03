@@ -32,7 +32,12 @@ export const useAuthStore = create<AuthState>()(
       user: null,
       profileLoaded: false,
       signIn: (payload) => set({ ...toSession(payload), profileLoaded: false }),
-      signOut: () => set({ token: null, user: null, profileLoaded: false }),
+      signOut: () => {
+        set({ token: null, user: null, profileLoaded: false })
+        void import('@/shared/lib/sessionCleanup').then(({ resetSessionStores }) =>
+          resetSessionStores(),
+        )
+      },
       setOnboardingComplete: (completed) =>
         set((state) =>
           state.user ? { user: { ...state.user, hasCompletedOnboarding: completed } } : {},

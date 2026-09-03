@@ -7,6 +7,7 @@ import { useAuthStore, selectUser } from '@/features/auth/store'
 import { useTeamStore, selectTeam } from '@/features/team/store'
 import { getCpuTeams, getTeamStats } from '@/features/team/api'
 import { useLobbyStore } from '@/features/lobby/store'
+import { resetSessionStores } from '@/shared/lib/sessionCleanup'
 import { FranchiseCarousel } from '@/features/onboarding/components/FranchiseCarousel'
 import { Button, Spinner } from '@/shared/ui'
 import type { Difficulty, Franchise, GameMode, PlayerPosition, TeamStatsResponse } from '@/shared/api/types'
@@ -51,6 +52,7 @@ export function LobbyPage() {
   }
 
   const handleLogout = () => {
+    resetSessionStores()
     signOut()
   }
 

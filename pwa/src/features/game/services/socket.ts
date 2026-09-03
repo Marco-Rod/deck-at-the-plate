@@ -59,8 +59,17 @@ export class GameSocketClient {
       this.ws.onmessage = null
       this.ws.onclose = null
       this.ws.onerror = null
-      if (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING) {
+      if (this.ws.readyState === WebSocket.OPEN) {
         this.ws.close()
+      } else if (this.ws.readyState === WebSocket.CONNECTING) {
+        // Cerrar un socket en CONNECTING dispara la advertencia
+        // "WebSocket is closed before the connection is established".
+        // Esperamos a que complete el handshake y lo cerramos en onopen
+        // para evitarla sin filtrar la conexión.
+        const ws = this.ws
+        ws.onopen = () => {
+          ws.close()
+        }
       }
       this.ws = null
     }
