@@ -560,6 +560,10 @@ async def acknowledge_pitcher_change(
     
     state = dict(game.state_data or {})
     
+    # Capturar el cambio pendiente ANTES de confirmarlo: acknowledge_pending_pitcher_change
+    # setea pending_pitcher_change a None, así que ya no se puede leer después.
+    pending = state.get("pending_pitcher_change") or {}
+    
     if not acknowledge_pending_pitcher_change(state):
         logger.debug("ACK PITCHER CHANGE: no hay cambio pendiente para confirmar")
         return {
@@ -569,8 +573,8 @@ async def acknowledge_pitcher_change(
     
     logger.debug(
         "ACK PITCHER CHANGE: usuario confirmo cambio de pitcher (old=%s new=%s)",
-        state.get("pending_pitcher_change", {}).get("old_pitcher_id"),
-        state.get("pending_pitcher_change", {}).get("new_pitcher_id"),
+        pending.get("old_pitcher_id"),
+        pending.get("new_pitcher_id"),
     )
     
     game.state_data = state
