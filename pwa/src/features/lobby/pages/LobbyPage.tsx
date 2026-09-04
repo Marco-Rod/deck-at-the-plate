@@ -9,7 +9,7 @@ import { getCpuTeams, getTeamStats } from '@/features/team/api'
 import { useLobbyStore } from '@/features/lobby/store'
 import { resetSessionStores } from '@/shared/lib/sessionCleanup'
 import { FranchiseCarousel } from '@/features/onboarding/components/FranchiseCarousel'
-import { Button, Spinner } from '@/shared/ui'
+import { Button } from '@/shared/ui'
 import type {
   Difficulty,
   Franchise,
@@ -83,9 +83,10 @@ export function LobbyPage() {
   }, [t])
 
   useEffect(() => {
-    if (teams.length === 0) return
+    const firstTeam = teams[0]
+    if (!firstTeam) return
     const selectedRivalExists = teams.some((candidate) => candidate.id === config.rivalId)
-    if (!selectedRivalExists) setConfig({ rivalId: teams[0].id })
+    if (!selectedRivalExists) setConfig({ rivalId: firstTeam.id })
   }, [teams, config.rivalId, setConfig])
 
   useEffect(() => {
@@ -321,7 +322,9 @@ export function LobbyPage() {
               {loadError ? (
                 <p className="font-vintage text-xs uppercase text-red-400">{loadError}</p>
               ) : teams.length === 0 ? (
-                <Spinner label={t('common.loading')} className="py-12" />
+                <p className="py-12 text-center font-vintage text-xs uppercase text-koshien-cream/60">
+                  {t('lobby.no_rivals')}
+                </p>
               ) : (
                 <FranchiseCarousel
                   teams={teams}
