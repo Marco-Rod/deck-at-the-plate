@@ -10,15 +10,57 @@ import { useLobbyStore } from '@/features/lobby/store'
 import { resetSessionStores } from '@/shared/lib/sessionCleanup'
 import { FranchiseCarousel } from '@/features/onboarding/components/FranchiseCarousel'
 import { Button, Spinner } from '@/shared/ui'
-import type { Difficulty, Franchise, GameMode, PlayerPosition, TeamStatsResponse } from '@/shared/api/types'
+import type {
+  Difficulty,
+  Franchise,
+  GameMode,
+  PlayerPosition,
+  TeamStatsResponse,
+} from '@/shared/api/types'
 
 const DIFFICULTIES: Difficulty[] = ['EASY', 'MEDIUM', 'HARD']
 const INNINGS = [3, 6, 9]
 const POSITIONS: PlayerPosition[] = ['HOME', 'AWAY']
 
+const RECENT_GAMES = [
+  {
+    id: 1,
+    opponent: 'Águilas de Baltimore',
+    mode: 'CPU',
+    result: 'win',
+    score: '5–2',
+    date: 'today',
+  },
+  {
+    id: 2,
+    opponent: 'Los Angeles Angels',
+    mode: 'ONLINE',
+    result: 'loss',
+    score: '3–4',
+    date: 'yesterday',
+  },
+  {
+    id: 3,
+    opponent: 'Arizona Diamondbacks',
+    mode: 'CPU',
+    result: 'win',
+    score: '7–1',
+    date: 'two_days',
+  },
+  {
+    id: 4,
+    opponent: 'Monterrey Kings',
+    mode: 'ONLINE',
+    result: 'win',
+    score: '6–5',
+    date: 'three_days',
+  },
+] as const
+
 const MODE_STYLES = {
-  active: 'border-koshien-gold bg-koshien-green sm:border-2 shadow-[0_0_15px_rgba(197,160,89,0.3)]',
-  inactive: 'border-koshien-border bg-koshien-dark/60 opacity-60 hover:opacity-100',
+  active:
+    'border-koshien-gold bg-koshien-green/80 sm:border-2 shadow-[0_0_15px_rgba(197,160,89,0.3)]',
+  inactive: 'border-koshien-border bg-koshien-dark/45 opacity-60 hover:opacity-100',
 }
 
 export function LobbyPage() {
@@ -39,6 +81,12 @@ export function LobbyPage() {
       .then(setTeams)
       .catch(() => setLoadError(t('lobby.error_load')))
   }, [t])
+
+  useEffect(() => {
+    if (teams.length === 0) return
+    const selectedRivalExists = teams.some((candidate) => candidate.id === config.rivalId)
+    if (!selectedRivalExists) setConfig({ rivalId: teams[0].id })
+  }, [teams, config.rivalId, setConfig])
 
   useEffect(() => {
     getTeamStats()
@@ -68,9 +116,9 @@ export function LobbyPage() {
     <motion.div
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
-      className="mx-auto flex min-h-screen w-full max-w-7xl flex-col justify-between px-2 py-3 sm:px-4 sm:py-4"
+      className="lobby-screen mx-auto flex min-h-screen w-full max-w-7xl flex-col justify-between px-2 py-3 sm:px-4 sm:py-4"
     >
-      <header className="mx-auto mb-4 flex w-full max-w-7xl flex-wrap items-center justify-between gap-2 rounded border border-koshien-gold bg-koshien-dark p-2 shadow-scoreboard sm:rounded-lg sm:border-2 sm:p-3">
+      <header className="lobby-glass-panel mx-auto mb-4 flex w-full max-w-7xl flex-wrap items-center justify-between gap-2 rounded border border-koshien-gold p-2 shadow-scoreboard sm:rounded-lg sm:border-2 sm:p-3">
         <div className="flex min-w-0 items-center gap-2 sm:gap-3">
           <div className="flex-shrink-0 rounded border border-koshien-gold bg-koshien-green px-2 py-1 text-center sm:px-3">
             <span className="font-sports text-sm text-koshien-gold sm:text-xl">LVL 12</span>
@@ -95,20 +143,22 @@ export function LobbyPage() {
             {(i18n.language ?? 'es').startsWith('es') ? 'EN' : 'ES'}
           </button>
 
-          <button
+          <motion.button
             type="button"
             onClick={handleLogout}
-            className="inline-flex items-center gap-1 rounded border border-koshien-border px-2 py-1 font-vintage text-[9px] uppercase tracking-widest text-koshien-cream transition-colors hover:border-koshien-gold hover:bg-koshien-dark focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-koshien-gold sm:px-3 sm:text-[10px]"
+            whileHover={{ scale: 1.05, borderColor: '#FF554F' }}
+            whileTap={{ scale: 0.95 }}
+            className="inline-flex items-center gap-1 rounded border border-koshien-red bg-koshien-dark px-2 py-1 font-vintage text-[9px] font-bold uppercase tracking-widest text-koshien-red transition-all focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-koshien-red sm:px-3 sm:text-[10px]"
           >
             <LogOut className="h-3.5 w-3.5" aria-hidden />
             {t('lobby.logout')}
-          </button>
+          </motion.button>
         </div>
       </header>
 
       <main className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-3 py-2 sm:gap-4 sm:py-3 lg:flex-row lg:items-stretch">
         {/* PANEL IZQUIERDO: MI CLUB / PREPARACIÓN */}
-        <section className="flex w-full flex-col justify-between rounded border border-koshien-border bg-koshien-dark p-3 shadow-scoreboard sm:p-4 lg:w-5/12 lg:border-2">
+        <section className="lobby-glass-panel flex w-full flex-col justify-between rounded border border-koshien-border p-3 shadow-scoreboard sm:p-4 lg:w-5/12 lg:border-2">
           <div>
             <span className="mb-1 block font-vintage text-[9px] uppercase tracking-widest text-koshien-gold sm:text-xs">
               {t('lobby.my_club')}
@@ -118,7 +168,7 @@ export function LobbyPage() {
             </h3>
 
             {team ? (
-              <div className="mb-3 rounded border border-koshien-gold/40 bg-koshien-dark p-2 sm:mb-4 sm:p-3">
+              <div className="lobby-glass-subpanel mb-3 rounded border border-koshien-gold/40 p-2 sm:mb-4 sm:p-3">
                 <div className="mb-2 flex items-center justify-between gap-2 sm:mb-3">
                   <div className="flex min-w-0 items-center gap-2 sm:gap-3">
                     <div
@@ -142,6 +192,57 @@ export function LobbyPage() {
                 </div>
               </div>
             ) : null}
+
+            <div className="lobby-glass-subpanel mb-3 overflow-hidden rounded border border-koshien-border/70 sm:mb-4">
+              <div className="flex items-center justify-between border-b border-koshien-border/70 bg-koshien-dark/35 px-2.5 py-2 sm:px-3">
+                <div>
+                  <span className="block font-vintage text-[8px] uppercase tracking-[0.18em] text-koshien-gold sm:text-[10px]">
+                    {t('lobby.recent_games')}
+                  </span>
+                  <span className="font-vintage text-[7px] uppercase text-koshien-cream/45 sm:text-[8px]">
+                    {t('lobby.recent_games_subtitle')}
+                  </span>
+                </div>
+                <span className="rounded border border-koshien-gold/40 bg-koshien-green/50 px-2 py-1 font-sports text-xs text-koshien-gold sm:text-sm">
+                  3–1
+                </span>
+              </div>
+
+              <ul className="divide-y divide-koshien-border/40">
+                {RECENT_GAMES.map((match) => {
+                  const won = match.result === 'win'
+                  return (
+                    <li
+                      key={match.id}
+                      className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 px-2.5 py-1.5 sm:px-3 sm:py-2"
+                    >
+                      <span
+                        className={`flex h-6 w-6 items-center justify-center rounded-sm border font-sports text-[10px] sm:h-7 sm:w-7 sm:text-xs ${
+                          won
+                            ? 'border-emerald-400/50 bg-emerald-950/60 text-emerald-300'
+                            : 'border-red-400/50 bg-red-950/50 text-red-300'
+                        }`}
+                      >
+                        {t(won ? 'lobby.win_short' : 'lobby.loss_short')}
+                      </span>
+                      <div className="min-w-0">
+                        <div className="truncate font-sports text-xs uppercase text-koshien-chalk sm:text-sm">
+                          {match.opponent}
+                        </div>
+                        <div className="flex items-center gap-1.5 font-vintage text-[7px] uppercase tracking-wider text-koshien-cream/45 sm:text-[8px]">
+                          <span>{match.mode}</span>
+                          <span>•</span>
+                          <span>{t(`lobby.${match.date}`)}</span>
+                        </div>
+                      </div>
+                      <span className="font-sports text-sm text-koshien-gold sm:text-base">
+                        {match.score}
+                      </span>
+                    </li>
+                  )
+                })}
+              </ul>
+            </div>
           </div>
 
           <div className="space-y-2 pt-1 sm:space-y-3 sm:pt-2">
@@ -157,7 +258,7 @@ export function LobbyPage() {
             <button
               type="button"
               onClick={() => navigate('/showcase')}
-              className="flex w-full items-center justify-between rounded border border-koshien-border bg-koshien-dark px-3 py-2 font-sports text-lg uppercase text-koshien-chalk shadow-md transition-all hover:border-koshien-gold hover:bg-koshien-green active:scale-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-koshien-gold sm:py-3 sm:text-2xl"
+              className="flex w-full items-center justify-between rounded border border-koshien-border bg-koshien-dark/55 px-3 py-2 font-sports text-lg uppercase text-koshien-chalk shadow-md backdrop-blur-sm transition-all hover:border-koshien-gold hover:bg-koshien-green/80 active:scale-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-koshien-gold sm:py-3 sm:text-2xl"
             >
               <span className="truncate">🎴 {t('menu.album')}</span>
               <span className="font-vintage text-xs text-koshien-cream">→</span>
@@ -166,7 +267,7 @@ export function LobbyPage() {
         </section>
 
         {/* PANEL DERECHO: MATCHMAKING */}
-        <section className="flex w-full flex-col justify-between rounded border border-koshien-gold bg-koshien-dark p-3 shadow-scoreboard sm:p-4 lg:w-7/12 lg:border-2">
+        <section className="lobby-glass-panel flex w-full flex-col justify-between rounded border border-koshien-gold p-3 shadow-scoreboard sm:p-4 lg:w-7/12 lg:border-2">
           <div>
             <span className="mb-1 block font-vintage text-[9px] uppercase tracking-widest text-koshien-gold sm:text-xs">
               {t('lobby.matchmaking')}
@@ -226,6 +327,7 @@ export function LobbyPage() {
                   teams={teams}
                   selectedTeamId={config.rivalId}
                   onSelectTeam={(rivalId) => setConfig({ rivalId })}
+                  compact
                 />
               )}
             </div>
@@ -296,7 +398,7 @@ export function LobbyPage() {
 
 function ConfigBox({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="rounded border border-koshien-border bg-koshien-dark p-2 sm:p-2.5">
+    <div className="lobby-glass-subpanel rounded border border-koshien-border p-2 sm:p-2.5">
       <span className="mb-1 block text-center font-vintage text-[8px] font-bold uppercase text-koshien-cream sm:text-[10px]">
         {title}
       </span>

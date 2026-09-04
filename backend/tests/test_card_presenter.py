@@ -88,7 +88,7 @@ def test_pitcher_payload_with_stamina():
         fatigue_level=37.5,
     )
     assert payload["pitch_count"] == 42
-    assert payload["fatigue_level"] == 37.5
+    assert payload["fatigue_level"] == 38
 
 
 def test_pitcher_payload_already_used():

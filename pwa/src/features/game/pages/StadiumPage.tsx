@@ -17,6 +17,8 @@ import { InningTransitionModal } from '@/features/game/components/modals/InningT
 import { GameOverModal } from '@/features/game/components/modals/GameOverModal'
 import { QuitGameModal } from '@/features/game/components/modals/QuitGameModal'
 import { RivalPitcherChangeModal } from '@/features/game/components/modals/RivalPitcherChangeModal'
+import { ChangePitcherModal } from '@/features/game/components/modals/ChangePitcherModal'
+import { getAvailablePitchers } from '@/features/game/api'
 import type {
   GameStateWS,
   PitchAttribute,
@@ -61,6 +63,10 @@ interface BatterSummary {
   rarity: string
 }
 
+interface BullpenPitcher extends PlayerGameData {
+  already_used?: boolean
+}
+
 const FALLBACK_PITCHER: PitcherSummary = {
   id: '',
   name: 'LANZADOR',
@@ -88,6 +94,13 @@ const FALLBACK_BATTER: BatterSummary = {
 
 function toPitcherSummary(p: PlayerGameData | undefined): PitcherSummary {
   if (!p) return FALLBACK_PITCHER
+  // El backend reporta fatiga (0 = fresco, 100 = agotado), mientras que la
+  // barra representa la stamina restante. Las estadísticas de respaldo ya
+  // vienen expresadas como stamina y no necesitan inversión.
+  const stamina =
+    p.fatigue_level == null
+      ? statValue(p.stats, ['STAM', 'STAMINA'], 100)
+      : 100 - p.fatigue_level
   return {
     id: p.id,
     name: p.name,
@@ -96,7 +109,7 @@ function toPitcherSummary(p: PlayerGameData | undefined): PitcherSummary {
     velocity: statValue(p.stats, ['VEL', 'VELO', 'VELOCITY']),
     control: statValue(p.stats, ['CTRL', 'CONTROL']),
     movement: statValue(p.stats, ['MOV', 'MOVEMENT']),
-    stamina: p.fatigue_level ?? statValue(p.stats, ['STAM', 'STAMINA'], 100),
+    stamina: Math.round(Math.min(100, Math.max(0, stamina))),
     pitchCount: p.pitch_count ?? 0,
     rarity: p.rarity ?? 'COMMON',
     repertoire: p.repertoire ?? null,
@@ -175,6 +188,18 @@ function extractTacticalHand(state: GameStateWS | null, userRole: 'HOME' | 'AWAY
   return Array.isArray(hand) ? (hand as string[]) : []
 }
 
+function extractNextBatterId(state: GameStateWS | null): string | null {
+  if (!state) return null
+  const data = (state.state_data ?? {}) as Record<string, unknown>
+  const lineupKey = state.isTopInning ? 'away_lineup' : 'home_lineup'
+  const indexKey = state.isTopInning ? 'away_batter_index' : 'home_batter_index'
+  const lineup = Array.isArray(data[lineupKey]) ? (data[lineupKey] as string[]) : []
+  const currentIndex = typeof data[indexKey] === 'number' ? data[indexKey] : 0
+
+  if (lineup.length === 0) return null
+  return lineup[(currentIndex + 1) % lineup.length] ?? null
+}
+
 function toIntroPlayer(card: PlayerCard): IntroPlayer {
   return {
     name: card.name,    number: card.number,
@@ -208,6 +233,7 @@ export function StadiumPage() {
   const [showIntro, setShowIntro] = useState(() => !isIntroShown(gameId))
   const [resolvedPitcher, setResolvedPitcher] = useState<PlayerGameData | null>(null)
   const [resolvedBatter, setResolvedBatter] = useState<PlayerGameData | null>(null)
+  const [resolvedNextBatter, setResolvedNextBatter] = useState<PlayerGameData | null>(null)
   const [selectedZone, setSelectedZone] = useState<number>(5)
   const [pitchSelectorOpen, setPitchSelectorOpen] = useState(false)
   const [selectedTacticalId, setSelectedTacticalId] = useState<string | null>(null)
@@ -217,6 +243,10 @@ export function StadiumPage() {
   const [showQuit, setShowQuit] = useState(false)
   const [isQuitting, setIsQuitting] = useState(false)
   const [showRivalPitchAck, setShowRivalPitchAck] = useState(false)
+  const [showChangePitcher, setShowChangePitcher] = useState(false)
+  const [availablePitchers, setAvailablePitchers] = useState<BullpenPitcher[]>([])
+  const [isLoadingPitchers, setIsLoadingPitchers] = useState(false)
+  const ownPitcherChangeRef = useRef<string | null>(null)
   const [rivalPitchData, setRivalPitchData] = useState<{
     oldPitcher: PlayerGameData | null
     newPitcher: PlayerGameData | null
@@ -234,13 +264,14 @@ export function StadiumPage() {
     event: string
     ts: number
   } | null>(null)
+  const introAudioRef = useRef<HTMLAudioElement | null>(null)
 
   const { onStep, enqueueEvent } = useEventSequencer()
 
   // Snapshot del último estado "commiteado" para el deferred display.
   const deferredRef = useRef<GameStateWS | null>(null)
 
-  const { game, isConnected, error, sendPitch, sendSwing, sendAcknowledgePitcherChange } =
+  const { game, isConnected, error, sendPitch, sendSwing, sendChangePitcher, sendAcknowledgePitcherChange } =
     useGameSocket(gameId, {
       onPlayResolved: (payload) => {
         const event = 'event' in payload ? payload.event : ''
@@ -251,6 +282,23 @@ export function StadiumPage() {
         const pd = payload as unknown as {
           old_pitcher_data?: PlayerGameData
           new_pitcher?: PlayerGameData
+        }
+        if (pd.new_pitcher?.id === ownPitcherChangeRef.current) {
+          ownPitcherChangeRef.current = null
+          setResolvedPitcher(pd.new_pitcher)
+          const currentGame = useGameStore.getState().game
+          if (currentGame) {
+            useGameStore.getState().setGame({
+              ...currentGame,
+              activePitcherId: pd.new_pitcher.id,
+              active_pitcher: pd.new_pitcher,
+              state_data: {
+                ...currentGame.state_data,
+                ...(payload.state_data ?? {}),
+              },
+            })
+          }
+          return
         }
         setRivalPitchData({
           oldPitcher: pd.old_pitcher_data ?? null,
@@ -280,7 +328,14 @@ export function StadiumPage() {
 
   const pitcher = useMemo(() => toPitcherSummary(activePitcher), [activePitcher])
   const batter = useMemo(() => toBatterSummary(activeBatter), [activeBatter])
-  const nextBatter = batter
+  const nextBatterId = extractNextBatterId(game)
+  const nextBatter = useMemo(
+    () =>
+      toBatterSummary(
+        resolvedNextBatter?.id === nextBatterId ? resolvedNextBatter : undefined,
+      ),
+    [nextBatterId, resolvedNextBatter],
+  )
   const tacticalHand = useMemo(
     () => extractTacticalHand(game, userRole).slice(0, 3),
     [game, userRole],
@@ -289,6 +344,27 @@ export function StadiumPage() {
   // La partida "arranca" visualmente cuando se cierra el modal de previa,
   // momento en el que el HUD entra desde los laterales.
   const started = !showIntro
+  const isIntroVisible = showIntro && Boolean(game)
+
+  useEffect(() => {
+    const audio = introAudioRef.current
+    if (!audio) return
+
+    if (isIntroVisible) {
+      audio.currentTime = 0
+      void audio.play().catch(() => {
+        // Algunos navegadores bloquean autoplay sin interacción previa.
+      })
+    } else {
+      audio.pause()
+      audio.currentTime = 0
+    }
+
+    return () => {
+      audio.pause()
+      audio.currentTime = 0
+    }
+  }, [isIntroVisible])
 
   // Cargar nombre del equipo del usuario.
   useEffect(() => {
@@ -319,10 +395,19 @@ export function StadiumPage() {
     const data = (game.state_data ?? {}) as Record<string, unknown>
     const pitcherId = typeof data.active_pitcher === 'string' ? data.active_pitcher : undefined
     const batterId = typeof data.active_batter === 'string' ? data.active_batter : undefined
+    const pitchCounts =
+      typeof data.pitch_counts === 'object' && data.pitch_counts !== null
+        ? (data.pitch_counts as Record<string, number>)
+        : {}
 
     if (pitcherId && !game.active_pitcher) {
       getCard(pitcherId)
-        .then((card) => setResolvedPitcher(toGamePlayer(card, 'PITCHER')))
+        .then((card) =>
+          setResolvedPitcher({
+            ...toGamePlayer(card, 'PITCHER'),
+            pitch_count: pitchCounts[pitcherId] ?? 0,
+          }),
+        )
         .catch(() => undefined)
     }
     if (batterId && !game.active_batter) {
@@ -331,6 +416,25 @@ export function StadiumPage() {
         .catch(() => undefined)
     }
   }, [game])
+
+  // Resolver el jugador que sigue en el orden ofensivo. En la alta batea AWAY
+  // y en la baja batea HOME, independientemente de cuál sea el equipo humano.
+  useEffect(() => {
+    if (!nextBatterId) return
+
+    let active = true
+    getCard(nextBatterId)
+      .then((card) => {
+        if (active) setResolvedNextBatter(toGamePlayer(card, 'BATTER'))
+      })
+      .catch(() => {
+        if (active) setResolvedNextBatter(null)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [nextBatterId])
 
   // Registrar pasos del event sequencer para el overlay de resultado.
   useEffect(() => {
@@ -424,6 +528,30 @@ export function StadiumPage() {
     }
   }
 
+  const handleOpenBullpen = async () => {
+    if (!gameId || role !== 'PITCHER' || pitcher.pitchCount < 5) return
+    setShowChangePitcher(true)
+    setIsLoadingPitchers(true)
+    try {
+      const response = await getAvailablePitchers(gameId)
+      setAvailablePitchers(response.available_pitchers ?? [])
+    } catch {
+      setAvailablePitchers([])
+    } finally {
+      setIsLoadingPitchers(false)
+    }
+  }
+
+  const handleChangePitcher = async (newPitcherId: string) => {
+    ownPitcherChangeRef.current = newPitcherId
+    try {
+      await sendChangePitcher(newPitcherId)
+    } catch (changeError) {
+      ownPitcherChangeRef.current = null
+      throw changeError
+    }
+  }
+
   const bases = {
     first: Boolean(game?.runners.b1),
     second: Boolean(game?.runners.b2),
@@ -434,6 +562,7 @@ export function StadiumPage() {
     <div
       className={`${styles.gameBg} relative min-h-screen w-screen bg-cover bg-center bg-koshien-dark lg:h-dvh lg:overflow-hidden`}
     >
+      <audio ref={introAudioRef} src="/audio/playball-stadium.mp3" preload="auto" />
       <div className="pointer-events-none absolute inset-0 z-0 bg-black/55" />
 
       <div className="relative z-10 flex min-h-full flex-col">
@@ -498,6 +627,14 @@ export function StadiumPage() {
         oldPitcher={rivalPitchData?.oldPitcher ?? null}
         newPitcher={rivalPitchData?.newPitcher ?? null}
         onAccept={handleAckPitcherChange}
+      />
+      <ChangePitcherModal
+        isOpen={showChangePitcher}
+        onClose={() => setShowChangePitcher(false)}
+        currentPitcher={activePitcher ?? null}
+        availablePitchers={availablePitchers}
+        onConfirm={handleChangePitcher}
+        isLoading={isLoadingPitchers}
       />
 
       <div className={styles.gameShell}>
@@ -571,7 +708,19 @@ export function StadiumPage() {
                 role={role}
                 hoveredStat={hoveredPitchStat}
                 setHoveredStat={setHoveredPitchStat}
+                onChangePitcher={handleOpenBullpen}
               />
+            </motion.div>
+          </div>
+
+          <div className={styles.areaPitcherMeta}>
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={started ? { opacity: 1, y: 0 } : {}}
+              transition={{ duration: 0.6, ease: 'easeOut', delay: 0.18 }}
+              className="h-full w-full"
+            >
+              <PitcherMetaBar pitcher={pitcher} />
             </motion.div>
           </div>
 
@@ -600,6 +749,16 @@ export function StadiumPage() {
                 >
                   {t('game.intentional_walk')}
                 </button>
+              </div>
+            )}
+
+            {role === 'BATTER' && (
+              <div className="mt-1 hidden w-full desktop:block">
+                <div className="neon-amber border border-koshien-border bg-koshien-dark/40 px-3 py-1.5">
+                  <div className="text-center font-vintage text-[10px] uppercase text-koshien-gold">
+                    {t('game.la_picho')}
+                  </div>
+                </div>
               </div>
             )}
 
@@ -689,7 +848,15 @@ export function StadiumPage() {
                 animate={started ? { x: 0, opacity: 1 } : {}}
                 transition={{ duration: 0.6, ease: 'easeOut', delay: 0.34 }}
               >
-                <div className="neon-amber border border-koshien-border bg-koshien-dark/40 p-2">
+                <div className="hidden desktop:block">
+                  <TacticalCardsArea
+                    hand={tacticalHand}
+                    selectedTacticalId={selectedTacticalId}
+                    disabled={Boolean(modalResult)}
+                    onSelect={setSelectedTacticalId}
+                  />
+                </div>
+                <div className="neon-amber border border-koshien-border bg-koshien-dark/40 p-2 desktop:hidden">
                   <div className="text-center font-vintage text-xs uppercase text-koshien-gold sm:text-sm lg:text-[9px]">
                     {t('game.la_picho')}
                   </div>
@@ -794,9 +961,7 @@ function Scoreboard({ homeTeamName, awayTeamName, homeScore, awayScore }: Scoreb
           {awayScore}
         </span>
       </div>
-      <div className="text-center font-vintage text-[9px] uppercase tracking-widest text-koshien-muted">
-        LIVE
-      </div>
+
     </motion.div>
   )
 }
@@ -859,7 +1024,7 @@ function GameSituation({ inning, isTop, balls, strikes, outs, bases, role }: Gam
         ))}
       </div>
 
-      <div className={styles.situationDivider} />
+      <div className={`${styles.situationDivider} ${styles.situationMainDivider}`} />
 
       <div className={`${styles.situationZone} ${styles.situationInningZone}`}>
         <div className={styles.situationInning}>
@@ -869,10 +1034,10 @@ function GameSituation({ inning, isTop, balls, strikes, outs, bases, role }: Gam
         </div>
       </div>
 
-      <div className={styles.situationDivider} />
+      <div className={`${styles.situationDivider} ${styles.situationRowDivider}`} />
 
       <div className={`${styles.situationZone} ${styles.situationBasesZone}`}>
-        <div className={styles.situationLabel}>{role === 'PITCHER' ? 'TU PICHAS' : 'TU BATEAS'}</div>
+        <div className={styles.situationLabel} style={{ whiteSpace: 'nowrap', fontSize: '7px', maxWidth: '100px', overflow: 'hidden' }}>{role === 'PITCHER' ? 'TU PICHAS' : 'TU BATEAS'}</div>
         <div className="mt-1 flex justify-center">
           <BasesDiamond bases={bases} />
         </div>
@@ -888,43 +1053,45 @@ interface BasesDiamondProps {
 function BasesDiamond({ bases }: BasesDiamondProps) {
   return (
     <svg viewBox="0 0 60 60" className="h-12 w-12 sm:h-14 sm:w-14 lg:h-10 lg:w-10">
-      <path d="M 30 10 L 50 30 L 30 50 L 10 30 Z" fill="none" stroke="#F2A13A" strokeWidth="1" />
-      <motion.circle
-        cx="30"
-        cy="10"
-        fill={bases.third ? '#F2A13A' : 'none'}
-        initial={{ r: 2 }}
-        animate={{ r: bases.third ? 3.5 : 2 }}
-        transition={{ repeat: bases.third ? Infinity : 0, repeatType: 'reverse', duration: 1 }}
-      />
-      <motion.circle
-        cx="50"
-        cy="30"
-        fill={bases.first ? '#F2A13A' : 'none'}
-        initial={{ r: 2 }}
-        animate={{ r: bases.first ? 3.5 : 2 }}
-        transition={{
-          repeat: bases.first ? Infinity : 0,
-          repeatType: 'reverse',
-          duration: 1,
-          delay: 0.2,
-        }}
-      />
-      <circle cx="30" cy="50" r="2" fill="none" />
-      <motion.circle
-        cx="10"
-        cy="30"
-        fill={bases.second ? '#F2A13A' : 'none'}
-        initial={{ r: 2 }}
-        animate={{ r: bases.second ? 3.5 : 2 }}
-        transition={{
-          repeat: bases.second ? Infinity : 0,
-          repeatType: 'reverse',
-          duration: 1,
-          delay: 0.1,
-        }}
-      />
-      <circle cx="30" cy="30" r="1.5" fill="#F2A13A" opacity="0.5" />
+      <g className={styles.basesDiamondGraphic}>
+        <path d="M 30 10 L 50 30 L 30 50 L 10 30 Z" fill="none" stroke="#F2A13A" strokeWidth="1" />
+        <motion.circle
+          cx="30"
+          cy="10"
+          fill={bases.second ? '#F2A13A' : 'none'}
+          initial={{ r: 2 }}
+          animate={{ r: bases.second ? 3.5 : 2 }}
+          transition={{ repeat: bases.second ? Infinity : 0, repeatType: 'reverse', duration: 1 }}
+        />
+        <motion.circle
+          cx="50"
+          cy="30"
+          fill={bases.first ? '#F2A13A' : 'none'}
+          initial={{ r: 2 }}
+          animate={{ r: bases.first ? 3.5 : 2 }}
+          transition={{
+            repeat: bases.first ? Infinity : 0,
+            repeatType: 'reverse',
+            duration: 1,
+            delay: 0.2,
+          }}
+        />
+        <circle cx="30" cy="50" r="2" fill="none" />
+        <motion.circle
+          cx="10"
+          cy="30"
+          fill={bases.third ? '#F2A13A' : 'none'}
+          initial={{ r: 2 }}
+          animate={{ r: bases.third ? 3.5 : 2 }}
+          transition={{
+            repeat: bases.third ? Infinity : 0,
+            repeatType: 'reverse',
+            duration: 1,
+            delay: 0.1,
+          }}
+        />
+        <circle cx="30" cy="30" r="1.5" fill="#F2A13A" opacity="0.5" />
+      </g>
     </svg>
   )
 }
@@ -948,7 +1115,7 @@ function TacticalCardsArea({ hand, selectedTacticalId, disabled, onSelect }: Tac
         const isSelected = id != null && selectedTacticalId === id
         return (
           <motion.button
-            key={id ?? `empty-${i}`}
+            key={id != null ? `${id}-${i}` : `empty-${i}`}
             type="button"
             disabled={disabled || id == null}
             onClick={() => id != null && onSelect(id)}
@@ -985,9 +1152,10 @@ interface PitcherCardProps {
   role: PlayerRole
   hoveredStat: string | null
   setHoveredStat: (stat: string | null) => void
+  onChangePitcher: () => void
 }
 
-function PitcherCard({ pitcher, role, hoveredStat, setHoveredStat }: PitcherCardProps) {
+function PitcherCard({ pitcher, role, hoveredStat, setHoveredStat, onChangePitcher }: PitcherCardProps) {
   const isPitching = role === 'PITCHER'
   return (
     <motion.div
@@ -996,12 +1164,12 @@ function PitcherCard({ pitcher, role, hoveredStat, setHoveredStat }: PitcherCard
       transition={{ duration: 0.3, delay: 0.3 }}
       className={`${rarityClass(pitcher.rarity)} flex flex-col border border-koshien-dark/40 bg-koshien-dark/60 p-2 sm:p-3 lg:p-2`}
     >
-      <div className="flex-1 desktop:flex desktop:flex-col">
-        <div className="mb-2 flex items-center justify-between border-b border-white/10 pb-1">
-          <span className="font-vintage text-[9px] uppercase text-koshien-muted sm:text-xs lg:text-[8px]">
+      <div className={`${styles.playerCardContent} flex-1`}>
+        <div className={`${styles.playerCardHeader} mb-1 flex items-center justify-between border-b border-white/10 pb-1`}>
+          <span className="font-vintage text-[9px] uppercase text-koshien-muted sm:text-xs lg:text-[10px] desktop:text-[12px]">
             PITCHER {isPitching ? '●' : ''}
           </span>
-          <span className="font-sports text-xs font-bold text-koshien-gold sm:text-sm lg:text-[9px]">
+          <span className="font-sports text-xs font-bold text-koshien-gold sm:text-sm lg:text-[14px] desktop:text-[18px]">
             {pitcher.overall}
           </span>
         </div>
@@ -1009,19 +1177,19 @@ function PitcherCard({ pitcher, role, hoveredStat, setHoveredStat }: PitcherCard
         <motion.div
           animate={{ scale: 1 }}
           initial={{ scale: 0.8 }}
-          className="mb-2 text-center font-sports text-2xl font-bold text-koshien-gold sm:text-3xl lg:text-xl desktop:order-3 desktop:mb-0 desktop:flex desktop:flex-1 desktop:flex-col desktop:items-center desktop:justify-center desktop:text-[9rem] desktop:leading-none"
+          className={`${styles.playerIdentity} mb-2 text-center font-sports text-2xl font-bold text-koshien-gold sm:text-3xl lg:text-xl`}
         >
-          <span className="desktop:font-vintage desktop:text-[2.5rem] desktop:tracking-widest">
+          <span className={styles.playerHash}>
             #
           </span>
-          <span className="desktop:block desktop:-mt-1">{pitcher.number}</span>
+          <span className={styles.playerNumber}>{pitcher.number}</span>
         </motion.div>
 
-        <div className="mb-2 truncate text-center font-vintage text-[10px] font-bold uppercase text-koshien-chalk sm:text-xs lg:text-[8px] desktop:order-2 desktop:mb-2 desktop:text-[3rem] desktop:tracking-wide">
+        <div className={`${styles.playerName} mb-2 truncate text-center font-vintage text-[10px] font-bold uppercase text-koshien-chalk sm:text-xs lg:text-[8px]`}>
           {pitcher.name}
         </div>
 
-        <div className="mb-2 grid grid-cols-3 gap-1 lg:gap-0.5 desktop:order-4 desktop:mb-0 desktop:mt-auto">
+        <div className={`${styles.playerStats} mb-2 grid grid-cols-3 gap-1 lg:gap-0.5`}>
           {[
             { label: 'VEL', value: pitcher.velocity },
             { label: 'CTRL', value: pitcher.control },
@@ -1038,41 +1206,55 @@ function PitcherCard({ pitcher, role, hoveredStat, setHoveredStat }: PitcherCard
                   : 'border-koshien-light-green/40 bg-koshien-dark'
               } p-1 text-center`}
             >
-              <div className="font-vintage text-[8px] uppercase text-koshien-muted sm:text-[9px] lg:text-[7px] desktop:text-[32px]">
+              <div className={`${styles.statLabel} font-vintage text-[8px] uppercase text-koshien-muted sm:text-[9px] lg:text-[7px]`}>
                 {label}
               </div>
               <motion.div
                 animate={{ scale: hoveredStat === label ? 1.1 : 1 }}
-                className="font-sports text-xs font-bold text-koshien-gold sm:text-sm lg:text-[9px] desktop:text-[48px]"
+                className={`${styles.statValue} font-sports text-xs font-bold text-koshien-gold sm:text-sm lg:text-[14px]`}
               >
                 {value}
               </motion.div>
             </motion.div>
           ))}
         </div>
+        {isPitching && (
+          <button
+            type="button"
+            onClick={onChangePitcher}
+            disabled={pitcher.pitchCount < 5}
+            className="mt-auto hidden w-full items-center justify-center border border-koshien-gold/60 bg-koshien-dark/70 px-2 py-1 font-vintage text-[9px] uppercase tracking-wider text-koshien-gold transition hover:bg-koshien-gold/15 disabled:cursor-not-allowed disabled:border-koshien-muted/30 disabled:text-koshien-muted/50 desktop:flex"
+          >
+            {pitcher.pitchCount < 5
+              ? `${5 - pitcher.pitchCount} lanz. para cambio`
+              : 'Cambiar lanzador'}
+          </button>
+        )}
       </div>
+    </motion.div>
+  )
+}
 
-      <div className="border-t border-white/10 pt-1">
-        <div className="mb-1 flex items-center justify-between">
-          <span className="font-vintage text-[8px] uppercase text-koshien-muted sm:text-[9px] lg:text-[7px]">
-            ⚡ STAMINA
-          </span>
-          <span className="font-sports text-xs font-bold text-koshien-green sm:text-sm lg:text-[9px]">
-            {pitcher.stamina}%
-          </span>
-        </div>
-        <div className="h-1 w-full overflow-hidden rounded bg-koshien-dark/50 lg:h-0.5">
-          <motion.div
-            initial={{ width: 0 }}
-            animate={{ width: `${Math.min(100, Math.max(0, pitcher.stamina))}%` }}
-            transition={{ duration: 0.8 }}
-            className="h-full bg-gradient-to-r from-koshien-green to-koshien-orange"
-          />
-        </div>
+function PitcherMetaBar({ pitcher }: { pitcher: PitcherSummary }) {
+  return (
+    <motion.div
+      className={`${styles.pitcherMeta} flex flex-col justify-center gap-1 border border-koshien-dark/40 bg-koshien-dark/60 p-2 sm:p-3 lg:p-2`}
+    >
+      <div className="flex items-center justify-between">
+        <span className="font-sports text-[10px] font-bold uppercase tracking-wider text-koshien-gold sm:text-sm lg:text-[9px]">
+          STAMINA {pitcher.stamina}%
+        </span>
+        <span className="font-vintage text-[10px] uppercase text-koshien-cream sm:text-sm lg:text-[9px]">
+          ⚾ {pitcher.pitchCount} LANZ.
+        </span>
       </div>
-
-      <div className="text-center font-vintage text-[8px] uppercase text-koshien-muted sm:text-[9px] lg:text-[7px]">
-        ⚾ {pitcher.pitchCount} LANZ.
+      <div className="h-1 w-full overflow-hidden rounded bg-koshien-dark/50 lg:h-[3px]">
+        <motion.div
+          initial={{ width: 0 }}
+          animate={{ width: `${Math.min(100, Math.max(0, pitcher.stamina))}%` }}
+          transition={{ duration: 0.8 }}
+          className="h-full bg-gradient-to-r from-koshien-green to-koshien-orange"
+        />
       </div>
     </motion.div>
   )
@@ -1094,12 +1276,12 @@ function BatterCard({ batter, role, hoveredStat, setHoveredStat }: BatterCardPro
       transition={{ duration: 0.3, delay: 0.4 }}
       className={`${rarityClass(batter.rarity)} flex flex-col border border-koshien-dark/40 bg-koshien-dark/60 p-2 sm:p-3 lg:p-2`}
     >
-      <div className="flex-1 desktop:flex desktop:flex-col">
-        <div className="mb-2 flex items-center justify-between border-b border-white/10 pb-1">
-          <span className="font-vintage text-[9px] uppercase text-koshien-muted sm:text-xs lg:text-[8px]">
+      <div className={`${styles.playerCardContent} flex-1`}>
+        <div className={`${styles.playerCardHeader} mb-1 flex items-center justify-between border-b border-white/10 pb-1`}>
+          <span className="font-vintage text-[9px] uppercase text-koshien-muted sm:text-xs lg:text-[10px] desktop:text-[12px]">
             BATTER {isBatting ? '●' : ''}
           </span>
-          <span className="font-sports text-xs font-bold text-koshien-gold sm:text-sm lg:text-[9px]">
+          <span className="font-sports text-xs font-bold text-koshien-gold sm:text-sm lg:text-[14px] desktop:text-[18px]">
             {batter.overall}
           </span>
         </div>
@@ -1107,19 +1289,19 @@ function BatterCard({ batter, role, hoveredStat, setHoveredStat }: BatterCardPro
         <motion.div
           animate={{ scale: 1 }}
           initial={{ scale: 0.8 }}
-          className="mb-2 text-center font-sports text-2xl font-bold text-koshien-gold sm:text-3xl lg:text-xl desktop:order-3 desktop:mb-0 desktop:flex desktop:flex-1 desktop:flex-col desktop:items-center desktop:justify-center desktop:text-[9rem] desktop:leading-none"
+          className={`${styles.playerIdentity} mb-2 text-center font-sports text-2xl font-bold text-koshien-gold sm:text-3xl lg:text-xl`}
         >
-          <span className="desktop:font-vintage desktop:text-[2.5rem] desktop:tracking-widest">
+          <span className={styles.playerHash}>
             #
           </span>
-          <span className="desktop:block desktop:-mt-1">{batter.number}</span>
+          <span className={styles.playerNumber}>{batter.number}</span>
         </motion.div>
 
-        <div className="mb-2 truncate text-center font-vintage text-[10px] font-bold uppercase text-koshien-chalk sm:text-xs lg:text-[8px] desktop:order-2 desktop:mb-2 desktop:text-[3rem] desktop:tracking-wide">
+        <div className={`${styles.playerName} mb-2 truncate text-center font-vintage text-[10px] font-bold uppercase text-koshien-chalk sm:text-xs lg:text-[8px]`}>
           {batter.name}
         </div>
 
-        <div className="mb-2 grid grid-cols-3 gap-1 lg:gap-0.5 desktop:order-4 desktop:mb-0 desktop:mt-auto">
+        <div className={`${styles.playerStats} mb-2 grid grid-cols-3 gap-1 lg:gap-0.5`}>
           {[
             { label: 'CON', value: batter.contact },
             { label: 'PWR', value: batter.power },
@@ -1136,12 +1318,12 @@ function BatterCard({ batter, role, hoveredStat, setHoveredStat }: BatterCardPro
                   : 'border-koshien-light-green/40 bg-koshien-dark'
               } p-1 text-center`}
             >
-              <div className="font-vintage text-[8px] uppercase text-koshien-muted sm:text-[9px] lg:text-[7px] desktop:text-[32px]">
+              <div className={`${styles.statLabel} font-vintage text-[8px] uppercase text-koshien-muted sm:text-[9px] lg:text-[7px]`}>
                 {label}
               </div>
               <motion.div
                 animate={{ scale: hoveredStat === label ? 1.1 : 1 }}
-                className="font-sports text-xs font-bold text-koshien-gold sm:text-sm lg:text-[9px] desktop:text-[48px]"
+                className={`${styles.statValue} font-sports text-xs font-bold text-koshien-gold sm:text-sm lg:text-[14px]`}
               >
                 {value}
               </motion.div>
@@ -1166,23 +1348,23 @@ function NextBatterPreview({ nextBatter }: NextBatterPreviewProps) {
       className={`${styles.nextBatter} neon-green border-2 border-koshien-light-green bg-koshien-green/20`}
     >
       <div className="flex items-center justify-between">
-        <span className="font-vintage text-[9px] font-bold uppercase tracking-wider text-koshien-cream lg:text-[8px]">
+        <span className="font-vintage text-[9px] font-bold uppercase tracking-wider text-koshien-cream lg:text-[8px] desktop:text-[clamp(0.875rem,2.5dvh,1.5rem)]">
           SIG
         </span>
         <motion.span
           animate={{ x: [0, 2, 0] }}
           transition={{ repeat: Infinity, duration: 1 }}
-          className="text-[9px] text-koshien-cream"
+          className="text-[9px] text-koshien-cream desktop:text-[clamp(0.875rem,2.5dvh,1.5rem)]"
         >
           ▶
         </motion.span>
       </div>
 
       <div className="flex items-baseline gap-1">
-        <span className="font-sports font-bold text-koshien-gold text-sm lg:text-xs">
+        <span className="font-sports font-bold text-koshien-gold text-sm lg:text-xs desktop:text-[clamp(1.25rem,3dvh,2rem)]">
           #{nextBatter.number}
         </span>
-        <span className="truncate font-vintage text-xs font-bold uppercase text-koshien-chalk lg:text-[11px]">
+        <span className="truncate font-vintage text-xs font-bold uppercase text-koshien-chalk lg:text-[11px] desktop:text-[clamp(1rem,2.5dvh,1.75rem)]">
           {nextBatter.name}
         </span>
       </div>
@@ -1194,10 +1376,10 @@ function NextBatterPreview({ nextBatter }: NextBatterPreviewProps) {
           { label: 'V', value: nextBatter.speed },
         ].map(({ label, value }) => (
           <div key={label} className="text-center">
-            <div className="font-vintage text-[8px] uppercase text-koshien-chalk/70 lg:text-[7px]">
+            <div className="font-vintage text-[8px] uppercase text-koshien-chalk/70 lg:text-[7px] desktop:text-[clamp(0.75rem,2dvh,1.25rem)]">
               {label}
             </div>
-            <div className="font-sports text-sm font-bold text-koshien-light-green lg:text-xs">
+            <div className="font-sports text-sm font-bold text-koshien-light-green lg:text-xs desktop:text-[clamp(1rem,2.5dvh,1.75rem)]">
               {value}
             </div>
           </div>

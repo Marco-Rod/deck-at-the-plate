@@ -205,5 +205,24 @@ def get_user_team_stats(
     if not lineup or not lineup.slots:
         return {"overall": 70, "batOvr": 70, "pitOvr": 70}
 
+    # Los slots persistidos por team/ contienen IDs de carta. Resolverlos desde
+    # el inventario autenticado antes de calcular las medias; pasar los IDs
+    # directamente hacía que compute_lineup_ratings los ignorara y devolviera
+    # siempre el valor por defecto.
+    inventory_cards = {
+        card.id: card
+        for _, card in find_inventory_with_cards(db, current_user_id)
+        if card
+    }
+    resolved_slots = {}
+    for slot, stored_card in lineup.slots.items():
+        card_id = stored_card.get("id") if isinstance(stored_card, dict) else stored_card
+        card = inventory_cards.get(card_id)
+        if card:
+            resolved_slots[slot] = {
+                "overall": card.overall,
+                "position": card.position,
+            }
+
     # Cálculo OVR unificado (regla única en services/team_ratings.py)
-    return compute_lineup_ratings(lineup.slots, default=70)
+    return compute_lineup_ratings(resolved_slots, default=70)

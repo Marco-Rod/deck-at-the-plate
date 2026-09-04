@@ -75,7 +75,7 @@
   grid-template-rows: minmax(0, 1fr) auto;
   grid-template-areas:
     'pitcher zone batter'
-    '.       .    next';
+    'pmeta   .    next';
   gap: clamp(6px, 2vw, 10px);
 }
 
@@ -151,6 +151,22 @@
   align-items: center;
   justify-content: center;
   height: clamp(56px, 10dvh, 72px);
+}
+
+/* Stamina + contador de lanzamientos del pitcher: celda propia debajo de la
+   tarjeta del lanzador, con el mismo alto que el "siguiente bateador". */
+.areaPitcherMeta {
+  grid-area: pmeta;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  height: clamp(56px, 10dvh, 72px);
+}
+
+.pitcherMeta > * {
+  max-width: 100%;
 }
 
 .nextBatter {
@@ -474,35 +490,106 @@
 
   /* GameSituation: composición horizontal y compacta (v1.7) */
   .gameSituation {
-    flex-direction: row;
+    display: grid;
+    height: 100%;
+    min-height: 0;
+    grid-template-columns:
+      minmax(0, 3fr)
+      1px
+      minmax(82px, 1fr);
+    grid-template-rows: minmax(0, 0.8fr) 1px minmax(0, 1.2fr);
+    grid-template-areas:
+      'counts main-divider inning'
+      'row-divider row-divider row-divider'
+      'bases bases bases';
     align-items: center;
-    justify-content: space-between;
-    gap: 14px;
-    padding: 12px 16px;
+    justify-content: stretch;
+    column-gap: clamp(8px, 1vw, 14px);
+    row-gap: 3px;
+    padding: 6px clamp(18px, 1.5vw, 26px);
+    overflow: hidden;
   }
 
   .countRow {
-    flex: 1.8;
+    grid-area: counts;
+    width: 100%;
     gap: 8px;
   }
 
+  .countDot {
+    width: 12px;
+    height: 12px;
+  }
+
+  .countLabel {
+    font-size: 11px;
+  }
+
+  .situationValue {
+    font-size: 24px;
+  }
+
   .situationDivider {
+    align-self: stretch;
+    max-height: none;
+  }
+
+  .situationMainDivider {
+    grid-area: main-divider;
     width: 1px;
     height: 100%;
-    max-height: 72px;
     background: rgba(255, 255, 255, 0.08);
   }
 
+  .situationRowDivider {
+    grid-area: row-divider;
+    width: 100%;
+    height: 1px;
+  }
+
   .situationZone {
-    flex: 0 0 auto;
+    width: 100%;
+    min-width: 0;
   }
 
   .situationInningZone {
-    min-width: 90px;
+    grid-area: inning;
+    min-width: 0;
   }
 
   .situationBasesZone {
-    min-width: 100px;
+    grid-area: bases;
+    min-width: 0;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+  }
+
+  .situationBasesZone svg {
+    width: clamp(64px, 7.5dvh, 82px);
+    height: clamp(64px, 7.5dvh, 82px);
+    max-width: 82px;
+    max-height: 82px;
+    flex: 0 0 auto;
+  }
+
+  .basesDiamondGraphic {
+    transform: scale(1.16);
+    transform-origin: center;
+    transform-box: view-box;
+  }
+
+  .basesDiamondGraphic path {
+    stroke-width: 1.35px;
+  }
+
+  .situationLabel {
+    font-size: 8px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   /* CoreGameplay: --matchup-height como fuente única de verdad.
@@ -511,7 +598,8 @@
      - Columna central determinista (sin fr).
      - Next Batter en segunda fila, fuera de la altura del matchup. */
   .coreGameplay {
-    --matchup-height: clamp(260px, 30dvh, 330px);
+    --matchup-height: 380px; /* Fallback for older browsers */
+    --matchup-height: clamp(340px, 40dvh, 440px);
 
     width: min(100%, 1120px);
     margin-inline: auto;
@@ -545,7 +633,117 @@
   .playerCard {
     width: min(100%, 340px);
     height: var(--matchup-height);
-    justify-content: space-between;
+  }
+
+  /* Estructura compacta y proporcional: cada bloque tiene una función clara
+     y la identidad del jugador ocupa el espacio que antes quedaba vacío. */
+  .playerCard > * {
+    padding: clamp(14px, 1.8dvh, 20px);
+  }
+
+  .playerCardContent {
+    height: 100%;
+    min-height: 0;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      'header'
+      'identity'
+      'stats';
+    gap: clamp(10px, 1.4dvh, 16px);
+  }
+
+  .playerCardHeader {
+    grid-area: header;
+    margin: 0;
+    padding-bottom: 8px;
+  }
+
+  .playerIdentity {
+    grid-area: identity;
+    min-height: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    line-height: 0.82;
+  }
+
+  .playerHash {
+    font-family: var(--font-vintage);
+    font-size: clamp(22px, 2.5dvh, 30px);
+    line-height: 1;
+    letter-spacing: 0.08em;
+  }
+
+  .playerNumber {
+    display: block;
+    font-size: clamp(72px, 11dvh, 118px);
+    line-height: 0.82;
+  }
+
+  .playerName {
+    grid-area: identity;
+    align-self: start;
+    width: 100%;
+    margin: 0;
+    padding-top: 2px;
+    font-size: clamp(14px, 1.7dvh, 19px);
+    line-height: 1.25;
+    letter-spacing: 0.06em;
+  }
+
+  .playerIdentity {
+    padding-top: clamp(28px, 4dvh, 44px);
+  }
+
+  .playerStats {
+    grid-area: stats;
+    margin: 0;
+    gap: 6px;
+  }
+
+  .playerStats > div {
+    padding: 8px 4px;
+  }
+
+  .statLabel {
+    font-size: 11px;
+    line-height: 1.2;
+  }
+
+  .statValue {
+    margin-top: 2px;
+    font-size: clamp(16px, 2dvh, 22px);
+    line-height: 1;
+  }
+
+  .playerStats > div:hover {
+    transform: scale(1.08);
+  }
+
+  /* Scoreboard Typography - Desktop Enhancement */
+  .areaScore :global(.font-sports) {
+    font-size: clamp(42px, 4vw, 56px);
+    line-height: 1.1;
+  }
+
+  .areaScore :global(.font-vintage) {
+    font-size: 12px;
+    letter-spacing: 0.12em;
+  }
+
+  /* Action Button - Desktop Enhancement */
+  .areaAction button {
+    min-height: 80px;
+    min-width: 180px;
+    font-size: 32px;
+  }
+
+  .areaAction button:hover {
+    transform: scale(1.03);
+    box-shadow: 0 0 20px rgba(242, 161, 58, 0.6);
   }
 
   /* Strike Zone: cuadrado perfecto (ancho = alto = --matchup-height);
@@ -586,6 +784,13 @@
     max-height: 88px;
   }
 
+  .areaPitcherMeta {
+    align-items: stretch;
+    justify-content: center;
+    min-height: 72px;
+    max-height: 88px;
+  }
+
   .nextBatter {
     width: 100%;
     min-height: 72px;
@@ -597,6 +802,9 @@
     box-sizing: border-box;
   }
 
+  /* Next Batter Typography - Desktop:
+     Los tamaños los controlan los utilities de Tailwind del JSX. */
+
   /* El grupo de Actions ocupa un ancho contenido, evitando cartas panorámicas */
   .areaCards {
     width: min(100%, 760px);
@@ -604,15 +812,54 @@
 
   .actionRow {
     grid-template-columns: minmax(0, 1fr) auto;
-    align-items: stretch;
+    min-height: 140px;
+    align-items: center;
     gap: clamp(14px, 1.5vw, 24px);
   }
-}
 
-/* Desktop con mayor altura vertical: crecimiento moderado del matchup */
+  .areaAction {
+    align-self: center;
+  }
+
+  /* Tactical Cards - Desktop Enhancement */
+  .areaCards button {
+    min-height: 140px;
+    min-width: 100px;
+  }
+
+  .areaCards button :global(.font-sports) {
+    font-size: 14px;
+  }
+
+  .areaCards button:hover {
+    transform: scale(1.06) translateY(-4px);
+  }
+}
+  /* Desktop: Fix TU PICHAS overflow */
+  .situationBasesZone .situationLabel {
+    font-size: 7px !important;
+    white-space: nowrap !important;
+    max-width: 100px;
+    overflow: hidden;
+    text-overflow: clip;
+  }
+
+/* Las reglas residuales del layout viejo (stamina/contador dentro de la
+   tarjeta del pitcher) se eliminaron: la stamina ahora vive en
+   .areaPitcherMeta fuera de la tarjeta. */
+
+  .situationBasesZone > div:first-child {
+    font-size: 6px !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: clip !important;
+    max-width: 90px !important;
+    display: block !important;
+  }
+
 @media (min-width: 1200px) and (min-height: 900px) {
   .coreGameplay {
-    --matchup-height: clamp(280px, 30dvh, 340px);
+    --matchup-height: clamp(360px, 40dvh, 460px);
   }
 }
 
@@ -631,8 +878,13 @@
     max-height: 76px;
   }
 
+  .areaPitcherMeta {
+    min-height: 60px;
+    max-height: 76px;
+  }
+
   .coreGameplay {
-    --matchup-height: clamp(240px, 28dvh, 290px);
+    --matchup-height: clamp(300px, 34dvh, 360px);
     column-gap: clamp(14px, 2vw, 28px);
   }
 }

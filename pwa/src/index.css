@@ -179,23 +179,63 @@
   .card-glow {
     position: relative;
     border-radius: 0.75rem;
-    padding: 2px;
-    animation: card-glow-spin 5s linear infinite;
+    padding: var(--showcase-border-width, 1px);
+    box-shadow:
+      0 0 var(--showcase-glow-size, 0) var(--showcase-glow-color, transparent),
+      inset 0 0 8px color-mix(in srgb, var(--showcase-rarity-color, #94a3b8) 12%, transparent);
+    animation: card-glow-spin var(--showcase-spin-speed, 12s) linear infinite;
+    will-change: filter;
   }
   .card-glow-inner {
     position: relative;
     border-radius: 0.625rem;
     overflow: hidden;
+    box-shadow: inset 0 0 var(--showcase-inner-glow, 0)
+      color-mix(in srgb, var(--showcase-rarity-color, #94a3b8) 18%, transparent);
+  }
+  .card-glow-inner::after {
+    content: '';
+    position: absolute;
+    inset: -40% -80%;
+    z-index: 2;
+    pointer-events: none;
+    background: linear-gradient(
+      108deg,
+      transparent 40%,
+      color-mix(in srgb, var(--showcase-rarity-color) 8%, transparent) 46%,
+      rgba(255, 255, 255, 0.55) 50%,
+      color-mix(in srgb, var(--showcase-rarity-color) 12%, transparent) 54%,
+      transparent 60%
+    );
+    opacity: 0;
+    transform: translateX(-45%) rotate(5deg);
+    animation: showcase-card-shine var(--showcase-shine-speed, 6s) ease-in-out infinite;
+    animation-delay: var(--showcase-delay, 0s);
+  }
+  .showcase-grid > :nth-child(3n + 2) .card-glow {
+    --showcase-delay: -1.4s;
+  }
+  .showcase-grid > :nth-child(3n) .card-glow {
+    --showcase-delay: -2.7s;
   }
   .card-glow-common {
+    --showcase-rarity-color: #94a3b8;
+    --showcase-border-width: 1px;
     background: conic-gradient(
-      from var(--glow-angle),
+      from 0deg,
       #4a5568,
       #94a3b8,
       #4a5568
     );
+    animation: none;
   }
   .card-glow-bronze {
+    --showcase-rarity-color: #df8d4b;
+    --showcase-border-width: 2px;
+    --showcase-spin-speed: 10s;
+    --showcase-glow-size: 8px;
+    --showcase-glow-color: rgba(223, 141, 75, 0.2);
+    --showcase-inner-glow: 10px;
     background: conic-gradient(
       from var(--glow-angle),
       #7a3f1d,
@@ -206,6 +246,13 @@
     );
   }
   .card-glow-silver {
+    --showcase-rarity-color: #e1edf4;
+    --showcase-border-width: 2px;
+    --showcase-spin-speed: 7.5s;
+    --showcase-glow-size: 12px;
+    --showcase-glow-color: rgba(225, 237, 244, 0.28);
+    --showcase-inner-glow: 14px;
+    --showcase-shine-speed: 7s;
     background: conic-gradient(
       from var(--glow-angle),
       #6b7280,
@@ -216,6 +263,14 @@
     );
   }
   .card-glow-gold {
+    --showcase-rarity-color: #ffd35a;
+    --showcase-border-width: 3px;
+    --showcase-spin-speed: 5s;
+    --showcase-glow-size: 17px;
+    --showcase-glow-color: rgba(255, 211, 90, 0.4);
+    --showcase-inner-glow: 19px;
+    --showcase-shine-speed: 4.8s;
+    --showcase-pulse-speed: 4s;
     background: conic-gradient(
       from var(--glow-angle),
       #8a6d3b,
@@ -226,6 +281,14 @@
     );
   }
   .card-glow-diamond {
+    --showcase-rarity-color: #67f3ff;
+    --showcase-border-width: 3px;
+    --showcase-spin-speed: 3s;
+    --showcase-glow-size: 24px;
+    --showcase-glow-color: rgba(103, 243, 255, 0.56);
+    --showcase-inner-glow: 25px;
+    --showcase-shine-speed: 3.2s;
+    --showcase-pulse-speed: 2.4s;
     background: conic-gradient(
       from var(--glow-angle),
       #0e7490,
@@ -234,6 +297,140 @@
       #4fd9ff,
       #0e7490
     );
+  }
+
+  .card-glow-common .card-glow-inner::after,
+  .card-glow-bronze .card-glow-inner::after {
+    animation: none;
+  }
+
+  .card-glow-gold,
+  .card-glow-diamond {
+    animation:
+      card-glow-spin var(--showcase-spin-speed) linear infinite,
+      showcase-card-pulse var(--showcase-pulse-speed) ease-in-out infinite;
+  }
+
+  .showcase-rarity-badge {
+    border-color: color-mix(in srgb, var(--showcase-rarity-color) 62%, transparent);
+    background: color-mix(in srgb, var(--showcase-rarity-color) 9%, transparent);
+    color: var(--showcase-rarity-color);
+    box-shadow: inset 0 0 8px color-mix(in srgb, var(--showcase-rarity-color) 12%, transparent);
+  }
+
+  .showcase-player-identity {
+    min-height: 0;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: var(--showcase-rarity-color);
+    text-align: center;
+    text-shadow: 0 0 18px color-mix(in srgb, var(--showcase-rarity-color) 28%, transparent);
+  }
+
+  .showcase-player-position {
+    font-size: clamp(12px, 1.1vw, 16px);
+    letter-spacing: 0.28em;
+    opacity: 0.72;
+  }
+
+  .showcase-player-number {
+    margin-top: 4px;
+    font-size: clamp(64px, 6vw, 96px);
+    line-height: 0.9;
+  }
+}
+
+@keyframes showcase-card-pulse {
+  0%, 100% {
+    filter: brightness(1) saturate(1);
+  }
+  50% {
+    filter: brightness(1.13) saturate(1.18);
+  }
+}
+
+@keyframes showcase-card-shine {
+  0%, 22% {
+    opacity: 0;
+    transform: translateX(-45%) rotate(5deg);
+  }
+  38% {
+    opacity: 0.58;
+  }
+  54%, 100% {
+    opacity: 0;
+    transform: translateX(45%) rotate(5deg);
+  }
+}
+
+/* Fondo de la colección: comparte el estadio y el breakpoint del gameplay. */
+.showcase-screen {
+  position: relative;
+  isolation: isolate;
+}
+
+.showcase-screen__bg,
+.team-screen::before,
+.lobby-screen::before {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(7, 11, 9, 0.8), rgba(7, 11, 9, 0.88)),
+    radial-gradient(circle at 50% 35%, transparent 0%, rgba(4, 7, 5, 0.42) 72%),
+    url('/stadium-desktop.png');
+  background-position: center;
+  background-size: cover;
+  background-repeat: no-repeat;
+}
+
+.team-screen,
+.lobby-screen {
+  position: relative;
+  isolation: isolate;
+}
+
+.team-screen::before,
+.lobby-screen::before {
+  content: '';
+}
+
+.lobby-glass-panel {
+  background: rgba(12, 17, 15, 0.72);
+  backdrop-filter: blur(10px) saturate(1.08);
+  -webkit-backdrop-filter: blur(10px) saturate(1.08);
+}
+
+.lobby-glass-subpanel {
+  background: rgba(12, 17, 15, 0.52);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+@media (max-width: 1199.98px) {
+  .showcase-screen__bg,
+  .team-screen::before,
+  .lobby-screen::before {
+    background-image:
+      linear-gradient(rgba(7, 11, 9, 0.78), rgba(7, 11, 9, 0.88)),
+      radial-gradient(circle at 50% 30%, transparent 0%, rgba(4, 7, 5, 0.45) 72%),
+      url('/stadium-mobile.png');
+  }
+}
+
+/* En escritorio el lobby deja respirar más la fotografía del estadio. Los
+   paneles mantienen su propio velo oscuro para conservar la legibilidad. */
+@media (min-width: 1200px) {
+  .lobby-screen::before {
+    background-image:
+      linear-gradient(rgba(7, 11, 9, 0.5), rgba(7, 11, 9, 0.64)),
+      radial-gradient(circle at 50% 35%, transparent 0%, rgba(4, 7, 5, 0.2) 76%),
+      url('/stadium-desktop.png');
+    filter: brightness(1.12) saturate(1.08);
   }
 }
 
@@ -389,10 +586,55 @@
 
   .pack-card__front {
     transform: rotateY(180deg);
+    isolation: isolate;
+    overflow: hidden;
     background: linear-gradient(160deg, rgba(18, 22, 20, 0.98), rgba(12, 16, 14, 0.99));
-    border: 1px solid color-mix(in srgb, var(--rarity-color) 35%, #303733);
+    border: var(--rarity-border-width, 1px) solid
+      color-mix(in srgb, var(--rarity-color) var(--rarity-border-strength, 35%), #303733);
     border-radius: 6px;
     padding: 14px;
+    box-shadow:
+      inset 0 0 0 1px color-mix(in srgb, var(--rarity-color) 12%, transparent),
+      inset 0 0 var(--rarity-inner-glow, 0) color-mix(in srgb, var(--rarity-color) 22%, transparent),
+      0 0 var(--rarity-glow, 0) color-mix(in srgb, var(--rarity-color) var(--rarity-glow-strength, 0%), transparent);
+  }
+
+  /* Dos capas decorativas permiten aumentar el brillo por rareza sin alterar
+     el contenido ni revelar el nivel mientras la carta sigue cerrada. */
+  .pack-card__front::before,
+  .pack-card__front::after {
+    content: '';
+    position: absolute;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .pack-card__front > * {
+    position: relative;
+    z-index: 1;
+  }
+
+  .pack-card__front::before {
+    inset: 0;
+    border-radius: inherit;
+    background:
+      radial-gradient(circle at 18% 12%, color-mix(in srgb, var(--rarity-color) 18%, transparent), transparent 34%),
+      radial-gradient(circle at 84% 88%, color-mix(in srgb, var(--rarity-color) 12%, transparent), transparent 38%);
+    opacity: var(--rarity-ambient-opacity, 0.25);
+  }
+
+  .pack-card__front::after {
+    inset: -35% -75%;
+    background: linear-gradient(
+      105deg,
+      transparent 37%,
+      color-mix(in srgb, var(--rarity-color) 8%, transparent) 45%,
+      color-mix(in srgb, white 68%, var(--rarity-color)) 50%,
+      color-mix(in srgb, var(--rarity-color) 12%, transparent) 55%,
+      transparent 63%
+    );
+    opacity: 0;
+    transform: translateX(-42%) rotate(5deg);
   }
 
   /* Card back premium */
@@ -595,18 +837,114 @@
   /* Rarity color variables */
   .rarity-common {
     --rarity-color: #8b918d;
+    --rarity-border-strength: 42%;
+    --rarity-ambient-opacity: 0.2;
   }
   .rarity-bronze {
-    --rarity-color: #b77a4b;
+    --rarity-color: #df8d4b;
+    --rarity-border-strength: 68%;
+    --rarity-glow: 10px;
+    --rarity-glow-strength: 24%;
+    --rarity-inner-glow: 12px;
+    --rarity-ambient-opacity: 0.42;
   }
   .rarity-silver {
-    --rarity-color: #b9c2c8;
+    --rarity-color: #e1edf4;
+    --rarity-border-strength: 78%;
+    --rarity-glow: 15px;
+    --rarity-glow-strength: 34%;
+    --rarity-inner-glow: 16px;
+    --rarity-ambient-opacity: 0.55;
   }
   .rarity-gold {
-    --rarity-color: #d3ab52;
+    --rarity-color: #ffd35a;
+    --rarity-border-width: 2px;
+    --rarity-border-strength: 90%;
+    --rarity-glow: 22px;
+    --rarity-glow-strength: 48%;
+    --rarity-inner-glow: 22px;
+    --rarity-ambient-opacity: 0.7;
   }
   .rarity-diamond {
-    --rarity-color: #61c8cf;
+    --rarity-color: #67f3ff;
+    --rarity-border-width: 2px;
+    --rarity-border-strength: 100%;
+    --rarity-glow: 30px;
+    --rarity-glow-strength: 68%;
+    --rarity-inner-glow: 28px;
+    --rarity-ambient-opacity: 0.9;
+  }
+
+  .pack-card.is-revealed.rarity-bronze .pack-card__front {
+    animation: rarity-bronze-pulse 3.8s ease-in-out infinite;
+  }
+
+  .pack-card.is-revealed.rarity-silver .pack-card__front {
+    animation: rarity-silver-pulse 3.1s ease-in-out infinite;
+  }
+
+  .pack-card.is-revealed.rarity-silver .pack-card__front::after {
+    animation: rarity-shine 4.2s ease-in-out infinite;
+  }
+
+  .pack-card.is-revealed.rarity-gold .pack-card__front {
+    animation: rarity-gold-pulse 2.6s ease-in-out infinite;
+  }
+
+  .pack-card.is-revealed.rarity-gold .pack-card__front::after {
+    animation: rarity-shine 3s ease-in-out infinite;
+  }
+
+  .pack-card.is-revealed.rarity-diamond .pack-card__front {
+    animation: rarity-diamond-pulse 1.9s ease-in-out infinite;
+  }
+
+  .pack-card.is-revealed.rarity-diamond .pack-card__front::before {
+    animation: rarity-diamond-ambient 3.4s linear infinite;
+  }
+
+  .pack-card.is-revealed.rarity-diamond .pack-card__front::after {
+    animation: rarity-shine 2.1s ease-in-out infinite;
+  }
+
+  @keyframes rarity-bronze-pulse {
+    0%, 100% { filter: brightness(1); }
+    50% { filter: brightness(1.08); }
+  }
+
+  @keyframes rarity-silver-pulse {
+    0%, 100% { filter: brightness(1); }
+    50% { filter: brightness(1.12); }
+  }
+
+  @keyframes rarity-gold-pulse {
+    0%, 100% { filter: brightness(1) saturate(1); }
+    50% { filter: brightness(1.14) saturate(1.18); }
+  }
+
+  @keyframes rarity-diamond-pulse {
+    0%, 100% { filter: brightness(1) saturate(1); }
+    50% { filter: brightness(1.2) saturate(1.28); }
+  }
+
+  @keyframes rarity-diamond-ambient {
+    0% { transform: scale(1) rotate(0deg); }
+    50% { transform: scale(1.08) rotate(180deg); }
+    100% { transform: scale(1) rotate(360deg); }
+  }
+
+  @keyframes rarity-shine {
+    0%, 18% {
+      opacity: 0;
+      transform: translateX(-42%) rotate(5deg);
+    }
+    35% {
+      opacity: 0.68;
+    }
+    52%, 100% {
+      opacity: 0;
+      transform: translateX(42%) rotate(5deg);
+    }
   }
 
   /* En el contexto pack-card la rareza no emite glow permanente sobre la carta cerrada

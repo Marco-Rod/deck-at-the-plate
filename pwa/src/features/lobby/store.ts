@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
 import type { Difficulty, GameMode, PlayerPosition } from '@/shared/api/types'
 
 export interface LobbyConfig {
@@ -23,10 +24,18 @@ const DEFAULT_CONFIG: LobbyConfig = {
   playerPosition: 'HOME',
 }
 
-export const useLobbyStore = create<LobbyState>((set) => ({
-  config: DEFAULT_CONFIG,
-  setConfig: (config) => set((state) => ({ config: { ...state.config, ...config } })),
-  reset: () => set({ config: DEFAULT_CONFIG }),
-}))
+export const useLobbyStore = create<LobbyState>()(
+  persist(
+    (set) => ({
+      config: DEFAULT_CONFIG,
+      setConfig: (config) => set((state) => ({ config: { ...state.config, ...config } })),
+      reset: () => set({ config: DEFAULT_CONFIG }),
+    }),
+    {
+      name: 'deck-at-the-plate-lobby',
+      partialize: (state) => ({ config: state.config }),
+    },
+  ),
+)
 
 export const selectLobbyConfig = (state: LobbyState) => state.config

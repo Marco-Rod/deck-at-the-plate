@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { useTranslation } from 'react-i18next'
@@ -25,6 +25,7 @@ export function RosterSelectionPage() {
   const [deck] = useState<string[]>(['t1', 't2', 't3', 't4', 't1'])
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const hasAutoAssigned = useRef(false)
 
   useEffect(() => {
     void load()
@@ -49,6 +50,32 @@ export function RosterSelectionPage() {
   // Auto-seleccionar el primer pitcher si no hay seleccionado (valor derivado)
   const effectivePitcherId = selectedPitcherId ?? pitchers[0]?.card.id ?? null
 
+  const autoAssignLineup = useCallback(() => {
+    const assigned: Record<string, string> = {}
+    const usedCardIds = new Set<string>()
+
+    // Asignar bateadores por posición (1-9 del batting order)
+    for (const spot of BATTING_SPOTS) {
+      const match = bestCardFor(batters, (c) => !usedCardIds.has(c.id))
+      if (match) {
+        assigned[spot] = match.id
+        usedCardIds.add(match.id)
+      }
+    }
+
+    // Asignar el mejor pitcher disponible
+    const pitcher = bestCardFor(pitchers, (c) => !usedCardIds.has(c.id))
+    if (pitcher) setSelectedPitcherId(pitcher.id)
+
+    setLineup(assigned)
+  }, [batters, pitchers])
+
+  useEffect(() => {
+    if (!hasLoaded || loading || hasAutoAssigned.current) return
+    hasAutoAssigned.current = true
+    autoAssignLineup()
+  }, [autoAssignLineup, hasLoaded, loading])
+
   if (!hasLoaded || loading) {
     return <Spinner label={t('common.loading')} className="min-h-screen py-20" />
   }
@@ -63,34 +90,6 @@ export function RosterSelectionPage() {
       next[slot] = card.id
       return next
     })
-  }
-
-  const autoAssignLineup = () => {
-    const assigned: Record<string, string> = {}
-    const usedCardIds = new Set<string>()
-
-    // Asignar bateadores por posición (1-9 del batting order)
-    for (const spot of BATTING_SPOTS) {
-      const match = bestCardFor(
-        batters,
-        (c) => !usedCardIds.has(c.id),
-      )
-      if (match) {
-        assigned[spot] = match.id
-        usedCardIds.add(match.id)
-      }
-    }
-
-    // Asignar el mejor pitcher disponible
-    const pitcher = bestCardFor(
-      pitchers,
-      (c) => !usedCardIds.has(c.id),
-    )
-    if (pitcher) {
-      setSelectedPitcherId(pitcher.id)
-    }
-
-    setLineup(assigned)
   }
 
   const handleConfirm = async () => {
@@ -155,9 +154,24 @@ export function RosterSelectionPage() {
       </p>
 
       <section className="mb-8">
-        <h2 className="mb-3 font-sports text-xl font-bold uppercase tracking-wide text-koshien-chalk">
-          {t('roster.lineup')}
-        </h2>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <h2 className="font-sports text-xl font-bold uppercase tracking-wide text-koshien-chalk">
+            {t('roster.lineup')}
+          </h2>
+          <Button
+            size="sm"
+            disabled={submitting}
+            onClick={handleConfirm}
+            className="min-w-44 border border-koshien-gold bg-koshien-green px-4 font-sports uppercase text-koshien-gold shadow-[0_0_14px_rgba(197,160,89,0.2)] hover:bg-koshien-light-green"
+          >
+            {submitting ? t('roster.creating') : t('roster.start')}
+          </Button>
+        </div>
+        {error ? (
+          <p className="mb-3 rounded border border-red-500/40 bg-red-950/30 px-3 py-2 font-vintage text-xs uppercase text-red-400">
+            {error}
+          </p>
+        ) : null}
         <div className="rounded-xl border border-koshien-border bg-koshien-dark/80 p-4">
           <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-3">
             {BATTING_SPOTS.map((spot) => {
@@ -224,19 +238,25 @@ export function RosterSelectionPage() {
               >
                 <div className="flex items-center justify-between">
                   <div className="flex-1">
-                    <div className="font-sports text-sm font-bold text-koshien-chalk">{item.card.name}</div>
+                    <div className="font-sports text-sm font-bold text-koshien-chalk">
+                      {item.card.name}
+                    </div>
                     <div className="font-vintage text-xs text-koshien-cream/60">
                       {item.card.team_id} • {item.card.position} • #{item.card.number}
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
                     <div className="text-right">
-                      <div className="font-sports text-sm font-bold text-koshien-gold">{item.card.overall}</div>
+                      <div className="font-sports text-sm font-bold text-koshien-gold">
+                        {item.card.overall}
+                      </div>
                       <div className="font-vintage text-xs text-koshien-cream/60">OVR</div>
                     </div>
                     {inLineup && (
                       <div className="rounded-lg bg-koshien-gold/30 px-2 py-1">
-                        <div className="font-sports text-xs font-bold text-koshien-gold">SPOT {spot}</div>
+                        <div className="font-sports text-xs font-bold text-koshien-gold">
+                          SPOT {spot}
+                        </div>
                       </div>
                     )}
                   </div>
@@ -268,9 +288,15 @@ export function RosterSelectionPage() {
                       : 'border-koshien-border bg-koshien-dark/60 hover:border-koshien-gold/50'
                   }`}
                 >
-                  <div className="font-sports text-sm font-bold text-koshien-chalk">{item.card.name}</div>
-                  <div className="font-vintage text-xs text-koshien-cream/60">{item.card.position}</div>
-                  <div className="font-sports text-xs text-koshien-gold">{item.card.overall} OVR</div>
+                  <div className="font-sports text-sm font-bold text-koshien-chalk">
+                    {item.card.name}
+                  </div>
+                  <div className="font-vintage text-xs text-koshien-cream/60">
+                    {item.card.position}
+                  </div>
+                  <div className="font-sports text-xs text-koshien-gold">
+                    {item.card.overall} OVR
+                  </div>
                 </button>
               )
             })}
@@ -288,16 +314,6 @@ export function RosterSelectionPage() {
           </div>
         </section>
       )}
-
-
-
-      {error ? (
-        <p className="mb-3 font-vintage text-xs uppercase text-red-400">{error}</p>
-      ) : null}
-
-      <Button size="lg" disabled={submitting || !config.rivalId} onClick={handleConfirm}>
-        {submitting ? t('roster.creating') : t('roster.start')}
-      </Button>
     </motion.div>
   )
 }

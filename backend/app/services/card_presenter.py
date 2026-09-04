@@ -54,7 +54,7 @@ def build_pitcher_payload(
         payload["repertoire"] = card.repertoire or []
     if with_stamina:
         payload["pitch_count"] = pitch_count
-        payload["fatigue_level"] = fatigue_level
+        payload["fatigue_level"] = round(fatigue_level)
     if already_used is not None:
         payload["already_used"] = already_used
     if extra:

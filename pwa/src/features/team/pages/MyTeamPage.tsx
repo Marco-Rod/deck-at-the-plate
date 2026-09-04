@@ -168,7 +168,7 @@ export function MyTeamPage() {
     <motion.div
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
-      className="mx-auto flex min-h-screen w-full max-w-7xl flex-col justify-between px-2 py-3 sm:px-4 sm:py-4"
+      className="team-screen mx-auto flex min-h-screen w-full max-w-7xl flex-col justify-between px-2 py-3 sm:px-4 sm:py-4"
     >
       {/* CABECERA DEL CLUB */}
       <header className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b-2 border-koshien-gold pb-3">
