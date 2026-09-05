@@ -30,9 +30,11 @@ def format_batter_stats(card: "PlayerCardModel") -> List[dict]:
         - POW (Poder)
         - VIS (Visión derivada)
     """
-    # Calcular visión como en attribute_mapper
-    vision = int(card.contact * 0.70 + card.overall * 0.30)
-    
+    # Visión es columna persistida; fallback legacy mientras no haya backfill.
+    vision = getattr(card, "vision", None)
+    if vision is None:
+        vision = int(card.contact * 0.70 + card.overall * 0.30)
+
     return [
         {"label": "CON", "val": card.contact},
         {"label": "POW", "val": card.power},

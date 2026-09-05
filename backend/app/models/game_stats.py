@@ -47,7 +47,13 @@ class GameEventLog(Base):
     # Resultados
     runs_scored = Column(Integer, default=0)  # Carreras anotadas como resultado
     rbi = Column(Integer, default=0)  # RBI generadas por este evento
-    
+
+    # --- Campos aditivos (telemetría pitch-by-pitch; backward-compatible) ---
+    # Agrupa los PitchEventLog que desembocan en este evento final.
+    plate_appearance_id = Column(String(36), nullable=True, index=True)
+    # Versión del motor que resolvió la jugada; útil para análisis histórico.
+    engine_version = Column(String(30), nullable=True, index=True)
+
     # Metadatos
     created_at = Column(DateTime, default=datetime.utcnow)
     

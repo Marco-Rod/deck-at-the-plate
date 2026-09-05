@@ -25,11 +25,17 @@ class PitcherAttrs(TypedDict):
 
 
 class BatterAttrs(TypedDict):
-    """Atributos de bateo. La visión es derivada (no existe como columna)."""
+    """Atributos de bateo.
+
+    Visión/clutch son columnas persistidas (post-backfill). Durante la
+    transición, vision usa fallback legacy; clutch cae a 50 si está ausente.
+    El Matchup Engine V1 consume clutch; el motor actual no lo usa todavía.
+    """
 
     contacto: int
     poder: int
     vision: int
+    clutch: int
 
 
 class TacticsModifiers(TypedDict, total=False):

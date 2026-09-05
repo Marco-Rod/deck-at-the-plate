@@ -158,3 +158,62 @@ class Position(str, enum.Enum):
 
 # Posiciones capaces de lanzar (single source of truth).
 PITCHER_POSITIONS: frozenset[str] = frozenset(p.value for p in Position if p.is_pitcher)
+
+
+class Handedness(str, enum.Enum):
+    """Mano del bateador (L/R/S = switch). Usado en identity y en raw."""
+
+    LEFT = "L"
+    RIGHT = "R"
+    SWITCH = "S"
+
+
+class ThrowHand(str, enum.Enum):
+    """Mano con la que lanza el pitcher."""
+
+    LEFT = "L"
+    RIGHT = "R"
+
+
+class SplitHand(str, enum.Enum):
+    """Nivel de agregación por mano en perfiles. ALL permite fallback."""
+
+    ALL = "ALL"
+    LEFT = "L"
+    RIGHT = "R"
+
+
+class PitchFamily(str, enum.Enum):
+    """Familia normalizada de un lanzamiento. OTHER no es seleccionable como approach."""
+
+    FASTBALL = "FASTBALL"
+    BREAKING = "BREAKING"
+    OFFSPEED = "OFFSPEED"
+    OTHER = "OTHER"
+
+
+class PitchFamilySplit(str, enum.Enum):
+    """Nivel de agregación por familia en perfiles de zona."""
+
+    ALL = "ALL"
+    FASTBALL = "FASTBALL"
+    BREAKING = "BREAKING"
+    OFFSPEED = "OFFSPEED"
+
+
+class BatterApproach(str, enum.Enum):
+    """Decisión simplificada del bateador en el Matchup Engine V1."""
+
+    FASTBALL = "FASTBALL"
+    BREAKING = "BREAKING"
+    REACT = "REACT"
+    TAKE = "TAKE"
+
+
+class ImportStatus(str, enum.Enum):
+    """Estados de una ejecución ETL (DataImportRun)."""
+
+    RUNNING = "RUNNING"
+    SUCCESS = "SUCCESS"
+    PARTIAL = "PARTIAL"
+    FAILED = "FAILED"
