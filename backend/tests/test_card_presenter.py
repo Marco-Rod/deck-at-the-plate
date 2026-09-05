@@ -29,6 +29,8 @@ def make_card(**overrides):
         velocity=95,
         control=90,
         movement=88,
+        vision=70,
+        clutch=50,
     )
     base.update(overrides)
     return SimpleNamespace(**base)
@@ -108,8 +110,8 @@ def test_batter_payload():
     assert payload["stats"][0]["label"] == "CON"
     assert payload["stats"][0]["val"] == 70
     assert payload["stats"][1]["val"] == 75
-    # VIS = round(contact*0.7 + overall*0.3)
-    assert payload["stats"][2]["val"] == int(70 * 0.70 + 85 * 0.30)
+    # VIS ahora es columna persistida (backfill completado), ya no se deriva.
+    assert payload["stats"][2]["val"] == 70
 
 
 def test_batter_payload_extra_fields():

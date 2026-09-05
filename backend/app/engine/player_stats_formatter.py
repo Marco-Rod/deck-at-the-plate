@@ -6,7 +6,7 @@ Formatea los atributos de jugadores según su rol para ser mostrados en el front
 Para BATEADORES:
   - CON (Contacto): contact attribute
   - POW (Poder): power attribute
-  - VIS (Visión): derived from contact (70%) + overall (30%)
+  - VIS (Visión): vision column (persistida post-backfill)
 
 Para LANZADORES:
   - VEL (Velocidad): best velocity from repertoire
@@ -28,17 +28,12 @@ def format_batter_stats(card: "PlayerCardModel") -> List[dict]:
         List[{"label": str, "val": int}]
         - CON (Contacto)
         - POW (Poder)
-        - VIS (Visión derivada)
+        - VIS (Visión)
     """
-    # Visión es columna persistida; fallback legacy mientras no haya backfill.
-    vision = getattr(card, "vision", None)
-    if vision is None:
-        vision = int(card.contact * 0.70 + card.overall * 0.30)
-
     return [
         {"label": "CON", "val": card.contact},
         {"label": "POW", "val": card.power},
-        {"label": "VIS", "val": vision},
+        {"label": "VIS", "val": card.vision},
     ]
 
 

@@ -19,9 +19,8 @@ Mapeo de atributos:
     Bateo:
         contact   → contacto
         power     → poder
-        vision    → vision (columna persistida tras backfill)
+        vision    → vision (columna persistida, backfill completado)
         clutch    → clutch
-        (durante la transición, vision usa fallback legacy = 70% contact + 30% overall)
 """
 
 from typing import TYPE_CHECKING
@@ -50,24 +49,13 @@ def map_card_to_pitcher_attrs(card: "PlayerCardModel") -> PitcherAttrs:
     }
 
 
-def _legacy_vision(card: "PlayerCardModel") -> int:
-    """Fallback legacy: mismas fórmulas previas a la migración (transición).
-
-    Solo aplica mientras las cartas existentes no tienen vision backfilleada.
-    Replica exactamente la fórmula original para no alterar el gameplay.
-    """
-    return int(card.contact * 0.70 + card.overall * 0.30)
-
-
 def map_card_to_batter_attrs(card: "PlayerCardModel") -> BatterAttrs:
     """
     Convierte un PlayerCardModel a un diccionario de atributos de bateo
     listo para ser consumido por el engine (calculator.py).
 
-    La "vision" ahora es una columna persistida. Mientras existan cartas legacy
-    sin backfill (vision aún no poblada), se usa un fallback equivalente a la
-    fórmula original (70% contact + 30% overall), de modo que el resto de cartas
-    se comporta igual que antes de la migración.
+    La "vision" y el "clutch" son columnas persistidas (NOT NULL post-backfill)
+    calculadas por seeds/backfill_cards.py, por lo que aquí no hay fallback.
 
     Args:
         card: Instancia de PlayerCardModel obtenida de la base de datos.
@@ -75,13 +63,9 @@ def map_card_to_batter_attrs(card: "PlayerCardModel") -> BatterAttrs:
     Returns:
         BatterAttrs con claves: "contacto", "poder", "vision", "clutch"
     """
-    # Fase de compatibilidad (temporal): cartas legacy sin backfill.
-    vision = card.vision if card.vision is not None else _legacy_vision(card)
-    # Tras el backfill se eliminará el fallback y vision quedará NOT NULL.
-
     return {
         "contacto": card.contact,
         "poder": card.power,
-        "vision": vision,
-        "clutch": card.clutch if card.clutch is not None else 50,
+        "vision": card.vision,
+        "clutch": card.clutch,
     }

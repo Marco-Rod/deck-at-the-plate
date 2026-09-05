@@ -59,7 +59,7 @@ class PlayerCardModel(Base):
     power = Column(Integer, default=50)
     contact = Column(Integer, default=50)
     # Atributos de Bateo — nuevos (0-99), persistidos tras el backfill (migración).
-    # Dejan de derivarse: el mapper usa card.vision; fallback legacy solo durante transición.
+    # Columnas persistidas; el mapper las consume directo (backfill completado).
     vision = Column(Integer, nullable=False, default=50)
     clutch = Column(Integer, nullable=False, default=50)
 

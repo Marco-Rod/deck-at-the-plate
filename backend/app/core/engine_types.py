@@ -27,9 +27,8 @@ class PitcherAttrs(TypedDict):
 class BatterAttrs(TypedDict):
     """Atributos de bateo.
 
-    Visión/clutch son columnas persistidas (post-backfill). Durante la
-    transición, vision usa fallback legacy; clutch cae a 50 si está ausente.
-    El Matchup Engine V1 consume clutch; el motor actual no lo usa todavía.
+    Visión/clutch son columnas persistidas (NOT NULL post-backfill). Vision
+    viene de seeds/backfill_cards.py; el Matchup Engine V1 consumirá clutch.
     """
 
     contacto: int
