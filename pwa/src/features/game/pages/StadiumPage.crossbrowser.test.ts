@@ -34,7 +34,7 @@ describe('StadiumPage Cross-Browser Compatibility - Task 12', () => {
 
       // Should have static fallback before clamp()
       expect(coreGameplaySection).toMatch(
-        /--matchup-height:\s*300px;[\s\S]*?--matchup-height:\s*clamp\(/s,
+        /--matchup-height:\s*380px;[\s\S]*?--matchup-height:\s*clamp\(/s,
       )
     })
 

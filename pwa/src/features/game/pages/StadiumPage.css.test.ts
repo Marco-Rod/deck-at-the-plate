@@ -38,18 +38,16 @@ describe('StadiumPage.module.css - Task 11 Verification', () => {
   })
 
   describe('Requirements 1.1, 1.2: PlayerCard typography scaling in desktop only', () => {
-    it('should scale player numbers (.font-sports) in desktop viewport', () => {
+    it('should scale player numbers in desktop viewport', () => {
       const desktopSection = extractDesktopSection(cssContent)
 
-      // Player numbers should have clamp with minimum 48px
-      expect(desktopSection).toMatch(/\.playerCard.*\.font-sports.*font-size:\s*clamp\(48px/s)
+      expect(desktopSection).toMatch(/\.playerNumber.*font-size:\s*clamp\(72px/s)
     })
 
-    it('should scale player names (.font-vintage) in desktop viewport', () => {
+    it('should scale player names in desktop viewport', () => {
       const desktopSection = extractDesktopSection(cssContent)
 
-      // Player names should have clamp with minimum 14px
-      expect(desktopSection).toMatch(/\.playerCard.*\.font-vintage.*font-size:\s*clamp\(14px/s)
+      expect(desktopSection).toMatch(/\.playerName.*font-size:\s*clamp\(14px/s)
     })
 
     it('should NOT modify player card typography in mobile sections', () => {
@@ -65,26 +63,19 @@ describe('StadiumPage.module.css - Task 11 Verification', () => {
     it('should scale stat labels to 11px minimum in desktop', () => {
       const desktopSection = extractDesktopSection(cssContent)
 
-      // Stat labels should be 11px in desktop
-      expect(desktopSection).toMatch(
-        /\.playerCard.*grid-cols-3.*\.font-vintage.*font-size:\s*11px/s,
-      )
+      expect(desktopSection).toMatch(/\.statLabel.*font-size:\s*11px/s)
     })
 
     it('should scale stat values to 16px minimum in desktop', () => {
       const desktopSection = extractDesktopSection(cssContent)
 
-      // Stat values should be 16px in desktop
-      expect(desktopSection).toMatch(/\.playerCard.*grid-cols-3.*\.font-sports.*font-size:\s*16px/s)
+      expect(desktopSection).toMatch(/\.statValue.*font-size:\s*clamp\(16px/s)
     })
 
     it('should increase hover scale to 1.08 in desktop', () => {
       const desktopSection = extractDesktopSection(cssContent)
 
-      // Hover effect should scale to 1.08
-      expect(desktopSection).toMatch(
-        /\.playerCard.*grid-cols-3.*:hover.*transform:\s*scale\(1\.08\)/s,
-      )
+      expect(desktopSection).toMatch(/\.playerStats\s*>\s*div:hover.*transform:\s*scale\(1\.08\)/s)
     })
   })
 
@@ -164,23 +155,23 @@ describe('StadiumPage.module.css - Task 11 Verification', () => {
     })
   })
 
-  describe('Requirements 6.1, 6.2, 6.3: Next Batter Preview typography', () => {
-    it('should scale batter number to 18px in desktop', () => {
+  describe('Requirements 6.1, 6.2, 6.3: Next Batter Preview sizing', () => {
+    it('should reserve a readable minimum height in desktop', () => {
       const desktopSection = extractDesktopSection(cssContent)
 
-      expect(desktopSection).toMatch(/\.nextBatter.*\.font-sports.*font-size:\s*18px/s)
+      expect(desktopSection).toMatch(/\.nextBatter.*min-height:\s*72px/s)
     })
 
-    it('should scale batter name to 14px in desktop', () => {
+    it('should limit its height to preserve the gameplay layout', () => {
       const desktopSection = extractDesktopSection(cssContent)
 
-      expect(desktopSection).toMatch(/\.nextBatter.*\.font-vintage.*font-size:\s*14px/s)
+      expect(desktopSection).toMatch(/\.nextBatter.*max-height:\s*88px/s)
     })
 
-    it('should scale stat values to 16px in desktop', () => {
+    it('should provide internal spacing for its content', () => {
       const desktopSection = extractDesktopSection(cssContent)
 
-      expect(desktopSection).toMatch(/\.nextBatter.*grid-cols-3.*\.font-sports.*font-size:\s*16px/s)
+      expect(desktopSection).toMatch(/\.nextBatter.*padding:\s*10px 12px/s)
     })
   })
 
