@@ -49,8 +49,13 @@ export function PlayerCardShowcase({ card, selected = false, onSelect, size = 'm
       tabIndex={onSelect ? 0 : undefined}
       aria-pressed={onSelect ? selected : undefined}
       onClick={onSelect}
-      onKeyDown={onSelect ? (e) => e.key === 'Enter' && onSelect() : undefined}
-      className={`${glow} ${ring} ${aspectRatio}`}
+      onKeyDown={onSelect ? (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          onSelect()
+        }
+      } : undefined}
+      className={`${glow} ${ring} ${aspectRatio} focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-koshien-gold`}
     >
       <div className={`card-glow-inner flex h-full w-full flex-col ${gap} bg-koshien-dark ${padding}`}>
         <header className="flex items-start justify-between gap-1">

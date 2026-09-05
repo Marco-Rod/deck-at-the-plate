@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { motion } from 'framer-motion'
 import { useTranslation } from 'react-i18next'
+import { useDialogFocus } from '@/shared/ui/useDialogFocus'
 
 interface IntroPlayer {
   name: string
@@ -35,6 +36,8 @@ export function GameIntroModal({
 }: GameIntroModalProps) {
   const { t } = useTranslation()
   const [isVisible, setIsVisible] = useState(true)
+  const dialogRef = useRef<HTMLDivElement>(null)
+  useDialogFocus({ active: isVisible, containerRef: dialogRef })
 
   const handlePlayBall = () => {
     setIsVisible(false)
@@ -45,20 +48,35 @@ export function GameIntroModal({
 
   return (
     <motion.div
+      ref={dialogRef}
+      role="dialog"
+      aria-modal="true"
+      aria-label={`${userTeamName} vs ${cpuTeamName}`}
+      tabIndex={-1}
       className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden bg-koshien-dark"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.5 }}
     >
-      <div
-        className="absolute inset-0 bg-cover bg-center"
-        style={{ backgroundImage: "url('/start-mobile.png')" }}
+      <link
+        rel="preload"
+        as="image"
+        href="/start-mobile.avif"
+        type="image/avif"
+        media="(max-width: 1199px)"
+        fetchPriority="high"
       />
-      <div
-        className="absolute inset-0 hidden bg-cover bg-center desktop:block"
-        style={{ backgroundImage: "url('/start-desktop.png')" }}
+      <link
+        rel="preload"
+        as="image"
+        href="/start-desktop.avif"
+        type="image/avif"
+        media="(min-width: 1200px)"
+        fetchPriority="high"
       />
+      <div className="game-intro-bg-mobile absolute inset-0 bg-cover bg-center" />
+      <div className="game-intro-bg-desktop absolute inset-0 hidden bg-cover bg-center desktop:block" />
       <div className="absolute inset-0 bg-gradient-to-b from-black/70 via-black/45 to-black/75" />
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(197,160,89,0.12),transparent_60%)]" />
       <div className="absolute inset-0 bg-black/25 backdrop-blur-[2px]" />
@@ -79,6 +97,9 @@ export function GameIntroModal({
             <motion.img
               src={userTeamLogo}
               alt={userTeamName}
+              width="64"
+              height="64"
+              decoding="async"
               className="h-16 w-16 object-contain drop-shadow-lg"
               initial={{ scale: 0 }}
               animate={{ scale: 1 }}
@@ -102,6 +123,9 @@ export function GameIntroModal({
                 <img
                   src={userPitcher.photo}
                   alt={userPitcher.name}
+                  width="48"
+                  height="48"
+                  decoding="async"
                   className="mx-auto mb-1 h-12 w-12 rounded-full object-cover"
                 />
               )}
@@ -201,6 +225,9 @@ export function GameIntroModal({
             <motion.img
               src={cpuTeamLogo}
               alt={cpuTeamName}
+              width="64"
+              height="64"
+              decoding="async"
               className="h-16 w-16 object-contain drop-shadow-lg"
               initial={{ scale: 0 }}
               animate={{ scale: 1 }}
@@ -224,6 +251,9 @@ export function GameIntroModal({
                 <img
                   src={cpuPitcher.photo}
                   alt={cpuPitcher.name}
+                  width="48"
+                  height="48"
+                  decoding="async"
                   className="mx-auto mb-1 h-12 w-12 rounded-full object-cover"
                 />
               )}

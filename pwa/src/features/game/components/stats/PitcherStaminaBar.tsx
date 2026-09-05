@@ -180,7 +180,7 @@ export function PitcherStaminaBar({
           <span className="font-vintage text-xs font-bold text-koshien-gold sm:text-sm md:text-base">
             {pitchCount}
           </span>
-          <span className="font-vintage text-[8px] text-koshien-cream/50 sm:text-[9px] md:text-[10px]">
+          <span className="font-vintage text-[8px] text-koshien-cream/70 sm:text-[9px] md:text-[10px]">
             {t('game.threshold', { threshold: getPitchThreshold(totalInnings) })}
           </span>
         </div>

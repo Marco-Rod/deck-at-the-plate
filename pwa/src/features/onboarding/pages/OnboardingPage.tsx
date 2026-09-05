@@ -15,6 +15,8 @@ import type { Franchise, PlayerCard as PlayerCardData, UserTeam } from '@/shared
 import { FranchiseCarousel } from '../components/FranchiseCarousel'
 import { PlayerCardReveal } from '../components/PlayerCardReveal'
 import { PremiumStarterPack } from '../components/PremiumStarterPack'
+import { OnlineRequiredHint } from '@/offline/OnlineRequiredHint'
+import { useOnlineStatus } from '@/offline/useOnlineStatus'
 
 type Step = 'CREATE_TEAM' | 'SELECT_FRANCHISE' | 'PACK_UNBOX' | 'SHOW_CARDS'
 
@@ -52,6 +54,7 @@ export function OnboardingPage() {
   const navigate = useNavigate()
   const setTeam = useTeamStore((state) => state.setTeam)
   const setOnboardingComplete = useAuthStore((state) => state.setOnboardingComplete)
+  const online = useOnlineStatus()
 
   const [step, setStep] = useState<Step>(
     useTeamStore.getState().team ? 'SELECT_FRANCHISE' : 'CREATE_TEAM',
@@ -102,6 +105,10 @@ export function OnboardingPage() {
 
   const handleCreateTeam = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    if (!online) {
+      setError(t('offline.action_requires_connection'))
+      return
+    }
     if (!teamForm.name.trim() || !teamForm.short_name.trim()) {
       setError(t('onboarding.create.error_required'))
       return
@@ -129,6 +136,10 @@ export function OnboardingPage() {
   }
 
   const handleClaimStarterPack = async () => {
+    if (!online) {
+      setError(t('offline.action_requires_connection'))
+      return
+    }
     if (!selectedFranchise) {
       setError(t('onboarding.franchise.error_required'))
       return
@@ -279,12 +290,19 @@ export function OnboardingPage() {
               </div>
             </fieldset>
 
-            <Button type="submit" size="lg" disabled={loading} className="mt-2 w-full">
+            <Button
+              type="submit"
+              size="lg"
+              disabled={loading || !online}
+              aria-describedby={!online ? 'onboarding-create-online-required' : undefined}
+              className="mt-2 w-full"
+            >
               {loading ? <Loader2 className="h-5 w-5 animate-spin" aria-hidden /> : null}
               {loading
                 ? t('onboarding.create.submitting')
                 : t('onboarding.create.submit')}
             </Button>
+            <OnlineRequiredHint id="onboarding-create-online-required" visible={!online} />
           </form>
         </div>
       </main>
@@ -334,7 +352,8 @@ export function OnboardingPage() {
           <Button
             type="button"
             size="lg"
-            disabled={loading || franchises.length === 0}
+            disabled={loading || franchises.length === 0 || !online}
+            aria-describedby={!online ? 'onboarding-claim-online-required' : undefined}
             onClick={() => void handleClaimStarterPack()}
             className="mt-6 w-full"
           >
@@ -343,6 +362,7 @@ export function OnboardingPage() {
               ? t('onboarding.franchise.claiming')
               : t('onboarding.franchise.claim')}
           </Button>
+          <OnlineRequiredHint id="onboarding-claim-online-required" visible={!online} />
         </div>
       </main>
     )
@@ -352,6 +372,22 @@ export function OnboardingPage() {
 
   return (
     <main className="pack-screen min-h-dvh px-4 pb-[max(2rem,calc(env(safe-area-inset-bottom)+1rem))] pt-[max(1.5rem,env(safe-area-inset-top))]">
+      <link
+        rel="preload"
+        as="image"
+        href="/open-pack-mobile.avif"
+        type="image/avif"
+        media="(max-width: 767px)"
+        fetchPriority="high"
+      />
+      <link
+        rel="preload"
+        as="image"
+        href="/open-pack.avif"
+        type="image/avif"
+        media="(min-width: 768px)"
+        fetchPriority="high"
+      />
       <div aria-hidden className="pack-screen__bg" />
       <div className="pack-screen__content">
       <AnimatePresence mode="wait">

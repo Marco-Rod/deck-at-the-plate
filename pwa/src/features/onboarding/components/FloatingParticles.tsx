@@ -39,19 +39,24 @@ interface Particle {
   blur: boolean
 }
 
+function pseudoRandom(seed: number): number {
+  const value = Math.sin(seed * 12.9898) * 43758.5453
+  return value - Math.floor(value)
+}
+
 export const FloatingParticles = memo(function FloatingParticles() {
   const particleCount = useParticleCount()
 
   const particles = useMemo<Particle[]>(() => {
     return Array.from({ length: particleCount }, (_, i) => ({
       id: i,
-      left: `${Math.random() * 100}%`,
-      top: `${Math.random() * 100}%`,
-      delay: Math.random() * 3,
-      duration: 3 + Math.random() * 4, // 3-7 segundos
-      size: 2 + Math.random() * 4, // 2-6px
-      opacity: 0.2 + Math.random() * 0.6, // 0.2-0.8
-      blur: Math.random() > 0.6, // 40% con blur para profundidad
+      left: `${pseudoRandom(i + 1) * 100}%`,
+      top: `${pseudoRandom(i + 11) * 100}%`,
+      delay: pseudoRandom(i + 23) * 3,
+      duration: 3 + pseudoRandom(i + 37) * 4, // 3-7 segundos
+      size: 2 + pseudoRandom(i + 41) * 4, // 2-6px
+      opacity: 0.2 + pseudoRandom(i + 53) * 0.6, // 0.2-0.8
+      blur: pseudoRandom(i + 67) > 0.6, // 40% con blur para profundidad
     }))
   }, [particleCount])
 

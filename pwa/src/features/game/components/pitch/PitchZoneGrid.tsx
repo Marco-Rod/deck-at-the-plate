@@ -1,10 +1,11 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import type { MouseEvent } from 'react'
 import { motion } from 'framer-motion'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import type { PitchAttribute, PlayerRole } from '@/shared/api/types'
 import { StrikeZoneGrid } from './StrikeZoneGrid'
+import { useDialogFocus } from '@/shared/ui/useDialogFocus'
 
 interface PitchZoneGridProps {
   role: PlayerRole
@@ -45,6 +46,12 @@ export function PitchZoneGrid({
 }: PitchZoneGridProps) {
   const { t } = useTranslation()
   const [showPitchModal, setShowPitchModal] = useState(false)
+  const pitchDialogRef = useRef<HTMLDivElement>(null)
+  useDialogFocus({
+    active: role === 'PITCHER' && showPitchModal && !disabled,
+    containerRef: pitchDialogRef,
+    onEscape: () => setShowPitchModal(false),
+  })
 
   const availablePitches = useMemo(() => {
     if (repertoire && repertoire.length > 0) {
@@ -96,6 +103,11 @@ export function PitchZoneGrid({
             <div className="pointer-events-none fixed inset-0 z-0 bg-black/40 backdrop-blur-sm" />
 
             <motion.div
+              ref={pitchDialogRef}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="pitch-selection-title"
+              tabIndex={-1}
               className="relative z-[10000] w-full max-w-2xl max-h-[80vh] overflow-y-auto rounded-lg border-2 border-koshien-gold bg-gradient-to-b from-koshien-dark to-koshien-dark p-6 shadow-2xl sm:p-8 lg:p-10"
               initial={{ opacity: 0, scale: 0.8 }}
               animate={{ opacity: 1, scale: 1 }}
@@ -104,7 +116,7 @@ export function PitchZoneGrid({
               onClick={(event) => event.stopPropagation()}
             >
               <div className="mb-6 border-b border-koshien-gold/50 pb-4">
-                <h3 className="text-center font-vintage text-lg font-bold uppercase tracking-wider text-koshien-gold sm:text-xl">
+                <h3 id="pitch-selection-title" className="text-center font-vintage text-lg font-bold uppercase tracking-wider text-koshien-gold sm:text-xl">
                   {t('game.select_pitch')}
                 </h3>
                 <p className="mt-2 text-center font-vintage text-xs text-koshien-cream/70 sm:text-sm">
@@ -120,6 +132,7 @@ export function PitchZoneGrid({
                     <motion.button
                       key={pitch}
                       type="button"
+                      aria-pressed={isSelected}
                       onClick={() => handlePitchSelect(pitch)}
                       className={`relative cursor-pointer overflow-hidden rounded-lg border-2 px-5 py-3 font-vintage text-sm font-bold uppercase transition-all sm:px-6 sm:py-4 sm:text-base ${
                         isSelected
@@ -138,6 +151,7 @@ export function PitchZoneGrid({
 
                 <motion.button
                   type="button"
+                  aria-pressed={selectedPitch === 'IBB'}
                   onClick={() => handlePitchSelect('IBB')}
                   className={`relative cursor-pointer overflow-hidden rounded-lg border-2 px-5 py-3 font-vintage text-sm font-bold uppercase transition-all sm:px-6 sm:py-4 sm:text-base ${
                     selectedPitch === 'IBB'

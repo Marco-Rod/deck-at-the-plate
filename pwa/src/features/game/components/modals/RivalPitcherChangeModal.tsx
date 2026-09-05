@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useTranslation } from 'react-i18next'
 import type { PlayerGameData } from '@/shared/api/types'
+import { useDialogFocus } from '@/shared/ui/useDialogFocus'
 
 interface BullpenPitcher extends PlayerGameData {
   already_used?: boolean
@@ -38,6 +39,12 @@ export function RivalPitcherChangeModal({
   const [selectedPitcherId, setSelectedPitcherId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const dialogRef = useRef<HTMLDivElement>(null)
+  useDialogFocus({
+    active: isOpen && Boolean(oldPitcher),
+    containerRef: dialogRef,
+    onEscape: isLoading || isSubmitting ? undefined : onAccept,
+  })
 
   if (!oldPitcher) return null
 
@@ -62,9 +69,16 @@ export function RivalPitcherChangeModal({
               transition={{ duration: 0.3, ease: 'easeOut' }}
               className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center"
             >
-              <div className="pointer-events-auto mx-4 w-full max-w-lg rounded-lg border-2 border-koshien-gold/60 bg-gradient-to-br from-[#1A1D23] via-[#0F1219] to-[#0A0D0F] p-6 shadow-2xl sm:p-8 md:p-10">
+              <div
+                ref={dialogRef}
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="rival-pitcher-change-title"
+                tabIndex={-1}
+                className="pointer-events-auto mx-4 w-full max-w-lg rounded-lg border-2 border-koshien-gold/60 bg-gradient-to-br from-[#1A1D23] via-[#0F1219] to-[#0A0D0F] p-6 shadow-2xl sm:p-8 md:p-10"
+              >
                 <div className="mb-6 text-center">
-                  <h2 className="mb-2 font-vintage text-lg font-bold uppercase tracking-wider text-koshien-gold sm:text-xl md:text-2xl">
+                  <h2 id="rival-pitcher-change-title" className="mb-2 font-vintage text-lg font-bold uppercase tracking-wider text-koshien-gold sm:text-xl md:text-2xl">
                     {t('game.rival_change_title')}
                   </h2>
                   <p className="text-xs text-[#A89968] sm:text-sm">{t('game.rival_change_msg')}</p>
@@ -206,13 +220,21 @@ export function RivalPitcherChangeModal({
               transition={{ duration: 0.18 }}
               className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center p-4"
             >
-              <div className="pointer-events-auto w-full max-w-3xl rounded-xl border-2 border-koshien-gold/50 bg-[#0F1419]/95 shadow-2xl backdrop-blur-md">
+              <div
+                ref={dialogRef}
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="rival-pitcher-selection-title"
+                tabIndex={-1}
+                className="pointer-events-auto w-full max-w-3xl rounded-xl border-2 border-koshien-gold/50 bg-[#0F1419]/95 shadow-2xl backdrop-blur-md"
+              >
                 <div className="flex items-center justify-between border-b border-koshien-gold/30 px-6 py-4">
-                  <h2 className="font-vintage text-xl font-bold tracking-wide text-koshien-cream">
+                  <h2 id="rival-pitcher-selection-title" className="font-vintage text-xl font-bold tracking-wide text-koshien-cream">
                     {t('game.rival_change_title_sel')}
                   </h2>
                   <button
                     type="button"
+                    aria-label={t('game.cancel')}
                     onClick={onAccept}
                     disabled={isLoading || isSubmitting}
                     className="text-xl font-bold leading-none text-koshien-gold hover:text-koshien-chalk disabled:opacity-50"
@@ -342,6 +364,7 @@ export function RivalPitcherChangeModal({
                   <AnimatePresence>
                     {error && (
                       <motion.p
+                        role="alert"
                         initial={{ opacity: 0, x: -8 }}
                         animate={{ opacity: 1, x: 0 }}
                         exit={{ opacity: 0 }}

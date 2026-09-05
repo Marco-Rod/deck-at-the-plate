@@ -150,6 +150,7 @@ export function PlayerCard({
   const vibrateIntensity = (fatigueLevel / 100) * 3
   const vibrationDuration = Math.max(0.2, 1 - fatigueLevel / 100)
   const shouldVibrate = role === 'PITCHER' && fatigueLevel > 0
+  const isInteractive = role === 'PITCHER' && Boolean(onClickPitcher)
   const whileHover = disableEffects
     ? {}
     : {
@@ -168,8 +169,17 @@ export function PlayerCard({
   return (
     <motion.div
       key={player.id}
-      className={`${cardSizeClass} relative z-10 flex aspect-[3/4] cursor-pointer select-none flex-col rounded-xs bg-koshien-dark/90 p-2 backdrop-blur-sm sm:p-3 md:p-4 ${
-        role === 'PITCHER' && onClickPitcher ? 'hover:shadow-lg' : ''
+      role={isInteractive ? 'button' : undefined}
+      tabIndex={isInteractive ? 0 : undefined}
+      aria-label={isInteractive ? t('game.change_pitcher_title') : undefined}
+      onKeyDown={isInteractive ? (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          onClickPitcher?.()
+        }
+      } : undefined}
+      className={`${cardSizeClass} relative z-10 flex aspect-[3/4] select-none flex-col rounded-xs bg-koshien-dark/90 p-2 backdrop-blur-sm sm:p-3 md:p-4 ${
+        isInteractive ? 'cursor-pointer hover:shadow-lg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-koshien-gold' : ''
       }`}
       style={{
         borderWidth: '2px',
@@ -204,7 +214,7 @@ export function PlayerCard({
       whileHover={whileHover}
       whileTap={whileTap}
       onClick={() => {
-        if (role === 'PITCHER' && onClickPitcher) {
+        if (isInteractive && onClickPitcher) {
           onClickPitcher()
         }
       }}

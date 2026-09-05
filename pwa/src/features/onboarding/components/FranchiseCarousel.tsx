@@ -1,4 +1,5 @@
 import { useRef } from 'react'
+import type { KeyboardEvent } from 'react'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import type { Franchise } from '@/shared/api/types'
 
@@ -24,6 +25,24 @@ export function FranchiseCarousel({ teams, selectedTeamId, onSelectTeam, compact
     el.scrollBy({ left: direction * (cardWidth + 12), behavior: 'smooth' })
   }
 
+  const handleOptionKeyDown = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
+    let nextIndex = index
+    if (event.key === 'ArrowRight' || event.key === 'ArrowDown') nextIndex = index + 1
+    else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') nextIndex = index - 1
+    else if (event.key === 'Home') nextIndex = 0
+    else if (event.key === 'End') nextIndex = teams.length - 1
+    else return
+
+    event.preventDefault()
+    const boundedIndex = Math.max(0, Math.min(teams.length - 1, nextIndex))
+    const nextTeam = teams[boundedIndex]
+    const nextButton = scrollRef.current?.querySelectorAll<HTMLButtonElement>('[role="option"]')[boundedIndex]
+    if (!nextTeam || !nextButton) return
+    onSelectTeam(nextTeam.id)
+    nextButton.focus()
+    nextButton.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' })
+  }
+
   return (
     <div
       className={`relative rounded-2xl border border-koshien-border ${compact ? 'bg-koshien-dark/45 p-2.5 backdrop-blur-md sm:p-3' : 'bg-koshien-dark/60 p-3 sm:p-4'}`}
@@ -32,10 +51,9 @@ export function FranchiseCarousel({ teams, selectedTeamId, onSelectTeam, compact
         ref={scrollRef}
         role="listbox"
         aria-label="Franquicias de la liga"
-        tabIndex={0}
         className={`flex snap-x snap-mandatory overflow-x-auto scroll-smooth scroll-px-2 no-scrollbar ${compact ? 'gap-2.5 px-1 py-1 sm:gap-3 sm:px-5 sm:py-2 sm:scroll-px-5' : 'gap-3 sm:scroll-px-4'}`}
       >
-        {teams.map((team) => {
+        {teams.map((team, index) => {
           const selected = team.id === selectedTeamId
           return (
             <button
@@ -43,7 +61,9 @@ export function FranchiseCarousel({ teams, selectedTeamId, onSelectTeam, compact
               type="button"
               role="option"
               aria-selected={selected}
+              tabIndex={selected ? 0 : -1}
               onClick={() => onSelectTeam(team.id)}
+              onKeyDown={(event) => handleOptionKeyDown(event, index)}
               className={`${compact ? COMPACT_CARD_SIZE_CLASS : CARD_SIZE_CLASS} relative flex shrink-0 snap-start flex-col justify-center rounded-xl border-2 text-left transition-all focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-koshien-gold ${compact ? 'p-2.5 sm:p-3' : 'p-3'} ${
                 selected
                   ? compact

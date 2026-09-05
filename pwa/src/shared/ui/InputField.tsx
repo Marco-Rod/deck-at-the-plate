@@ -42,7 +42,7 @@ export function InputField({
           id={inputId}
           aria-invalid={error ? true : undefined}
           aria-describedby={errorId}
-          className={`h-12 w-full rounded-xl border bg-koshien-dark/80 px-3 text-base text-koshien-chalk transition-colors placeholder:text-koshien-cream/30 focus:border-koshien-gold focus:outline-none focus:ring-2 focus:ring-koshien-gold/40 ${leadingIcon ? 'pl-10' : ''} ${trailingAction ? 'pr-12' : ''} ${error ? 'border-red-500/60 focus:border-red-400 focus:ring-red-400/40' : 'border-koshien-border'} ${className}`}
+          className={`h-12 w-full rounded-xl border bg-koshien-dark/80 px-3 text-base text-koshien-chalk transition-colors placeholder:text-koshien-cream/60 focus:border-koshien-gold focus:outline-none focus:ring-2 focus:ring-koshien-gold/40 ${leadingIcon ? 'pl-10' : ''} ${trailingAction ? 'pr-12' : ''} ${error ? 'border-red-500/60 focus:border-red-400 focus:ring-red-400/40' : 'border-koshien-border'} ${className}`}
           {...props}
         />
         {trailingAction ? (

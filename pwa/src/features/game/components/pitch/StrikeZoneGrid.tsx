@@ -32,8 +32,11 @@ export function StrikeZoneGrid({ selectedZone, onSelectZone, disabled = false }:
             <motion.button
               key={zone}
               type="button"
+              disabled={disabled}
+              aria-pressed={isSelected}
+              aria-label={t('game.zone', { zone })}
               onClick={() => onSelectZone(zone)}
-              className={`relative flex h-16 w-16 cursor-pointer items-center justify-center border font-vintage text-xs overflow-hidden transition-all ${
+              className={`relative flex h-16 w-16 cursor-pointer items-center justify-center border font-vintage text-xs overflow-hidden transition-all focus-visible:z-20 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-koshien-gold ${
                 isSelected
                   ? 'z-10 border-red-600 bg-red-900/30 font-bold text-red-400 shadow-lg'
                   : 'border-koshien-border bg-koshien-dark text-koshien-cream hover:border-white/40'

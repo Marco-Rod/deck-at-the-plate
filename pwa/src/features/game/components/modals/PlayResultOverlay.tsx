@@ -225,25 +225,23 @@ export function PlayResultOverlay({
   delayMs = 0,
 }: PlayResultOverlayProps) {
   const { t } = useTranslation()
-  const [visible, setVisible] = useState(false)
-  const [currentTheme, setCurrentTheme] = useState<EventTheme>(DEFAULT_THEME)
-  const [currentText, setCurrentText] = useState('')
+  const [displayedResult, setDisplayedResult] = useState<{
+    sourceTs: number
+    eventKey: string
+    text: string
+    theme: EventTheme
+  } | null>(null)
 
   useEffect(() => {
-    if (!resultText || !resultTs) {
-      setVisible(false)
-      return
-    }
+    if (!resultText || !resultTs) return
     const eventKey = resultEvent?.toUpperCase() ?? ''
     const theme = EVENT_THEMES[eventKey] ?? DEFAULT_THEME
 
     const showTimer = setTimeout(() => {
-      setCurrentTheme(theme)
-      setCurrentText(resultText)
-      setVisible(true)
+      setDisplayedResult({ sourceTs: resultTs, eventKey, text: resultText, theme })
     }, delayMs)
 
-    const hideTimer = setTimeout(() => setVisible(false), delayMs + theme.duration)
+    const hideTimer = setTimeout(() => setDisplayedResult(null), delayMs + theme.duration)
 
     return () => {
       clearTimeout(showTimer)
@@ -251,13 +249,21 @@ export function PlayResultOverlay({
     }
   }, [resultTs, delayMs, resultText, resultEvent])
 
-  const eventKey = resultEvent?.toUpperCase() ?? ''
-  const isEpic = ['HOME_RUN', 'HIT_3B', 'STRIKEOUT', 'STEAL', 'GAME_OVER'].includes(eventKey)
+  const visible = Boolean(displayedResult && displayedResult.sourceTs === resultTs)
+  const currentTheme = displayedResult?.theme ?? DEFAULT_THEME
+  const currentText = displayedResult?.text ?? ''
+  const isEpic = ['HOME_RUN', 'HIT_3B', 'STRIKEOUT', 'STEAL', 'GAME_OVER'].includes(
+    displayedResult?.eventKey ?? '',
+  )
 
   return (
-    <AnimatePresence>
-      {visible && (
-        <>
+    <>
+      <div role="status" aria-live="polite" aria-atomic="true" className="sr-only">
+        {visible ? `${t(currentTheme.labelKey)}: ${currentText}` : ''}
+      </div>
+      <AnimatePresence>
+        {visible && (
+          <div aria-hidden="true">
           <motion.div
             className={`pointer-events-none absolute inset-0 z-30 ${currentTheme.screenFlash}`}
             initial={{ opacity: 1 }}
@@ -359,8 +365,9 @@ export function PlayResultOverlay({
               />
             </motion.div>
           </motion.div>
-        </>
-      )}
-    </AnimatePresence>
+          </div>
+        )}
+      </AnimatePresence>
+    </>
   )
 }

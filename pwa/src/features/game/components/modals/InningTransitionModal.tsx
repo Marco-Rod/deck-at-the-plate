@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
 import { useTranslation } from 'react-i18next'
+import { useDialogFocus } from '@/shared/ui/useDialogFocus'
 
 interface InningTransitionModalProps {
   completedInning: number
@@ -25,6 +26,8 @@ export function InningTransitionModal({
   const userScore = userRole === 'HOME' ? homeScore : awayScore
   const cpuScore = userRole === 'HOME' ? awayScore : homeScore
   const [progress, setProgress] = useState(0)
+  const dialogRef = useRef<HTMLDivElement>(null)
+  useDialogFocus({ active: true, containerRef: dialogRef })
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -40,6 +43,11 @@ export function InningTransitionModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md">
       <motion.div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="inning-transition-title"
+        tabIndex={-1}
         className="w-full max-w-md border-2 border-koshien-gold bg-[#0A0D0F] p-8 shadow-[0_0_50px_rgba(197,160,89,0.4)]"
         initial={{ opacity: 0, scale: 0.8, y: 20 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -50,7 +58,7 @@ export function InningTransitionModal({
           <span className="mb-2 block text-xs font-bold uppercase tracking-widest text-koshien-gold">
             {t('game.entry_kicker')}
           </span>
-          <h2 className="font-sports text-3xl uppercase tracking-wider text-koshien-chalk">
+          <h2 id="inning-transition-title" className="font-sports text-3xl uppercase tracking-wider text-koshien-chalk">
             3 OUTS
           </h2>
         </div>

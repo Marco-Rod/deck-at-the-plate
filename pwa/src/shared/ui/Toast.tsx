@@ -26,8 +26,9 @@ export function Toast({ open, tone = 'success', message, onClose }: Props) {
     <AnimatePresence>
       {open ? (
         <motion.div
-          role="status"
-          aria-live="polite"
+          role={tone === 'error' ? 'alert' : 'status'}
+          aria-live={tone === 'error' ? 'assertive' : 'polite'}
+          aria-atomic="true"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: 20 }}

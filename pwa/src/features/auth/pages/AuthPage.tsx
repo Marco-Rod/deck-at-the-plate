@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { FormEvent } from 'react'
+import type { FormEvent, KeyboardEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { Languages, Loader2, User } from 'lucide-react'
@@ -10,6 +10,8 @@ import { PasswordField } from '@/shared/ui/PasswordField'
 import { login, register } from '../api'
 import { useAuthStore } from '../store'
 import { validateLogin, validateRegister } from '../lib/validation'
+import { OnlineRequiredHint } from '@/offline/OnlineRequiredHint'
+import { useOnlineStatus } from '@/offline/useOnlineStatus'
 import type { AuthFieldErrors, AuthFieldKey, AuthFormValues, AuthMode } from '../lib/validation'
 
 const initialValues: AuthFormValues = {
@@ -28,6 +30,7 @@ export function AuthPage() {
   const navigate = useNavigate()
   const signIn = useAuthStore((state) => state.signIn)
   const refreshProfile = useAuthStore((state) => state.refreshProfile)
+  const online = useOnlineStatus()
 
   const [mode, setMode] = useState<AuthMode>('login')
   const [values, setValues] = useState<AuthFormValues>(initialValues)
@@ -39,6 +42,22 @@ export function AuthPage() {
     setMode(next)
     setFieldErrors({})
     setSubmitError(null)
+  }
+
+  const handleTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+    event.preventDefault()
+    const nextIndex = event.key === 'Home'
+      ? 0
+      : event.key === 'End'
+        ? tabs.length - 1
+        : (index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length
+    const nextTab = tabs[nextIndex]
+    if (!nextTab) return
+    switchMode(nextTab.id)
+    event.currentTarget.parentElement
+      ?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[nextIndex]
+      ?.focus()
   }
 
   const setField = (key: AuthFieldKey, value: string) => {
@@ -54,6 +73,10 @@ export function AuthPage() {
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setSubmitError(null)
+    if (!online) {
+      setSubmitError(t('offline.action_requires_connection'))
+      return
+    }
 
     const errors = mode === 'login' ? validateLogin(values) : validateRegister(values)
     setFieldErrors(errors)
@@ -77,6 +100,13 @@ export function AuthPage() {
 
   return (
     <main className="auth-aurora relative flex min-h-dvh flex-col overflow-x-hidden bg-koshien-dark px-4 pb-[max(2rem,calc(env(safe-area-inset-bottom)+1rem))] pt-[max(1rem,env(safe-area-inset-top))] select-none">
+      <link
+        rel="preload"
+        as="image"
+        href="/login-background.avif"
+        type="image/avif"
+        fetchPriority="high"
+      />
       <button
         type="button"
         onClick={toggleLanguage}
@@ -88,11 +118,18 @@ export function AuthPage() {
 
       <div className="relative mx-auto flex w-full max-w-sm flex-1 flex-col justify-center py-10">
         <header className="mb-8 text-center">
-          <img
-            src="/logo-mark.png"
-            alt=""
-            className="mx-auto mb-4 h-auto w-24 sm:w-28"
-          />
+          <picture>
+            <source srcSet="/logo-mark-128.avif" type="image/avif" />
+            <img
+              src="/logo-mark.png"
+              alt=""
+              width="128"
+              height="128"
+              fetchPriority="high"
+              decoding="async"
+              className="mx-auto mb-4 h-auto w-24 sm:w-28"
+            />
+          </picture>
           <span className="inline-block rounded-full border border-koshien-gold/40 bg-koshien-green/60 px-4 py-1 font-vintage text-[10px] uppercase tracking-[0.28em] text-koshien-gold">
             {t('app.tradition')}
           </span>
@@ -109,7 +146,7 @@ export function AuthPage() {
           aria-label={t('auth.select_mode')}
           className="grid grid-cols-2 gap-1 rounded-2xl border border-koshien-border bg-koshien-dark/80 p-1"
         >
-          {tabs.map((tab) => {
+          {tabs.map((tab, index) => {
             const active = mode === tab.id
             return (
               <button
@@ -117,11 +154,13 @@ export function AuthPage() {
                 type="button"
                 role="tab"
                 aria-selected={active}
+                tabIndex={active ? 0 : -1}
                 onClick={() => switchMode(tab.id)}
+                onKeyDown={(event) => handleTabKeyDown(event, index)}
                 className={`rounded-xl py-2.5 font-sports text-xl uppercase tracking-wider transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-koshien-gold ${
                   active
                     ? 'bg-koshien-green text-koshien-chalk'
-                    : 'text-koshien-cream/50 hover:text-koshien-chalk'
+                    : 'text-koshien-cream/70 hover:text-koshien-chalk'
                 }`}
               >
                 {t(tab.labelKey)}
@@ -174,12 +213,19 @@ export function AuthPage() {
             />
           ) : null}
 
-          <Button type="submit" size="lg" disabled={loading} className="mt-2 w-full">
+          <Button
+            type="submit"
+            size="lg"
+            disabled={loading || !online}
+            aria-describedby={!online ? 'auth-online-required' : undefined}
+            className="mt-2 w-full"
+          >
             {loading ? <Loader2 className="h-5 w-5 animate-spin" aria-hidden /> : null}
             {loading
               ? t('common.loading')
               : t(mode === 'login' ? 'auth.submit_login' : 'auth.submit_register')}
           </Button>
+          <OnlineRequiredHint id="auth-online-required" visible={!online} />
         </form>
       </div>
     </main>

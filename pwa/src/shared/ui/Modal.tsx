@@ -1,24 +1,19 @@
-import { useEffect } from 'react'
+import { useRef } from 'react'
 import type { ReactNode } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { X } from 'lucide-react'
+import { useDialogFocus } from './useDialogFocus'
 
 interface Props {
   open: boolean
-  title?: string
+  title: string
   onClose: () => void
   children: ReactNode
 }
 
 export function Modal({ open, title, onClose, children }: Props) {
-  useEffect(() => {
-    if (!open) return
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [open, onClose])
+  const dialogRef = useRef<HTMLDivElement>(null)
+  useDialogFocus({ active: open, containerRef: dialogRef, onEscape: onClose })
 
   return (
     <AnimatePresence>
@@ -32,9 +27,11 @@ export function Modal({ open, title, onClose, children }: Props) {
           className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-0 backdrop-blur-sm sm:items-center sm:p-4"
         >
           <motion.div
+            ref={dialogRef}
             role="dialog"
             aria-modal="true"
             aria-label={title}
+            tabIndex={-1}
             initial={{ y: 40, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: 40, opacity: 0 }}
@@ -43,13 +40,9 @@ export function Modal({ open, title, onClose, children }: Props) {
             className="w-full max-w-md rounded-t-2xl border border-koshien-border bg-koshien-dark p-5 shadow-scoreboard sm:rounded-2xl"
           >
             <div className="mb-4 flex items-center justify-between gap-2">
-              {title ? (
-                <h2 className="font-sports text-xl font-bold uppercase tracking-wide text-koshien-chalk">
-                  {title}
-                </h2>
-              ) : (
-                <span />
-              )}
+              <h2 className="font-sports text-xl font-bold uppercase tracking-wide text-koshien-chalk">
+                {title}
+              </h2>
               <button
                 type="button"
                 aria-label="Cerrar"

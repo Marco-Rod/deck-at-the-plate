@@ -16,7 +16,7 @@ export function SubmitPlayButton({ label, disabled = false, onSubmit }: SubmitPl
         type="button"
         onClick={onSubmit}
         disabled={disabled}
-        className={`relative flex items-center gap-3 overflow-hidden rounded-sm border-2 border-orange-500 bg-[#1A100A] px-8 py-3.5 font-sports text-3xl tracking-widest text-koshien-chalk shadow-2xl ${
+        className={`relative flex items-center gap-3 overflow-hidden rounded-sm border-2 border-orange-500 bg-[#1A100A] px-8 py-3.5 font-sports text-3xl tracking-widest text-koshien-chalk shadow-2xl focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-koshien-gold ${
           disabled ? 'cursor-not-allowed opacity-40' : 'cursor-pointer'
         }`}
         animate={{

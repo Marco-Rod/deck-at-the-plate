@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useTranslation } from 'react-i18next'
 import type { PlayerGameData } from '@/shared/api/types'
+import { useDialogFocus } from '@/shared/ui/useDialogFocus'
 
 interface BullpenPitcher extends PlayerGameData {
   already_used?: boolean
@@ -35,6 +36,12 @@ export function ChangePitcherModal({
   const { t } = useTranslation()
   const [selectedPitcherId, setSelectedPitcherId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const dialogRef = useRef<HTMLDivElement>(null)
+  useDialogFocus({
+    active: isOpen,
+    containerRef: dialogRef,
+    onEscape: isLoading ? undefined : onClose,
+  })
 
   const handleConfirm = async () => {
     if (!selectedPitcherId) {
@@ -76,13 +83,21 @@ export function ChangePitcherModal({
             transition={{ duration: 0.18 }}
             className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center p-4"
           >
-            <div className="pointer-events-auto w-full max-w-3xl rounded-xl border-2 border-koshien-gold/50 bg-[#0F1419]/95 shadow-2xl backdrop-blur-md">
+            <div
+              ref={dialogRef}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="change-pitcher-title"
+              tabIndex={-1}
+              className="pointer-events-auto w-full max-w-3xl rounded-xl border-2 border-koshien-gold/50 bg-[#0F1419]/95 shadow-2xl backdrop-blur-md"
+            >
               <div className="flex items-center justify-between border-b border-koshien-gold/30 px-6 py-4">
-                <h2 className="font-vintage text-xl font-bold tracking-wide text-koshien-cream">
+                <h2 id="change-pitcher-title" className="font-vintage text-xl font-bold tracking-wide text-koshien-cream">
                   {t('game.change_pitcher_title')}
                 </h2>
                 <button
                   type="button"
+                  aria-label={t('game.cancel')}
                   onClick={onClose}
                   disabled={isLoading}
                   className="text-xl font-bold leading-none text-koshien-gold hover:text-koshien-chalk disabled:opacity-50"
@@ -211,6 +226,7 @@ export function ChangePitcherModal({
                 <AnimatePresence>
                   {error && (
                     <motion.p
+                      role="alert"
                       initial={{ opacity: 0, x: -8 }}
                       animate={{ opacity: 1, x: 0 }}
                       exit={{ opacity: 0 }}

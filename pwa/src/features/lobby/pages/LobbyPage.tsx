@@ -10,6 +10,8 @@ import { useLobbyStore } from '@/features/lobby/store'
 import { resetSessionStores } from '@/shared/lib/sessionCleanup'
 import { FranchiseCarousel } from '@/features/onboarding/components/FranchiseCarousel'
 import { Button } from '@/shared/ui'
+import { OnlineRequiredHint } from '@/offline/OnlineRequiredHint'
+import { useOnlineStatus } from '@/offline/useOnlineStatus'
 import type {
   Difficulty,
   Franchise,
@@ -71,6 +73,7 @@ export function LobbyPage() {
   const team = useTeamStore(selectTeam)
   const config = useLobbyStore((s) => s.config)
   const setConfig = useLobbyStore((s) => s.setConfig)
+  const online = useOnlineStatus()
 
   const [teams, setTeams] = useState<Franchise[]>([])
   const [stats, setStats] = useState<TeamStatsResponse | null>(null)
@@ -128,9 +131,9 @@ export function LobbyPage() {
             <span className="block font-vintage text-[9px] uppercase tracking-widest text-koshien-gold sm:text-[10px]">
               {t('lobby.manager')}
             </span>
-            <h2 className="truncate font-sports text-lg uppercase leading-none text-koshien-chalk sm:text-2xl">
+            <div className="truncate font-sports text-lg uppercase leading-none text-koshien-chalk sm:text-2xl">
               {(user?.username ?? '').substring(0, 12)}
-            </h2>
+            </div>
           </div>
         </div>
 
@@ -164,9 +167,9 @@ export function LobbyPage() {
             <span className="mb-1 block font-vintage text-[9px] uppercase tracking-widest text-koshien-gold sm:text-xs">
               {t('lobby.my_club')}
             </span>
-            <h3 className="mb-2 border-b border-koshien-border pb-1 font-sports text-2xl uppercase text-koshien-chalk sm:mb-4 sm:text-3xl">
+            <h1 className="mb-2 border-b border-koshien-border pb-1 font-sports text-2xl uppercase text-koshien-chalk sm:mb-4 sm:text-3xl">
               {t('lobby.preparation')}
-            </h3>
+            </h1>
 
             {team ? (
               <div className="lobby-glass-subpanel mb-3 rounded border border-koshien-gold/40 p-2 sm:mb-4 sm:p-3">
@@ -182,9 +185,9 @@ export function LobbyPage() {
                       <span className="block truncate font-vintage text-[8px] uppercase tracking-widest text-koshien-cream/60 sm:text-[10px]">
                         {team.city}
                       </span>
-                      <h4 className="truncate font-sports text-lg uppercase text-koshien-chalk sm:text-2xl">
+                      <h2 className="truncate font-sports text-lg uppercase text-koshien-chalk sm:text-2xl">
                         {team.name}
-                      </h4>
+                      </h2>
                     </div>
                   </div>
                   <div className="flex-shrink-0 rounded border border-white bg-koshien-gold px-1.5 py-0.5 font-sports text-sm font-extrabold text-koshien-dark shadow sm:px-2 sm:text-lg">
@@ -200,7 +203,7 @@ export function LobbyPage() {
                   <span className="block font-vintage text-[8px] uppercase tracking-[0.18em] text-koshien-gold sm:text-[10px]">
                     {t('lobby.recent_games')}
                   </span>
-                  <span className="font-vintage text-[7px] uppercase text-koshien-cream/45 sm:text-[8px]">
+                  <span className="font-vintage text-[7px] uppercase text-koshien-cream/70 sm:text-[8px]">
                     {t('lobby.recent_games_subtitle')}
                   </span>
                 </div>
@@ -230,7 +233,7 @@ export function LobbyPage() {
                         <div className="truncate font-sports text-xs uppercase text-koshien-chalk sm:text-sm">
                           {match.opponent}
                         </div>
-                        <div className="flex items-center gap-1.5 font-vintage text-[7px] uppercase tracking-wider text-koshien-cream/45 sm:text-[8px]">
+                        <div className="flex items-center gap-1.5 font-vintage text-[7px] uppercase tracking-wider text-koshien-cream/70 sm:text-[8px]">
                           <span>{match.mode}</span>
                           <span>•</span>
                           <span>{t(`lobby.${match.date}`)}</span>
@@ -273,9 +276,9 @@ export function LobbyPage() {
             <span className="mb-1 block font-vintage text-[9px] uppercase tracking-widest text-koshien-gold sm:text-xs">
               {t('lobby.matchmaking')}
             </span>
-            <h3 className="mb-2 border-b border-koshien-border pb-1 font-sports text-2xl uppercase text-koshien-chalk sm:mb-4 sm:text-3xl">
+            <h2 className="mb-2 border-b border-koshien-border pb-1 font-sports text-2xl uppercase text-koshien-chalk sm:mb-4 sm:text-3xl">
               {t('lobby.game_mode')}
-            </h3>
+            </h2>
 
             {/* SELECTOR DE MODO */}
             <div className="mb-3 grid grid-cols-1 gap-2 sm:mb-4 sm:grid-cols-2 sm:gap-3">
@@ -383,16 +386,18 @@ export function LobbyPage() {
 
           <Button
             size="lg"
-            disabled={!config.rivalId}
+            disabled={!config.rivalId || !online}
+            aria-describedby={!online ? 'lobby-online-required' : undefined}
             onClick={handleCreate}
             className="mt-2 w-full border border-koshien-gold bg-koshien-green text-koshien-gold hover:bg-koshien-light-green sm:mt-3 sm:border-2 sm:text-2xl"
           >
             {t('lobby.start_pve', { innings: config.innings })}
           </Button>
+          <OnlineRequiredHint id="lobby-online-required" visible={!online} />
         </section>
       </main>
 
-      <footer className="mt-1 text-center font-vintage text-[8px] uppercase tracking-widest text-koshien-border sm:mt-2 sm:text-[10px]">
+      <footer className="mt-1 text-center font-vintage text-[8px] uppercase tracking-widest text-koshien-muted sm:mt-2 sm:text-[10px]">
         KOSHIEN • RESPONSIVE
       </footer>
     </motion.div>

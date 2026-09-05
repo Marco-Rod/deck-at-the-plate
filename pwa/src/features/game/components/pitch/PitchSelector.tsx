@@ -45,8 +45,10 @@ export function PitchSelector({
           <motion.button
             key={pitch}
             type="button"
+            disabled={disabled}
+            aria-pressed={isSelected}
             onClick={() => onSelectPitch(pitch)}
-            className={`relative cursor-pointer overflow-hidden rounded-xs border px-3 py-1.5 font-vintage text-[10px] uppercase transition-all ${
+            className={`relative cursor-pointer overflow-hidden rounded-xs border px-3 py-1.5 font-vintage text-[10px] uppercase transition-all focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-koshien-gold disabled:cursor-not-allowed ${
               isSelected
                 ? 'z-10 border-koshien-gold bg-koshien-green font-bold text-koshien-gold'
                 : 'border-koshien-border bg-koshien-dark text-koshien-cream opacity-70 hover:opacity-100'
@@ -63,8 +65,10 @@ export function PitchSelector({
 
       <motion.button
         type="button"
+        disabled={disabled}
+        aria-pressed={selectedPitch === 'IBB'}
         onClick={() => onSelectPitch('IBB')}
-        className={`relative cursor-pointer overflow-hidden rounded-xs border px-2.5 py-1.5 font-vintage text-[10px] uppercase transition-all ${
+        className={`relative cursor-pointer overflow-hidden rounded-xs border px-2.5 py-1.5 font-vintage text-[10px] uppercase transition-all focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-koshien-gold disabled:cursor-not-allowed ${
           selectedPitch === 'IBB'
             ? 'z-10 border-koshien-chalk bg-koshien-gold font-bold text-koshien-dark'
             : 'border-koshien-gold/40 bg-koshien-dark text-koshien-gold opacity-80 hover:opacity-100'

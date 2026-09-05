@@ -1,4 +1,6 @@
+import { useRef } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useDialogFocus } from '@/shared/ui/useDialogFocus'
 
 interface GameOverModalProps {
   winnerMessage?: string
@@ -28,15 +30,24 @@ export function GameOverModal({
   const cpuScore = userRole === 'HOME' ? awayScore : homeScore
   const userTeamName = userRole === 'HOME' ? homeTeamName : awayTeamName
   const cpuTeamName = userRole === 'HOME' ? awayTeamName : homeTeamName
+  const dialogRef = useRef<HTMLDivElement>(null)
+  useDialogFocus({ active: true, containerRef: dialogRef })
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md">
-      <div className="w-full max-w-md border-2 border-koshien-gold bg-[#0A0D0F] p-8 text-center shadow-[0_0_50px_rgba(197,160,89,0.4)] font-vintage">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="game-over-title"
+        tabIndex={-1}
+        className="w-full max-w-md border-2 border-koshien-gold bg-[#0A0D0F] p-8 text-center shadow-[0_0_50px_rgba(197,160,89,0.4)] font-vintage"
+      >
         <span className="mb-2 block text-xs font-bold uppercase tracking-widest text-koshien-gold">
           {t('game.over_kicker')}
         </span>
 
-        <h2 className="mb-4 font-sports text-4xl uppercase tracking-wider text-koshien-chalk">
+        <h2 id="game-over-title" className="mb-4 font-sports text-4xl uppercase tracking-wider text-koshien-chalk">
           {winnerMessage || t('game.over_default_title')}
         </h2>
 

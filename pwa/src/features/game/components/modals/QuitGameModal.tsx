@@ -1,5 +1,7 @@
+import { useRef } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useTranslation } from 'react-i18next'
+import { useDialogFocus } from '@/shared/ui/useDialogFocus'
 
 interface QuitGameModalProps {
   isOpen: boolean
@@ -15,6 +17,12 @@ export function QuitGameModal({
   isLoading = false,
 }: QuitGameModalProps) {
   const { t } = useTranslation()
+  const dialogRef = useRef<HTMLDivElement>(null)
+  useDialogFocus({
+    active: isOpen,
+    containerRef: dialogRef,
+    onEscape: isLoading ? undefined : onCancel,
+  })
 
   return (
     <AnimatePresence>
@@ -35,15 +43,23 @@ export function QuitGameModal({
             transition={{ duration: 0.2 }}
             className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center p-4"
           >
-            <div className="pointer-events-auto w-full max-w-md rounded-xl border-2 border-koshien-gold/50 bg-[#0F1419]/95 shadow-2xl backdrop-blur-md">
+            <div
+              ref={dialogRef}
+              role="alertdialog"
+              aria-modal="true"
+              aria-labelledby="quit-game-title"
+              aria-describedby="quit-game-description"
+              tabIndex={-1}
+              className="pointer-events-auto w-full max-w-md rounded-xl border-2 border-koshien-gold/50 bg-[#0F1419]/95 shadow-2xl backdrop-blur-md"
+            >
               <div className="flex items-center justify-between border-b border-koshien-gold/30 px-6 py-4">
-                <h2 className="font-vintage text-xl font-bold tracking-wide text-koshien-cream">
+                <h2 id="quit-game-title" className="font-vintage text-xl font-bold tracking-wide text-koshien-cream">
                   {t('game.quit_title')}
                 </h2>
               </div>
 
               <div className="px-6 py-6">
-                <p className="mb-4 text-sm leading-relaxed text-koshien-cream">
+                <p id="quit-game-description" className="mb-4 text-sm leading-relaxed text-koshien-cream">
                   {t('game.quit_confirm')}
                 </p>
                 <p className="font-vintage text-xs text-[#A89968]">{t('game.quit_note')}</p>

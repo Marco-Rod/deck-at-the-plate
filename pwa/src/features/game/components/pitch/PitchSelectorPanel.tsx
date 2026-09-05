@@ -34,8 +34,10 @@ export function PitchSelectorPanel({
             <motion.button
               key={pitch.type}
               type="button"
+              disabled={disabled}
+              aria-pressed={isSelected}
               onClick={() => onSelectPitch(pitch.type)}
-              className={`relative cursor-pointer overflow-hidden rounded border px-2 py-2 text-center transition-all ${
+              className={`relative cursor-pointer overflow-hidden rounded border px-2 py-2 text-center transition-all focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-koshien-gold disabled:cursor-not-allowed ${
                 isSelected
                   ? 'z-10 border-koshien-gold bg-koshien-green'
                   : 'border-koshien-border bg-koshien-dark text-koshien-cream opacity-75 hover:opacity-100'
