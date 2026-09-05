@@ -83,6 +83,40 @@ class TestPlayerTeamStint:
             db.flush()
         db.rollback()
 
+    def test_team_stint_requiere_start_date(self, db):
+        """start_date es obligatorio desde 0008: un stint sin fecha no persiste."""
+        player = _player(db)
+        db.add(PlayerTeamStint(
+            player_id=player.id,
+            season=2026,
+            team_id="LAD",
+            start_date=None,
+        ))
+        with pytest.raises(IntegrityError):
+            db.flush()
+        db.rollback()
+
+    def test_stint_idempotente_no_duplica_con_start_date_nulo(self, db):
+        """Idempotencia del ETL: reintentar el mismo stint no deja duplicados.
+
+        Antes de 0008 start_date era NULLable y el UNIQUE (player, season,
+        team, start_date) NO protegía con NULL (NULL != NULL en Postgres), así
+        que dos ETLs podían insertar dos filas del mismo stint sin fecha. Al ser
+        NOT NULL, cada reintento falla y nunca queda más de una fila.
+        """
+        player = _player(db)
+        for _ in range(2):
+            db.add(PlayerTeamStint(
+                player_id=player.id,
+                season=2026,
+                team_id="LAD",
+                start_date=None,
+            ))
+            with pytest.raises(IntegrityError):
+                db.flush()
+            db.rollback()
+        assert db.query(PlayerTeamStint).count() == 0
+
     def test_end_date_antes_de_start_date_rechazado(self, db):
         player = _player(db)
         db.add(PlayerTeamStint(
