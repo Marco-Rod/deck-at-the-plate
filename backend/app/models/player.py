@@ -128,7 +128,7 @@ class PlayerTeamStint(Base):
     )
     season = Column(SmallInteger, nullable=False, index=True)
     team_id = Column(String(3), ForeignKey("teams.id"), nullable=False, index=True)
-    start_date = Column(Date, nullable=True)
+    start_date = Column(Date, nullable=False)
     # NULL significa que sigue activo al corte.
     end_date = Column(Date, nullable=True)
     games = Column(Integer, nullable=False, default=0)

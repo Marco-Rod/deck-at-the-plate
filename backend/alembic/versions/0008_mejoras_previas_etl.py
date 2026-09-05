@@ -82,6 +82,8 @@ def upgrade() -> None:
         "player_team_stints",
         "end_date IS NULL OR end_date >= start_date",
     )
+    # start_date pasa a ser obligatorio (ya cubierto por el UNIQUE y el CHECK).
+    op.alter_column("player_team_stints", "start_date", nullable=False, existing_type=sa.Date())
 
     # --- PitcherHandednessSplit.batter_side: throwhand → batter_side_enum ---
     op.execute(
@@ -441,6 +443,7 @@ def downgrade() -> None:
     # PlayerTeamStint
     op.drop_constraint("ck_player_team_stint_dates", table_name="player_team_stints", type_="check")
     op.drop_constraint("uq_player_team_stint", table_name="player_team_stints", type_="unique")
+    op.alter_column("player_team_stints", "start_date", nullable=True, existing_type=sa.Date())
 
     # DataImportRun
     for name in (
