@@ -175,6 +175,13 @@ class ThrowHand(str, enum.Enum):
     RIGHT = "R"
 
 
+class BatterSide(str, enum.Enum):
+    """Lado efectivo del bateador en splits analytics (sin bucket ALL)."""
+
+    LEFT = "L"
+    RIGHT = "R"
+
+
 class SplitHand(str, enum.Enum):
     """Nivel de agregación por mano en perfiles. ALL permite fallback."""
 

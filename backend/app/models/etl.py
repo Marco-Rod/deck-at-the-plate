@@ -12,7 +12,6 @@ Idempotencia: el ETL debe reejecutar la misma ventana sin duplicados, por eso
 raw_pitch_events tiene UNIQUE (game_pk, at_bat_number, pitch_number).
 """
 import uuid
-from datetime import datetime
 
 from sqlalchemy import (
     BigInteger,
@@ -32,6 +31,7 @@ from sqlalchemy import (
 )
 from app.database import Base
 from app.core.enums import Handedness, ImportStatus, PitchFamily, ThrowHand
+from app.core.time import utcnow
 
 
 def _new_id() -> str:
@@ -42,6 +42,16 @@ class DataImportRun(Base):
     """Traza de una ejecución de extracción/carga/transformación."""
 
     __tablename__ = "data_import_runs"
+    __table_args__ = (
+        CheckConstraint("rows_extracted >= 0", name="ck_data_import_runs_rows_extracted"),
+        CheckConstraint("rows_inserted >= 0", name="ck_data_import_runs_rows_inserted"),
+        CheckConstraint("rows_updated >= 0", name="ck_data_import_runs_rows_updated"),
+        CheckConstraint("rows_rejected >= 0", name="ck_data_import_runs_rows_rejected"),
+        CheckConstraint(
+            "date_to IS NULL OR date_from IS NULL OR date_to >= date_from",
+            name="ck_data_import_runs_date_range",
+        ),
+    )
 
     id = Column(String(36), primary_key=True, default=_new_id)
     source = Column(String(30), nullable=False, index=True)  # STATCAST, MLB_STATS_API
@@ -60,7 +70,7 @@ class DataImportRun(Base):
     rows_updated = Column(Integer, nullable=False, default=0)
     rows_rejected = Column(Integer, nullable=False, default=0)
     error_summary = Column(Text, nullable=True)
-    started_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, index=True)
+    started_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, index=True)
     finished_at = Column(DateTime(timezone=True), nullable=True)
 
 
@@ -120,4 +130,4 @@ class RawPitchEvent(Base):
     home_team = Column(String(3), nullable=True, index=True)
     away_team = Column(String(3), nullable=True, index=True)
     raw_payload_hash = Column(String(64), nullable=True, index=True)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)

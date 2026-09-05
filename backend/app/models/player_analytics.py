@@ -17,11 +17,11 @@ Reglas (ver referencias/nuevos_modelos.docx):
     - Rates: Numeric(7,6) en rango 0..1. Métricas AVG/wOBA: Numeric(6,5).
 """
 import uuid
-from datetime import datetime
 
 from sqlalchemy import (
     CheckConstraint,
     Column,
+    Date,
     DateTime,
     Enum,
     ForeignKey,
@@ -32,7 +32,8 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 from app.database import Base
-from app.core.enums import PitchFamily, PitchFamilySplit, SplitHand, ThrowHand
+from app.core.enums import BatterSide, PitchFamily, PitchFamilySplit, SplitHand, ThrowHand
+from app.core.time import utcnow
 
 
 def _new_id() -> str:
@@ -49,6 +50,12 @@ class BatterSeasonStats(Base):
         CheckConstraint("hits >= 0", name="ck_batter_season_stats_hits"),
         CheckConstraint("hard_hit_rate >= 0 AND hard_hit_rate <= 1", name="ck_batter_season_stats_hhr"),
         CheckConstraint("barrel_rate >= 0 AND barrel_rate <= 1", name="ck_batter_season_stats_barrel"),
+        CheckConstraint("swing_rate >= 0 AND swing_rate <= 1", name="ck_batter_season_stats_swing_rate"),
+        CheckConstraint("whiff_rate >= 0 AND whiff_rate <= 1", name="ck_batter_season_stats_whiff_rate"),
+        CheckConstraint("contact_rate >= 0 AND contact_rate <= 1", name="ck_batter_season_stats_contact_rate"),
+        CheckConstraint("chase_rate >= 0 AND chase_rate <= 1", name="ck_batter_season_stats_chase_rate"),
+        CheckConstraint("zone_swing_rate >= 0 AND zone_swing_rate <= 1", name="ck_batter_season_stats_zone_swing_rate"),
+        CheckConstraint("zone_contact_rate >= 0 AND zone_contact_rate <= 1", name="ck_batter_season_stats_zone_contact_rate"),
     )
 
     id = Column(String(36), primary_key=True, default=_new_id)
@@ -84,7 +91,7 @@ class BatterSeasonStats(Base):
     chase_rate = Column(Numeric(7, 6), nullable=True)
     zone_swing_rate = Column(Numeric(7, 6), nullable=True)
     zone_contact_rate = Column(Numeric(7, 6), nullable=True)
-    calculated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    calculated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
 
 
 class PitcherSeasonStats(Base):
@@ -95,6 +102,9 @@ class PitcherSeasonStats(Base):
         UniqueConstraint("player_season_id", name="uq_pitcher_season_stats_player_season"),
         CheckConstraint("hard_hit_rate_allowed >= 0 AND hard_hit_rate_allowed <= 1", name="ck_pitcher_season_stats_hhr"),
         CheckConstraint("barrel_rate_allowed >= 0 AND barrel_rate_allowed <= 1", name="ck_pitcher_season_stats_barrel"),
+        CheckConstraint("whiff_rate >= 0 AND whiff_rate <= 1", name="ck_pitcher_season_stats_whiff_rate"),
+        CheckConstraint("chase_rate >= 0 AND chase_rate <= 1", name="ck_pitcher_season_stats_chase_rate"),
+        CheckConstraint("called_strike_rate >= 0 AND called_strike_rate <= 1", name="ck_pitcher_season_stats_called_strike_rate"),
     )
 
     id = Column(String(36), primary_key=True, default=_new_id)
@@ -120,7 +130,7 @@ class PitcherSeasonStats(Base):
     called_strike_rate = Column(Numeric(7, 6), nullable=True)
     hard_hit_rate_allowed = Column(Numeric(7, 6), nullable=True)
     barrel_rate_allowed = Column(Numeric(7, 6), nullable=True)
-    calculated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    calculated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
 
 
 class BatterZoneProfile(Base):
@@ -137,6 +147,11 @@ class BatterZoneProfile(Base):
         ),
         CheckConstraint("zone >= 1 AND zone <= 9", name="ck_batter_zone_profiles_zone_range"),
         CheckConstraint("sample_size >= 0", name="ck_batter_zone_profiles_sample_size"),
+        CheckConstraint("sample_size = pitches_seen", name="ck_batter_zone_profiles_denom"),
+        CheckConstraint("contact_rate >= 0 AND contact_rate <= 1", name="ck_batter_zone_profiles_contact_rate"),
+        CheckConstraint("whiff_rate >= 0 AND whiff_rate <= 1", name="ck_batter_zone_profiles_whiff_rate"),
+        CheckConstraint("hard_hit_rate >= 0 AND hard_hit_rate <= 1", name="ck_batter_zone_profiles_hhr_rate"),
+        CheckConstraint("barrel_rate >= 0 AND barrel_rate <= 1", name="ck_batter_zone_profiles_barrel_rate"),
     )
 
     id = Column(String(36), primary_key=True, default=_new_id)
@@ -167,7 +182,7 @@ class BatterZoneProfile(Base):
     hard_hit_rate = Column(Numeric(7, 6), nullable=True)
     barrel_rate = Column(Numeric(7, 6), nullable=True)
     sample_size = Column(Integer, nullable=False, default=0)  # alias V1: pitches_seen
-    calculated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    calculated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
 
 
 class PitcherZoneProfile(Base):
@@ -184,6 +199,11 @@ class PitcherZoneProfile(Base):
         ),
         CheckConstraint("zone >= 1 AND zone <= 9", name="ck_pitcher_zone_profiles_zone_range"),
         CheckConstraint("sample_size >= 0", name="ck_pitcher_zone_profiles_sample_size"),
+        CheckConstraint("sample_size = pitches", name="ck_pitcher_zone_profiles_denom"),
+        CheckConstraint("whiff_rate >= 0 AND whiff_rate <= 1", name="ck_pitcher_zone_profiles_whiff_rate"),
+        CheckConstraint("called_strike_rate >= 0 AND called_strike_rate <= 1", name="ck_pitcher_zone_profiles_called_strike_rate"),
+        CheckConstraint("hard_hit_rate_allowed >= 0 AND hard_hit_rate_allowed <= 1", name="ck_pitcher_zone_profiles_hhr_rate"),
+        CheckConstraint("barrel_rate_allowed >= 0 AND barrel_rate_allowed <= 1", name="ck_pitcher_zone_profiles_barrel_rate"),
     )
 
     id = Column(String(36), primary_key=True, default=_new_id)
@@ -212,7 +232,7 @@ class PitcherZoneProfile(Base):
     hard_hit_rate_allowed = Column(Numeric(7, 6), nullable=True)
     barrel_rate_allowed = Column(Numeric(7, 6), nullable=True)
     sample_size = Column(Integer, nullable=False, default=0)  # alias V1: pitches
-    calculated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    calculated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
 
 
 class BatterPitchFamilyProfile(Base):
@@ -225,6 +245,11 @@ class BatterPitchFamilyProfile(Base):
             name="uq_batter_pitch_family_profiles_dimensions",
         ),
         CheckConstraint("sample_size >= 0", name="ck_batter_pitch_family_profiles_sample_size"),
+        CheckConstraint("sample_size = pitches_seen", name="ck_batter_pitch_family_profiles_denom"),
+        CheckConstraint("contact_rate >= 0 AND contact_rate <= 1", name="ck_batter_pitch_family_profiles_contact_rate"),
+        CheckConstraint("whiff_rate >= 0 AND whiff_rate <= 1", name="ck_batter_pitch_family_profiles_whiff_rate"),
+        CheckConstraint("hard_hit_rate >= 0 AND hard_hit_rate <= 1", name="ck_batter_pitch_family_profiles_hhr_rate"),
+        CheckConstraint("barrel_rate >= 0 AND barrel_rate <= 1", name="ck_batter_pitch_family_profiles_barrel_rate"),
     )
 
     id = Column(String(36), primary_key=True, default=_new_id)
@@ -250,7 +275,7 @@ class BatterPitchFamilyProfile(Base):
     hard_hit_rate = Column(Numeric(7, 6), nullable=True)
     barrel_rate = Column(Numeric(7, 6), nullable=True)
     sample_size = Column(Integer, nullable=False, default=0)  # pitches_seen
-    calculated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    calculated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
 
 
 class PitcherPitchProfile(Base):
@@ -264,6 +289,13 @@ class PitcherPitchProfile(Base):
         ),
         CheckConstraint("pitch_count >= 0", name="ck_pitcher_pitch_profiles_pitch_count"),
         CheckConstraint("usage_rate >= 0 AND usage_rate <= 1", name="ck_pitcher_pitch_profiles_usage"),
+        CheckConstraint("sample_size >= 0", name="ck_pitcher_pitch_profiles_sample_size"),
+        CheckConstraint("sample_size = pitch_count", name="ck_pitcher_pitch_profiles_denom"),
+        CheckConstraint("whiff_rate >= 0 AND whiff_rate <= 1", name="ck_pitcher_pitch_profiles_whiff_rate"),
+        CheckConstraint("chase_rate >= 0 AND chase_rate <= 1", name="ck_pitcher_pitch_profiles_chase_rate"),
+        CheckConstraint("called_strike_rate >= 0 AND called_strike_rate <= 1", name="ck_pitcher_pitch_profiles_called_strike_rate"),
+        CheckConstraint("hard_hit_rate_allowed >= 0 AND hard_hit_rate_allowed <= 1", name="ck_pitcher_pitch_profiles_hhr_rate"),
+        CheckConstraint("barrel_rate_allowed >= 0 AND barrel_rate_allowed <= 1", name="ck_pitcher_pitch_profiles_barrel_rate"),
     )
 
     id = Column(String(36), primary_key=True, default=_new_id)
@@ -278,6 +310,7 @@ class PitcherPitchProfile(Base):
         Enum(SplitHand, name="sorthand", create_type=False), nullable=False, default=SplitHand.ALL, index=True
     )
     pitch_count = Column(Integer, nullable=False, default=0)
+    sample_size = Column(Integer, nullable=False, default=0)  # alias V1: pitch_count
     usage_rate = Column(Numeric(7, 6), nullable=True)
     avg_velocity = Column(Numeric(5, 2), nullable=True)
     max_velocity = Column(Numeric(5, 2), nullable=True)
@@ -296,7 +329,7 @@ class PitcherPitchProfile(Base):
     xwoba_allowed = Column(Numeric(6, 5), nullable=True)
     hard_hit_rate_allowed = Column(Numeric(7, 6), nullable=True)
     barrel_rate_allowed = Column(Numeric(7, 6), nullable=True)
-    calculated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    calculated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
 
 
 class BatterHandednessSplit(Base):
@@ -306,6 +339,10 @@ class BatterHandednessSplit(Base):
     __table_args__ = (
         UniqueConstraint("player_season_id", "pitcher_hand", name="uq_batter_handedness_splits_hand"),
         CheckConstraint("hard_hit_rate >= 0 AND hard_hit_rate <= 1", name="ck_batter_handedness_splits_hhr"),
+        CheckConstraint("sample_size >= 0", name="ck_batter_handedness_splits_sample_size"),
+        CheckConstraint("sample_size = pa", name="ck_batter_handedness_splits_denom"),
+        CheckConstraint("contact_rate >= 0 AND contact_rate <= 1", name="ck_batter_handedness_splits_contact_rate"),
+        CheckConstraint("whiff_rate >= 0 AND whiff_rate <= 1", name="ck_batter_handedness_splits_whiff_rate"),
     )
 
     id = Column(String(36), primary_key=True, default=_new_id)
@@ -316,6 +353,7 @@ class BatterHandednessSplit(Base):
         Enum(ThrowHand, name="throwhand", create_type=False), nullable=False, index=True
     )
     pa = Column(Integer, nullable=False, default=0)
+    sample_size = Column(Integer, nullable=False, default=0)  # alias V1: pa
     pitches_seen = Column(Integer, nullable=False, default=0)
     swings = Column(Integer, nullable=False, default=0)
     whiffs = Column(Integer, nullable=False, default=0)
@@ -330,7 +368,7 @@ class BatterHandednessSplit(Base):
     contact_rate = Column(Numeric(7, 6), nullable=True)
     whiff_rate = Column(Numeric(7, 6), nullable=True)
     hard_hit_rate = Column(Numeric(7, 6), nullable=True)
-    calculated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    calculated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
 
 
 class PitcherHandednessSplit(Base):
@@ -341,6 +379,8 @@ class PitcherHandednessSplit(Base):
         UniqueConstraint("player_season_id", "batter_side", name="uq_pitcher_handedness_splits_side"),
         CheckConstraint("whiff_rate >= 0 AND whiff_rate <= 1", name="ck_pitcher_handedness_splits_whiff"),
         CheckConstraint("hard_hit_rate_allowed >= 0 AND hard_hit_rate_allowed <= 1", name="ck_pitcher_handedness_splits_hhr"),
+        CheckConstraint("sample_size >= 0", name="ck_pitcher_handedness_splits_sample_size"),
+        CheckConstraint("sample_size = batters_faced", name="ck_pitcher_handedness_splits_denom"),
     )
 
     id = Column(String(36), primary_key=True, default=_new_id)
@@ -348,9 +388,10 @@ class PitcherHandednessSplit(Base):
         String(36), ForeignKey("player_seasons.id"), nullable=False, index=True
     )
     batter_side = Column(
-        Enum(ThrowHand, name="throwhand", create_type=False), nullable=False, index=True
+        Enum(BatterSide, name="batter_side_enum", create_type=False), nullable=False, index=True
     )
     batters_faced = Column(Integer, nullable=False, default=0)
+    sample_size = Column(Integer, nullable=False, default=0)  # alias V1: batters_faced
     pitches = Column(Integer, nullable=False, default=0)
     swings = Column(Integer, nullable=False, default=0)
     whiffs = Column(Integer, nullable=False, default=0)
@@ -362,7 +403,7 @@ class PitcherHandednessSplit(Base):
     xwoba_allowed = Column(Numeric(6, 5), nullable=True)
     whiff_rate = Column(Numeric(7, 6), nullable=True)
     hard_hit_rate_allowed = Column(Numeric(7, 6), nullable=True)
-    calculated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    calculated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
 
 
 class BatterPitcherMatchup(Base):
@@ -379,6 +420,8 @@ class BatterPitcherMatchup(Base):
             name="uq_batter_pitcher_matchups_window",
         ),
         CheckConstraint("hard_hit_rate >= 0 AND hard_hit_rate <= 1", name="ck_batter_pitcher_matchups_hhr"),
+        CheckConstraint("sample_size >= 0", name="ck_batter_pitcher_matchups_sample_size"),
+        CheckConstraint("sample_size = plate_appearances", name="ck_batter_pitcher_matchups_denom"),
     )
 
     id = Column(String(36), primary_key=True, default=_new_id)
@@ -386,7 +429,7 @@ class BatterPitcherMatchup(Base):
     pitcher_id = Column(String(36), ForeignKey("players.id"), nullable=False, index=True)
     season_start = Column(SmallInteger, nullable=False, index=True)
     season_end = Column(SmallInteger, nullable=False, index=True)
-    data_end_date = Column(DateTime(timezone=True), nullable=False, index=True)
+    data_end_date = Column(Date, nullable=False, index=True)
     plate_appearances = Column(Integer, nullable=False, default=0)
     at_bats = Column(Integer, nullable=False, default=0)
     pitches = Column(Integer, nullable=False, default=0)
@@ -405,4 +448,4 @@ class BatterPitcherMatchup(Base):
     xwoba = Column(Numeric(6, 5), nullable=True)
     hard_hit_rate = Column(Numeric(7, 6), nullable=True)
     sample_size = Column(Integer, nullable=False, default=0)  # convención V1: plate_appearances
-    calculated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    calculated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)

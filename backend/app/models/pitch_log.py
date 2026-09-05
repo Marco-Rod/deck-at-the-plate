@@ -9,7 +9,6 @@ log ocurre DESPUÉS de cerrar la resolución del pitch (nunca se almacenan
 secretos ni la información del rival antes de resolver).
 """
 import uuid
-from datetime import datetime
 
 from sqlalchemy import (
     Boolean,
@@ -26,6 +25,7 @@ from sqlalchemy import (
 )
 from app.database import Base
 from app.core.enums import BatterApproach, PitchFamily
+from app.core.time import utcnow
 
 
 def _new_id() -> str:
@@ -87,4 +87,4 @@ class PitchEventLog(Base):
     rng_value = Column(Numeric(10, 9), nullable=True)
     result = Column(String(30), nullable=False, index=True)
     engine_version = Column(String(30), nullable=False, index=True)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, index=True)

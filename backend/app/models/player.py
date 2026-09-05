@@ -12,7 +12,6 @@ Convenciones (ver referencias/nuevos_modelos.docx):
     - Fechas: Date para cobertura; DateTime(timezone=True) para timestamps operativos.
 """
 import uuid
-from datetime import datetime
 
 from sqlalchemy import (
     Boolean,
@@ -29,6 +28,7 @@ from sqlalchemy import (
 )
 from app.database import Base
 from app.core.enums import Handedness, ThrowHand
+from app.core.time import utcnow
 
 
 def _new_id() -> str:
@@ -51,9 +51,9 @@ class Player(Base):
     bats = Column(Enum(Handedness, name="handedness", create_type=False), nullable=True, index=True)
     throws = Column(Enum(ThrowHand, name="throwhand", create_type=False), nullable=True, index=True)
     is_active = Column(Boolean, nullable=False, default=True, index=True)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
     updated_at = Column(
-        DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow
     )
 
 
@@ -94,9 +94,9 @@ class PlayerSeason(Base):
     outs_recorded = Column(Integer, nullable=False, default=0)
     # IP = outs_recorded / 3. Se prefieren outs para evitar decimales.
     import_run_id = Column(String(36), ForeignKey("data_import_runs.id"), nullable=True)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
     updated_at = Column(
-        DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow
     )
 
 
@@ -108,7 +108,18 @@ class PlayerTeamStint(Base):
 
     __tablename__ = "player_team_stints"
     __table_args__ = (
+        UniqueConstraint(
+            "player_id",
+            "season",
+            "team_id",
+            "start_date",
+            name="uq_player_team_stint",
+        ),
         CheckConstraint("games >= 0", name="ck_player_team_stints_games_non_negative"),
+        CheckConstraint(
+            "end_date IS NULL OR end_date >= start_date",
+            name="ck_player_team_stint_dates",
+        ),
     )
 
     id = Column(String(36), primary_key=True, default=_new_id)

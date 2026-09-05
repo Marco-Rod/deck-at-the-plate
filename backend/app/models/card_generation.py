@@ -13,7 +13,6 @@ Rules:
       versionada. Este modelo solo persiste el resultado + metadata.
 """
 import uuid
-from datetime import datetime
 
 from sqlalchemy import (
     CheckConstraint,
@@ -29,6 +28,7 @@ from sqlalchemy import (
 )
 from app.database import Base
 from app.models.card import CardRarity
+from app.core.time import utcnow
 
 
 def _new_id() -> str:
@@ -78,4 +78,4 @@ class CardGenerationProfile(Base):
     repertoire_payload = Column(JSON, nullable=True)
     # Percentiles/inputs/parámetros suficientes para explicar el cálculo.
     calculation_metadata = Column(JSON, nullable=False, default=dict)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, index=True)
