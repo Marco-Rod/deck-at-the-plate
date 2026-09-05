@@ -18,6 +18,6 @@ export function resetSessionStores(): void {
   useRosterStore.getState().reset()
   useLobbyStore.getState().reset()
   useGameStore.getState().resetGame()
-  clearPersistedGameState()
+  void clearPersistedGameState()
   clearGameSession()
 }

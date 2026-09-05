@@ -11,6 +11,7 @@ import { useAuthStore } from '@/features/auth/store'
 import * as gameApi from '@/features/game/api'
 import type {
   InitGameStatePayload,
+  GameStateWS,
   PitcherChangedPayload,
   PlayerRole,
   SwingType,
@@ -18,7 +19,10 @@ import type {
 
 export interface GameSocketHandlers {
   onInit?: (payload: InitGameStatePayload) => void
-  onPlayResolved?: (payload: Parameters<typeof parseStateData>[0]) => void
+  onPlayResolved?: (
+    payload: Parameters<typeof parseStateData>[0],
+    previousGame: GameStateWS | null,
+  ) => void
   onPitcherChanged?: (payload: PitcherChangedPayload) => void
   onError?: (message: string) => void
 }
@@ -40,10 +44,12 @@ export function useGameSocket(gameId: string, handlers: GameSocketHandlers = {})
   useEffect(() => {
     if (!gameId || !token || !userId) return
 
-    const recovered = recoverGameState(gameId, userId)
-    if (recovered) {
-      useGameStore.getState().setGame(recovered)
-    }
+    let active = true
+    void recoverGameState(gameId, userId).then((recovered) => {
+      if (active && recovered && !useGameStore.getState().game) {
+        useGameStore.getState().setGame(recovered)
+      }
+    })
 
     gameSocketClient.connect(gameId, token, {
       onStatus: (connected, mode) => {
@@ -56,7 +62,7 @@ export function useGameSocket(gameId: string, handlers: GameSocketHandlers = {})
           case 'INIT_GAME_STATE': {
             const newState = parseStateData(message)
             store.setGame(newState)
-            persistGameState(newState, gameId, userId)
+            void persistGameState(newState, gameId, userId)
             handlersRef.current.onInit?.(message)
             break
           }
@@ -66,11 +72,12 @@ export function useGameSocket(gameId: string, handlers: GameSocketHandlers = {})
           case 'PLAY_RESOLVED':
           case 'STEAL_RESOLVED': {
             if (isPlayResultPayload(message)) {
+              const previousGame = store.game
               const newState = parseStateData(message)
               store.setGame(newState)
               store.setLastPlayResult(message)
-              persistGameState(newState, gameId, userId)
-              handlersRef.current.onPlayResolved?.(message)
+              void persistGameState(newState, gameId, userId)
+              handlersRef.current.onPlayResolved?.(message, previousGame)
             }
             break
           }
@@ -90,13 +97,14 @@ export function useGameSocket(gameId: string, handlers: GameSocketHandlers = {})
     })
 
     return () => {
+      active = false
       gameSocketClient.disconnect()
     }
   }, [gameId, token, userId])
 
   useEffect(() => {
     if (game?.isGameOver) {
-      clearPersistedGameState()
+      void clearPersistedGameState()
     }
   }, [game?.isGameOver])
 

@@ -1,8 +1,5 @@
 import { lazy } from 'react'
 
-export const AuthPage = lazy(() =>
-  import('../features/auth/pages/AuthPage').then((m) => ({ default: m.AuthPage })),
-)
 export const OnboardingPage = lazy(() =>
   import('../features/onboarding/pages/OnboardingPage').then((m) => ({
     default: m.OnboardingPage,

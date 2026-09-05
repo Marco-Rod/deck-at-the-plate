@@ -1,4 +1,5 @@
 import type { GameStateWS } from '@/shared/api/types'
+import { gameStateKey, offlineDb } from '@/offline/db'
 
 const GAME_STATE_KEY = 'game_state_persistence'
 const GAME_METADATA_KEY = 'game_metadata'
@@ -28,14 +29,14 @@ function sanitizePersistedState(stateData: Record<string, unknown>): Record<stri
   return sanitized
 }
 
-export function persistGameState(
+export async function persistGameState(
   gameState: GameStateWS | null,
   gameId: string,
   userId: string,
-): void {
+): Promise<void> {
   if (!gameState) return
   try {
-    const dataToSave = {
+    const dataToSave: GameStateWS = {
       gameId: gameState.gameId,
       currentInning: gameState.currentInning,
       isTopInning: gameState.isTopInning,
@@ -58,65 +59,86 @@ export function persistGameState(
       inning_runs: gameState.inning_runs ?? {},
       state_data: sanitizePersistedState(gameState.state_data ?? {}),
     }
-    localStorage.setItem(GAME_STATE_KEY, JSON.stringify(dataToSave))
-    const metadata: GameMetadata = {
+    await offlineDb.gameState.put({
+      key: gameStateKey(gameId, userId),
       gameId,
       userId,
-      savedAt: Date.now(),
-      lastInning: gameState.currentInning,
-    }
-    localStorage.setItem(GAME_METADATA_KEY, JSON.stringify(metadata))
+      updatedAt: Date.now(),
+      state: dataToSave,
+    })
   } catch (err) {
     console.error('[PERSISTENCE] Error guardando gameState:', err)
   }
 }
 
-export function recoverGameState(gameId: string, userId: string): GameStateWS | null {
+function recoverLegacyGameState(gameId: string, saved: Partial<GameStateWS>): GameStateWS {
+  const stateData = saved.state_data ?? {}
+  return {
+    gameId: saved.gameId ?? gameId,
+    currentInning: saved.currentInning ?? 1,
+    isTopInning: saved.isTopInning ?? true,
+    homeScore: saved.homeScore ?? 0,
+    awayScore: saved.awayScore ?? 0,
+    balls: saved.balls ?? 0,
+    strikes: saved.strikes ?? 0,
+    outs: saved.outs ?? 0,
+    runners: saved.runners ?? { b1: null, b2: null, b3: null },
+    totalInnings:
+      typeof stateData.total_innings === 'number' ? stateData.total_innings : 9,
+    activePitcherId: saved.activePitcherId,
+    activeBatterId: saved.activeBatterId,
+    isGameOver: saved.isGameOver,
+    winnerMessage: saved.winnerMessage,
+    rivalTeamName: saved.rivalTeamName,
+    userRole: saved.userRole ?? 'HOME',
+    state_data: sanitizePersistedState(stateData),
+    pitcher_strikeouts: saved.pitcher_strikeouts ?? {},
+    batter_stats: saved.batter_stats ?? {},
+    homeHits: saved.homeHits ?? 0,
+    awayHits: saved.awayHits ?? 0,
+    inning_runs: saved.inning_runs ?? {},
+  }
+}
+
+async function migrateLegacyGameState(gameId: string, userId: string): Promise<GameStateWS | null> {
+  const metadataStr = localStorage.getItem(GAME_METADATA_KEY)
+  const savedStr = localStorage.getItem(GAME_STATE_KEY)
+  if (!metadataStr || !savedStr) return null
+
+  const metadata = JSON.parse(metadataStr) as GameMetadata
+  if (metadata.gameId !== gameId || metadata.userId !== userId) {
+    localStorage.removeItem(GAME_STATE_KEY)
+    localStorage.removeItem(GAME_METADATA_KEY)
+    return null
+  }
+
+  const recovered = recoverLegacyGameState(
+    gameId,
+    JSON.parse(savedStr) as Partial<GameStateWS>,
+  )
+  await persistGameState(recovered, gameId, userId)
+  localStorage.removeItem(GAME_STATE_KEY)
+  localStorage.removeItem(GAME_METADATA_KEY)
+  return recovered
+}
+
+export async function recoverGameState(
+  gameId: string,
+  userId: string,
+): Promise<GameStateWS | null> {
   try {
-    const metadataStr = localStorage.getItem(GAME_METADATA_KEY)
-    if (!metadataStr) return null
-    const metadata: GameMetadata = JSON.parse(metadataStr)
-    if (metadata.gameId !== gameId || metadata.userId !== userId) {
-      clearPersistedGameState()
-      return null
-    }
-    const savedStr = localStorage.getItem(GAME_STATE_KEY)
-    if (!savedStr) return null
-    const saved = JSON.parse(savedStr)
-    const recovered: GameStateWS = {
-      gameId: saved.gameId ?? gameId,
-      currentInning: saved.currentInning,
-      isTopInning: saved.isTopInning,
-      homeScore: saved.homeScore,
-      awayScore: saved.awayScore,
-      balls: saved.balls,
-      strikes: saved.strikes,
-      outs: saved.outs,
-      runners: saved.runners,
-      totalInnings: saved.state_data?.total_innings ?? 9,
-      activePitcherId: saved.activePitcherId,
-      activeBatterId: saved.activeBatterId,
-      isGameOver: saved.isGameOver,
-      winnerMessage: saved.winnerMessage,
-      rivalTeamName: saved.rivalTeamName,
-      userRole: saved.userRole ?? 'HOME',
-      state_data: saved.state_data,
-      pitcher_strikeouts: saved.pitcher_strikeouts ?? {},
-      batter_stats: saved.batter_stats ?? {},
-      homeHits: saved.homeHits ?? 0,
-      awayHits: saved.awayHits ?? 0,
-      inning_runs: saved.inning_runs ?? {},
-    }
-    return recovered
+    const stored = await offlineDb.gameState.get(gameStateKey(gameId, userId))
+    if (stored) return stored.state
+    return await migrateLegacyGameState(gameId, userId)
   } catch (err) {
     console.error('[PERSISTENCE] Error recuperando gameState:', err)
-    clearPersistedGameState()
     return null
   }
 }
 
-export function clearPersistedGameState(): void {
+export async function clearPersistedGameState(): Promise<void> {
   try {
+    await offlineDb.gameState.clear()
     localStorage.removeItem(GAME_STATE_KEY)
     localStorage.removeItem(GAME_METADATA_KEY)
   } catch (err) {

@@ -17,10 +17,10 @@ export function useGamePersistence(
   useEffect(() => {
     if (!enabled || !game || !gameId || !userId) return
     if (game.isGameOver) {
-      clearPersistedGameState()
+      void clearPersistedGameState()
       return
     }
-    persistGameState(game, gameId, userId)
+    void persistGameState(game, gameId, userId)
   }, [game, gameId, userId, enabled])
 }
 

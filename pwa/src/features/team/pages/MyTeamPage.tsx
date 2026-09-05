@@ -49,7 +49,7 @@ const FIELD_SECTORS: Array<{ nameKey: string; slots: FieldSlot[] }> = [
   },
 ]
 
-type SavingStatus = 'saving' | 'saved' | 'error' | null
+type SavingStatus = 'saving' | 'saved' | 'queued' | 'error' | null
 
 export function MyTeamPage() {
   const { t } = useTranslation()
@@ -112,8 +112,8 @@ export function MyTeamPage() {
     setLineup(next)
     setSavingStatus('saving')
     try {
-      await updateLineup(next)
-      setSavingStatus('saved')
+      const result = await updateLineup(next)
+      setSavingStatus(result)
       setTimeout(() => setSavingStatus(null), 2000)
     } catch {
       setSavingStatus('error')
@@ -188,16 +188,23 @@ export function MyTeamPage() {
               </span>
               {savingStatus ? (
                 <span
+                  role={savingStatus === 'error' ? 'alert' : 'status'}
+                  aria-live={savingStatus === 'error' ? 'assertive' : 'polite'}
+                  aria-atomic="true"
                   className={`rounded border px-1.5 py-0.5 font-vintage text-[9px] uppercase tracking-widest ${
                     savingStatus === 'error'
                       ? 'animate-pulse border-red-400 text-red-400'
-                      : 'animate-pulse border-koshien-gold bg-koshien-green text-koshien-gold'
+                      : savingStatus === 'queued'
+                        ? 'border-amber-400 bg-koshien-dark text-amber-300'
+                        : 'animate-pulse border-koshien-gold bg-koshien-green text-koshien-gold'
                   }`}
                 >
                   {savingStatus === 'saving'
                     ? t('team.saving')
                     : savingStatus === 'saved'
                       ? t('team.saved')
+                      : savingStatus === 'queued'
+                        ? t('team.queued')
                       : t('team.save_error')}
                 </span>
               ) : null}
@@ -254,6 +261,7 @@ export function MyTeamPage() {
                       <button
                         key={slot.id}
                         type="button"
+                        aria-pressed={isSelected}
                         onClick={() => setActiveSlot(slot.id)}
                         className={`flex min-h-[88px] min-w-[160px] max-w-[220px] flex-1 flex-col justify-between rounded border-2 p-2.5 text-left backdrop-blur-md transition-all focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-koshien-gold ${
                           isSelected
@@ -304,14 +312,14 @@ export function MyTeamPage() {
             <span className="block font-vintage text-[10px] uppercase tracking-widest text-koshien-cream/60">
               {t('team.candidates_for')}
             </span>
-            <h3 className="font-sports text-xl uppercase text-koshien-gold">
+            <h2 className="font-sports text-xl uppercase text-koshien-gold">
               {t('team.position')}: {activeSlot}
-            </h3>
+            </h2>
           </div>
 
           <div className="max-h-[50vh] space-y-2 overflow-y-auto pr-1">
             {availableForSelectedSlot.length === 0 ? (
-              <p className="py-8 text-center font-vintage text-xs text-koshien-cream/50">
+              <p className="py-8 text-center font-vintage text-xs text-koshien-cream/70">
                 {t('team.no_candidates', { pos: activeSlot })}
               </p>
             ) : (
@@ -328,7 +336,7 @@ export function MyTeamPage() {
         </aside>
       </main>
 
-      <footer className="mt-4 text-center font-vintage text-[9px] uppercase tracking-widest text-koshien-border sm:text-[10px]">
+      <footer className="mt-4 text-center font-vintage text-[9px] uppercase tracking-widest text-koshien-muted sm:text-[10px]">
         KOSHIEN LINEUP & FIELD ENGINE • 2026
       </footer>
     </motion.div>

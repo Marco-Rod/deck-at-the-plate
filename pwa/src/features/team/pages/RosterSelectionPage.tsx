@@ -8,6 +8,8 @@ import { useLobbyStore } from '@/features/lobby/store'
 import { createGame } from '@/features/lobby/api'
 import { bestCardFor, findCard, findFreeSpot } from '@/features/team/lib/cardHelpers'
 import { Button, Spinner } from '@/shared/ui'
+import { OnlineRequiredHint } from '@/offline/OnlineRequiredHint'
+import { useOnlineStatus } from '@/offline/useOnlineStatus'
 import type { PlayerCard as PlayerCardData } from '@/shared/api/types'
 
 const BATTING_SPOTS = ['1', '2', '3', '4', '5', '6', '7', '8', '9']
@@ -19,6 +21,7 @@ export function RosterSelectionPage() {
   const inventory = useRosterStore(selectInventory)
   const { load, hasLoaded, loading } = useRosterStore()
   const config = useLobbyStore((s) => s.config)
+  const online = useOnlineStatus()
 
   const [lineup, setLineup] = useState<Record<string, string>>({})
   const [selectedPitcherId, setSelectedPitcherId] = useState<string | null>(null)
@@ -94,6 +97,10 @@ export function RosterSelectionPage() {
 
   const handleConfirm = async () => {
     if (!user) return
+    if (!online) {
+      setError(t('offline.action_requires_connection'))
+      return
+    }
 
     if (!config.rivalId) {
       setError(t('roster.error_no_rival'))
@@ -160,15 +167,17 @@ export function RosterSelectionPage() {
           </h2>
           <Button
             size="sm"
-            disabled={submitting}
+            disabled={submitting || !online}
+            aria-describedby={!online ? 'roster-online-required' : undefined}
             onClick={handleConfirm}
             className="min-w-44 border border-koshien-gold bg-koshien-green px-4 font-sports uppercase text-koshien-gold shadow-[0_0_14px_rgba(197,160,89,0.2)] hover:bg-koshien-light-green"
           >
             {submitting ? t('roster.creating') : t('roster.start')}
           </Button>
+          <OnlineRequiredHint id="roster-online-required" visible={!online} />
         </div>
         {error ? (
-          <p className="mb-3 rounded border border-red-500/40 bg-red-950/30 px-3 py-2 font-vintage text-xs uppercase text-red-400">
+          <p role="alert" className="mb-3 rounded border border-red-500/40 bg-red-950/30 px-3 py-2 font-vintage text-xs uppercase text-red-400">
             {error}
           </p>
         ) : null}
@@ -220,6 +229,8 @@ export function RosterSelectionPage() {
             return (
               <button
                 key={item.inventory_id}
+                type="button"
+                aria-pressed={inLineup}
                 onClick={() => {
                   if (inLineup && spot) {
                     const next = { ...lineup }
@@ -230,7 +241,7 @@ export function RosterSelectionPage() {
                     if (freeSpot) assign(freeSpot, item.card)
                   }
                 }}
-                className={`w-full rounded-lg border-2 px-4 py-3 text-left transition-colors ${
+                className={`w-full rounded-lg border-2 px-4 py-3 text-left transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-koshien-gold ${
                   inLineup
                     ? 'border-koshien-gold bg-koshien-gold/20'
                     : 'border-koshien-border bg-koshien-dark/60 hover:border-koshien-gold/50'
@@ -281,8 +292,10 @@ export function RosterSelectionPage() {
               return (
                 <button
                   key={item.inventory_id}
+                  type="button"
+                  aria-pressed={isSelected}
                   onClick={() => setSelectedPitcherId(item.card.id)}
-                  className={`rounded-lg border-2 p-3 text-center transition-colors ${
+                  className={`rounded-lg border-2 p-3 text-center transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-koshien-gold ${
                     isSelected
                       ? 'border-koshien-gold bg-koshien-gold/20'
                       : 'border-koshien-border bg-koshien-dark/60 hover:border-koshien-gold/50'

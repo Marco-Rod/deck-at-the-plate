@@ -3,8 +3,8 @@ import type { RouteObject } from 'react-router-dom'
 import { RootLayout } from './RootLayout'
 import { ProtectedRoute } from './ProtectedRoute'
 import { RootRedirect } from './RootRedirect'
+import { AuthPage } from '@/features/auth/pages/AuthPage'
 import {
-  AuthPage,
   CardShowcasePage,
   LobbyPage,
   MyTeamPage,

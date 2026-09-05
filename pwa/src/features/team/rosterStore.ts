@@ -4,7 +4,9 @@ import type {
   LineupResponse,
   TeamStatsResponse,
 } from '@/shared/api/types'
-import { getInventory, getLineup, getTeamStats, saveLineup } from './api'
+import { useAuthStore } from '@/features/auth/store'
+import { saveLineupOfflineFirst } from '@/offline/sync'
+import { getInventory, getLineup, getTeamStats } from './api'
 
 interface RosterState {
   inventory: InventoryItem[] | null
@@ -14,7 +16,8 @@ interface RosterState {
   loading: boolean
   error: string | null
   load: () => Promise<void>
-  updateLineup: (slots: Record<string, string>) => Promise<void>
+  refreshLineup: () => Promise<void>
+  updateLineup: (slots: Record<string, string>) => Promise<'saved' | 'queued'>
   reset: () => void
 }
 
@@ -40,9 +43,17 @@ export const useRosterStore = create<RosterState>((set, get) => ({
     }
   },
   updateLineup: async (slots) => {
-    const payload = { name: get().lineup?.name ?? 'Lineup Principal', slots }
-    const saved = await saveLineup(payload)
-    set({ lineup: saved })
+    const currentLineup = get().lineup
+    const payload = { name: currentLineup?.name ?? 'Lineup Principal', slots }
+    const userId = useAuthStore.getState().user?.userId
+    if (!userId) throw new Error('No hay un usuario autenticado para guardar el lineup.')
+    const result = await saveLineupOfflineFirst(userId, payload, currentLineup?.slots ?? {})
+    set({ lineup: result.lineup })
+    return result.queued ? 'queued' : 'saved'
+  },
+  refreshLineup: async () => {
+    const lineup = await getLineup()
+    set({ lineup })
   },
   reset: () =>
     set({ inventory: null, lineup: null, stats: null, hasLoaded: false, loading: false, error: null }),
