@@ -58,3 +58,21 @@ BATTER_POWER_STABILIZATIONS = {
     "hard_hit_rate": HARD_HIT_RATE_STABILIZATION,
     "slg": SLG_STABILIZATION,
 }
+
+CHASE_RATE_STABILIZATION = 50  # chase opportunities
+WALK_RATE_STABILIZATION = 40  # PA
+STRIKEOUT_RATE_STABILIZATION = 40  # PA
+
+BATTER_VISION_WEIGHTS = {
+    "chase_rate": 0.40,
+    "whiff_rate": 0.30,
+    "walk_rate": 0.20,
+    "strikeout_rate": 0.10,
+}
+
+BATTER_VISION_STABILIZATIONS = {
+    "chase_rate": CHASE_RATE_STABILIZATION,
+    "whiff_rate": WHIFF_RATE_STABILIZATION,
+    "walk_rate": WALK_RATE_STABILIZATION,
+    "strikeout_rate": STRIKEOUT_RATE_STABILIZATION,
+}
