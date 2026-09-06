@@ -76,3 +76,7 @@ BATTER_VISION_STABILIZATIONS = {
     "walk_rate": WALK_RATE_STABILIZATION,
     "strikeout_rate": STRIKEOUT_RATE_STABILIZATION,
 }
+
+# Temporal hasta disponer de datos situacionales reproducibles para Clutch.
+CLUTCH_NEUTRAL_RATING = 70
+CLUTCH_SOURCE = "NEUTRAL_BASELINE_PENDING_SITUATIONAL_DATA"
