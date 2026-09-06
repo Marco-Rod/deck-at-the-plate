@@ -20,6 +20,7 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     JSON,
     SmallInteger,
@@ -44,6 +45,12 @@ class CardGenerationProfile(Base):
             "player_season_id", "rating_model_version",
             name="uq_card_generation_profiles_season_version",
         ),
+        ForeignKeyConstraint(
+            ["player_ratings_id", "rating_model_version"],
+            ["player_ratings.id", "player_ratings.rating_model_version"],
+            name="fk_card_generation_profiles_player_ratings_version",
+            ondelete="RESTRICT",
+        ),
         CheckConstraint("contact_rating >= 0 AND contact_rating <= 99", name="ck_card_generation_contact"),
         CheckConstraint("power_rating >= 0 AND power_rating <= 99", name="ck_card_generation_power"),
         CheckConstraint("vision_rating >= 0 AND vision_rating <= 99", name="ck_card_generation_vision"),
@@ -59,6 +66,9 @@ class CardGenerationProfile(Base):
         String(36), ForeignKey("player_seasons.id"), nullable=False, index=True
     )
     rating_model_version = Column(String(30), nullable=False, index=True)
+    # Nullable durante la transición: ratings-1.0 continúa sin PlayerRatings.
+    # La FK compuesta garantiza igualdad de rating_model_version al vincularse.
+    player_ratings_id = Column(String(36), nullable=True, index=True)
     # Nullable para que perfiles legacy sin fingerprint se reconstruyan una vez.
     input_hash = Column(String(64), nullable=True, index=True)
     contact_rating = Column(SmallInteger, nullable=False)
@@ -91,3 +101,4 @@ class CardGenerationProfile(Base):
     )
 
     player_season = relationship("PlayerSeason")
+    player_ratings = relationship("PlayerRatings", back_populates="card_generation_profiles")

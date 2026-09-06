@@ -30,6 +30,9 @@ class PlayerRatings(Base):
             "distribution_version", "data_start_date", "data_end_date",
             name="uq_player_ratings_identity",
         ),
+        # Clave candidata para que CardGenerationProfile pueda garantizar por
+        # FK compuesta que el vínculo usa la misma rating_model_version.
+        UniqueConstraint("id", "rating_model_version", name="uq_player_ratings_id_model_version"),
         CheckConstraint("season >= 1900 AND season <= 2100", name="ck_player_ratings_season"),
         CheckConstraint("data_end_date >= data_start_date", name="ck_player_ratings_window"),
         CheckConstraint("role IN ('BATTER', 'PITCHER')", name="ck_player_ratings_role"),
@@ -78,3 +81,4 @@ class PlayerRatings(Base):
     updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
 
     player = relationship("Player")
+    card_generation_profiles = relationship("CardGenerationProfile", back_populates="player_ratings")
