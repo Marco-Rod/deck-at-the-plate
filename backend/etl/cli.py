@@ -38,7 +38,7 @@ from etl.services.pitcher_control import calculate_control_candidate
 from etl.services.pitcher_velocity import calculate_velocity_candidate
 from etl.services.pitcher_stuff import calculate_stuff_candidate
 from etl.services.pitcher_ratings2 import calculate_pitcher_ratings2
-from etl.services.player_ratings import persist_pitcher_ratings2
+from etl.services.player_ratings import persist_batter_ratings2, persist_pitcher_ratings2
 from etl.services.ratings2_card_profiles import generate_pitcher_card_profile_from_ratings2
 from etl.services.rating_distributions import build_overall_rating_distribution
 from etl.services.pitcher_ratings2_population import generate_pitcher_ratings2_population
@@ -201,6 +201,18 @@ def _build_parser() -> argparse.ArgumentParser:
     batter_ratings.add_argument("--from", dest="data_start_date", type=_parse_date, required=True)
     batter_ratings.add_argument("--to", dest="data_end_date", type=_parse_date, required=True)
     batter_ratings.add_argument("--distribution-version", dest="distribution_version", default=None)
+
+    persist_batter_ratings = sub.add_parser(
+        "persist-batter-ratings",
+        help="Calcula y persiste batter ratings-2.0",
+    )
+    persist_batter_ratings.add_argument("--player-id", dest="player_id", type=int, required=True)
+    persist_batter_ratings.add_argument("--season", type=int, required=True)
+    persist_batter_ratings.add_argument("--from", dest="data_start_date", type=_parse_date, required=True)
+    persist_batter_ratings.add_argument("--to", dest="data_end_date", type=_parse_date, required=True)
+    persist_batter_ratings.add_argument(
+        "--distribution-version", dest="distribution_version", default=None
+    )
 
     ratings2 = sub.add_parser("calculate-pitcher-ratings2", help="Ensambla ratings-2.0 sin persistir carta")
     ratings2.add_argument("--player-id", dest="player_id", type=int, required=True)
@@ -593,6 +605,33 @@ def main(argv=None) -> int:
             )
             if result.skipped_components:
                 print(f"skipped={','.join(result.skipped_components)}")
+
+        elif args.command == "persist-batter-ratings":
+            ratings = calculate_batter_ratings2(
+                db,
+                mlb_id=args.player_id,
+                season=args.season,
+                data_start_date=args.data_start_date,
+                data_end_date=args.data_end_date,
+                distribution_version=args.distribution_version,
+            )
+            persisted = persist_batter_ratings2(
+                db,
+                ratings,
+                season=args.season,
+                data_start_date=args.data_start_date,
+                data_end_date=args.data_end_date,
+            )
+            print(
+                f"{persisted.status} player_ratings_id={persisted.player_ratings_id}"
+            )
+            print(
+                f"CONTACT={ratings.contact.rating} POWER={ratings.power.rating} "
+                f"VISION={ratings.vision.rating} CLUTCH={ratings.clutch.rating} "
+                f"OVERALL={ratings.overall_rating} MODEL={ratings.model_version}"
+            )
+            if persisted.skipped_components:
+                print(f"skipped={','.join(persisted.skipped_components)}")
 
         elif args.command == "calculate-pitcher-ratings2":
             result = calculate_pitcher_ratings2(

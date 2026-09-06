@@ -19,6 +19,7 @@ from etl.services.rating_math import round_rating
 @dataclass(frozen=True)
 class BatterVisionComponent:
     metric: str
+    distribution_id: str
     observed: float
     league_baseline: float
     sample_size: int
@@ -105,6 +106,7 @@ def calculate_batter_vision(
         component_rating = percentile_rating(percentile)
         components.append(BatterVisionComponent(
             metric=metric,
+            distribution_id=distribution.id,
             observed=observed,
             league_baseline=baseline,
             sample_size=sample_size,
