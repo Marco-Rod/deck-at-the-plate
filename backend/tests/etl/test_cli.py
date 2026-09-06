@@ -84,6 +84,15 @@ def test_build_league_distributions_flags():
     assert args.distribution_version == "mlb-2026-test"
 
 
+def test_build_league_distributions_acepta_batter():
+    parser = _build_parser()
+    args = parser.parse_args([
+        "build-league-distributions", "--season", "2026", "--role", "batter",
+        "--from", "2026-08-25", "--to", "2026-09-02",
+    ])
+    assert args.role == "batter"
+
+
 def test_generate_card_profiles_flags():
     parser = _build_parser()
     args = parser.parse_args(

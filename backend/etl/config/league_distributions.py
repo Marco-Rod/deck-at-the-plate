@@ -1,4 +1,4 @@
-"""Configuración versionable de las distribuciones de métricas de pitcher."""
+"""Configuración versionable de distribuciones de métricas de liga."""
 
 from dataclasses import dataclass
 
@@ -21,6 +21,14 @@ class MetricDistributionConfig:
     stabilization: int
 
 
+@dataclass(frozen=True)
+class BatterMetricDistributionConfig:
+    """Contrato descriptivo; eligibility/shrinkage se calibrarán después."""
+
+    direction: str
+    sample_field: str
+
+
 PITCHER_METRICS = {
     "zone_rate": MetricDistributionConfig("higher", "zone_opportunities", 50, 200),
     "first_pitch_strike_rate": MetricDistributionConfig("higher", "first_pitch_opportunities", 15, 100),
@@ -30,6 +38,20 @@ PITCHER_METRICS = {
     "csw_rate": MetricDistributionConfig("higher", "csw_opportunities", 50, 200),
     "avg_velocity": MetricDistributionConfig("higher", "pitches", 50, 200),
     "whiff_rate": MetricDistributionConfig("higher", "swings", 20, 100),
+}
+
+
+BATTER_METRICS = {
+    "contact_rate": BatterMetricDistributionConfig("higher", "swings"),
+    "avg": BatterMetricDistributionConfig("higher", "ab"),
+    "whiff_rate": BatterMetricDistributionConfig("lower", "swings"),
+    "iso": BatterMetricDistributionConfig("higher", "ab"),
+    "barrel_rate": BatterMetricDistributionConfig("higher", "barrel_opportunities"),
+    "hard_hit_rate": BatterMetricDistributionConfig("higher", "hard_hit_opportunities"),
+    "slg": BatterMetricDistributionConfig("higher", "ab"),
+    "chase_rate": BatterMetricDistributionConfig("lower", "chase_opportunities"),
+    "walk_rate": BatterMetricDistributionConfig("higher", "pa"),
+    "strikeout_rate": BatterMetricDistributionConfig("lower", "pa"),
 }
 
 

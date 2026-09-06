@@ -113,7 +113,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     dist = sub.add_parser("build-league-distributions", help="Construye distribuciones versionadas desde Analytics")
     dist.add_argument("--season", type=int, required=True)
-    dist.add_argument("--role", choices=("pitcher",), default="pitcher")
+    dist.add_argument("--role", choices=("batter", "pitcher"), default="pitcher")
     dist.add_argument("--from", dest="data_start_date", type=_parse_date, required=True)
     dist.add_argument("--to", dest="data_end_date", type=_parse_date, required=True)
     dist.add_argument("--distribution-version", dest="distribution_version", default=None)

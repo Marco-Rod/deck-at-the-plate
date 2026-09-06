@@ -8,8 +8,15 @@ from math import hypot
 
 from sqlalchemy.orm import Session
 
-from app.models import LeagueMetricDistribution, PitcherPitchProfile, PitcherSeasonStats, PlayerSeason
+from app.models import (
+    BatterSeasonStats,
+    LeagueMetricDistribution,
+    PitcherPitchProfile,
+    PitcherSeasonStats,
+    PlayerSeason,
+)
 from etl.config.league_distributions import (
+    BATTER_METRICS,
     MOVEMENT_EXCLUDED_PITCH_TYPES,
     MOVEMENT_FAMILY_MIN_POPULATION,
     MOVEMENT_PITCH_TYPE_MIN_POPULATION,
@@ -74,6 +81,73 @@ def _upsert_distribution(db: Session, identity: dict, payload: dict) -> str:
     return "updated"
 
 
+def _batter_metric_value(row: BatterSeasonStats, metric: str):
+    if metric == "iso":
+        if row.slg is None or row.avg is None:
+            return None
+        return row.slg - row.avg
+    if metric == "walk_rate":
+        return row.walks / row.pa if row.pa else None
+    if metric == "strikeout_rate":
+        return row.strikeouts / row.pa if row.pa else None
+    return getattr(row, metric)
+
+
+def _build_batter_distributions(
+    db: Session,
+    *,
+    season: int,
+    data_start_date: date,
+    data_end_date: date,
+    version: str,
+) -> DistributionBuildResult:
+    rows = (
+        db.query(BatterSeasonStats)
+        .join(PlayerSeason, PlayerSeason.id == BatterSeasonStats.player_season_id)
+        .filter(
+            PlayerSeason.season == season,
+            PlayerSeason.data_start_date == data_start_date,
+            PlayerSeason.data_end_date == data_end_date,
+        )
+        .all()
+    )
+    created = updated = unchanged = skipped = 0
+    for metric, config in BATTER_METRICS.items():
+        observations = [
+            (_batter_metric_value(row, metric), int(getattr(row, config.sample_field)))
+            for row in rows
+        ]
+        eligible = [
+            (value, sample)
+            for value, sample in observations
+            if value is not None and sample > 0
+        ]
+        if not eligible:
+            skipped += 1
+            continue
+        values = [float(value) for value, _sample in eligible]
+        samples = [sample for _value, sample in eligible]
+        identity = {
+            "season": season,
+            "role": "BATTER",
+            "metric": metric,
+            "pitch_type": None,
+            "pitch_family": None,
+            "distribution_version": version,
+            "data_start_date": data_start_date,
+            "data_end_date": data_end_date,
+        }
+        outcome = _upsert_distribution(db, identity, _summary(values, samples))
+        if outcome == "created":
+            created += 1
+        elif outcome == "updated":
+            updated += 1
+        else:
+            unchanged += 1
+    db.commit()
+    return DistributionBuildResult(created, updated, unchanged, skipped, version)
+
+
 def build_league_distributions(
     db: Session,
     *,
@@ -84,12 +158,20 @@ def build_league_distributions(
     distribution_version: str | None = None,
 ) -> DistributionBuildResult:
     normalized_role = role.upper()
-    if normalized_role != "PITCHER":
-        raise ValueError("la primera versión solo soporta role=pitcher")
+    if normalized_role not in {"BATTER", "PITCHER"}:
+        raise ValueError("role debe ser batter o pitcher")
     if data_end_date < data_start_date:
         raise ValueError("data_end_date debe ser igual o posterior a data_start_date")
 
     version = distribution_version or default_distribution_version()
+    if normalized_role == "BATTER":
+        return _build_batter_distributions(
+            db,
+            season=season,
+            data_start_date=data_start_date,
+            data_end_date=data_end_date,
+            version=version,
+        )
     rows = (
         db.query(PitcherSeasonStats)
         .join(PlayerSeason, PlayerSeason.id == PitcherSeasonStats.player_season_id)

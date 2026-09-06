@@ -8,7 +8,15 @@ from sqlalchemy.orm import sessionmaker
 
 from app.database import Base
 from app.core.enums import PitchFamily, SplitHand
-from app.models import LeagueMetricDistribution, PitcherPitchProfile, PitcherSeasonStats, Player, PlayerSeason
+from app.models import (
+    BatterSeasonStats,
+    LeagueMetricDistribution,
+    PitcherPitchProfile,
+    PitcherSeasonStats,
+    Player,
+    PlayerSeason,
+)
+from etl.config.league_distributions import BATTER_METRICS
 from etl.services.league_distributions import build_league_distributions
 from etl.services.percentiles import (
     distribution_percentile_rank,
@@ -86,6 +94,54 @@ def _movement_profile(db, mlb_id: int, pitch_type: str, family, count: int, x: f
     return profile
 
 
+def _batter(db, mlb_id: int, factor: float):
+    player = Player(mlb_id=mlb_id, full_name=f"Batter {mlb_id}")
+    db.add(player)
+    db.flush()
+    season = PlayerSeason(
+        player_id=player.id,
+        season=2026,
+        data_start_date=START,
+        data_end_date=END,
+    )
+    db.add(season)
+    db.flush()
+    swings = 50 + int(factor * 10)
+    whiffs = 10 + int(factor * 5)
+    pa = 40 + int(factor * 10)
+    ab = pa - 5
+    balls_in_play = 20 + int(factor * 5)
+    hard_opportunities = balls_in_play - 2
+    barrel_opportunities = balls_in_play - 4
+    row = BatterSeasonStats(
+        player_season_id=season.id,
+        pa=pa,
+        ab=ab,
+        hits=12,
+        walks=5,
+        strikeouts=10,
+        pitches_seen=100,
+        swings=swings,
+        whiffs=whiffs,
+        balls_in_play=balls_in_play,
+        chases=10,
+        chase_opportunities=40,
+        hard_hits=8,
+        hard_hit_opportunities=hard_opportunities,
+        barrels=2,
+        barrel_opportunities=barrel_opportunities,
+        avg=0.250 + factor * 0.050,
+        slg=0.400 + factor * 0.100,
+        contact_rate=round((swings - whiffs) / swings, 6),
+        whiff_rate=round(whiffs / swings, 6),
+        chase_rate=0.25,
+        hard_hit_rate=round(8 / hard_opportunities, 6),
+        barrel_rate=round(2 / barrel_opportunities, 6),
+    )
+    db.add(row)
+    return row
+
+
 def test_percentiles_interpolan_e_invierten_direccion():
     assert percentile([0, 10, 20, 30], 0.25) == 7.5
     assert percentile([0, 10, 20, 30], 0.50) == 15
@@ -122,6 +178,81 @@ def test_builder_filtra_muestra_y_es_idempotente(db):
         db, season=2026, role="pitcher", data_start_date=START, data_end_date=END,
     )
     assert (changed.created, changed.updated, changed.unchanged) == (0, 1, 7)
+
+
+def test_builder_batter_crea_diez_metricas_derivadas_y_es_idempotente(db):
+    first_batter = _batter(db, 101, 0.0)
+    second_batter = _batter(db, 102, 1.0)
+    db.commit()
+
+    first = build_league_distributions(
+        db,
+        season=2026,
+        role="batter",
+        data_start_date=START,
+        data_end_date=END,
+    )
+
+    assert (first.created, first.updated, first.unchanged, first.skipped) == (10, 0, 0, 0)
+    assert set(BATTER_METRICS) == {
+        row.metric for row in db.query(LeagueMetricDistribution).filter_by(role="BATTER")
+    }
+    iso = db.query(LeagueMetricDistribution).filter_by(role="BATTER", metric="iso").one()
+    walks = db.query(LeagueMetricDistribution).filter_by(
+        role="BATTER", metric="walk_rate"
+    ).one()
+    strikeouts = db.query(LeagueMetricDistribution).filter_by(
+        role="BATTER", metric="strikeout_rate"
+    ).one()
+    assert float(iso.minimum) == pytest.approx(float(first_batter.slg - first_batter.avg))
+    assert float(iso.maximum) == pytest.approx(float(second_batter.slg - second_batter.avg))
+    assert float(walks.maximum) == pytest.approx(first_batter.walks / first_batter.pa)
+    assert float(strikeouts.maximum) == pytest.approx(
+        first_batter.strikeouts / first_batter.pa
+    )
+
+    second = build_league_distributions(
+        db,
+        season=2026,
+        role="batter",
+        data_start_date=START,
+        data_end_date=END,
+    )
+    assert (second.created, second.updated, second.unchanged) == (0, 0, 10)
+
+
+def test_builder_batter_usa_denominador_real_como_sample(db):
+    row = _batter(db, 101, 0.0)
+    db.commit()
+    build_league_distributions(
+        db,
+        season=2026,
+        role="batter",
+        data_start_date=START,
+        data_end_date=END,
+    )
+
+    expected_samples = {
+        metric: getattr(row, config.sample_field)
+        for metric, config in BATTER_METRICS.items()
+    }
+    actual = {
+        distribution.metric: distribution.sample_size_total
+        for distribution in db.query(LeagueMetricDistribution).filter_by(role="BATTER")
+    }
+    assert actual == expected_samples
+    assert {metric: config.direction for metric, config in BATTER_METRICS.items()} == {
+        "contact_rate": "higher",
+        "avg": "higher",
+        "whiff_rate": "lower",
+        "iso": "higher",
+        "barrel_rate": "higher",
+        "hard_hit_rate": "higher",
+        "slg": "higher",
+        "chase_rate": "lower",
+        "walk_rate": "higher",
+        "strikeout_rate": "lower",
+    }
 
 
 def test_version_nueva_no_sobrescribe_historial(db):
