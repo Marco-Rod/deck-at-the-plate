@@ -112,6 +112,26 @@ class PitcherSeasonStats(Base):
         CheckConstraint("whiff_rate >= 0 AND whiff_rate <= 1", name="ck_pitcher_season_stats_whiff_rate"),
         CheckConstraint("chase_rate >= 0 AND chase_rate <= 1", name="ck_pitcher_season_stats_chase_rate"),
         CheckConstraint("called_strike_rate >= 0 AND called_strike_rate <= 1", name="ck_pitcher_season_stats_called_strike_rate"),
+        CheckConstraint("zone_rate >= 0 AND zone_rate <= 1", name="ck_pitcher_season_stats_zone_rate"),
+        CheckConstraint("zone_pitches <= zone_opportunities", name="ck_pitcher_season_stats_zone_counts"),
+        CheckConstraint("first_pitch_strike_rate >= 0 AND first_pitch_strike_rate <= 1", name="ck_pitcher_season_stats_first_pitch_strike_rate"),
+        CheckConstraint("first_pitch_strikes <= first_pitch_opportunities", name="ck_pitcher_season_stats_first_pitch_counts"),
+        CheckConstraint("hbp_rate >= 0 AND hbp_rate <= 1", name="ck_pitcher_season_stats_hbp_rate"),
+        CheckConstraint("hit_by_pitches <= hbp_opportunities", name="ck_pitcher_season_stats_hbp_counts"),
+        CheckConstraint("walk_rate >= 0 AND walk_rate <= 1", name="ck_pitcher_season_stats_walk_rate"),
+        CheckConstraint("walk_opportunities = batters_faced", name="ck_pitcher_season_stats_walk_denom"),
+        CheckConstraint("strikeout_rate >= 0 AND strikeout_rate <= 1", name="ck_pitcher_season_stats_strikeout_rate"),
+        CheckConstraint("strikeout_opportunities = batters_faced", name="ck_pitcher_season_stats_strikeout_denom"),
+        CheckConstraint("hbp_opportunities = batters_faced", name="ck_pitcher_season_stats_hbp_denom"),
+        CheckConstraint("csw_rate >= 0 AND csw_rate <= 1", name="ck_pitcher_season_stats_csw_rate"),
+        CheckConstraint("csw = called_strikes + whiffs", name="ck_pitcher_season_stats_csw_numerator"),
+        CheckConstraint("csw_opportunities = pitches", name="ck_pitcher_season_stats_csw_denom"),
+        CheckConstraint("zone_pitches >= 0 AND zone_opportunities >= 0", name="ck_pitcher_season_stats_zone_non_negative"),
+        CheckConstraint("first_pitch_strikes >= 0 AND first_pitch_opportunities >= 0", name="ck_pitcher_season_stats_first_pitch_non_negative"),
+        CheckConstraint("hit_by_pitches >= 0 AND hbp_opportunities >= 0", name="ck_pitcher_season_stats_hbp_non_negative"),
+        CheckConstraint("walks >= 0 AND walk_opportunities >= 0", name="ck_pitcher_season_stats_walk_non_negative"),
+        CheckConstraint("strikeouts >= 0 AND strikeout_opportunities >= 0", name="ck_pitcher_season_stats_strikeout_non_negative"),
+        CheckConstraint("called_strikes >= 0 AND whiffs >= 0 AND csw >= 0 AND csw_opportunities >= 0", name="ck_pitcher_season_stats_csw_non_negative"),
     )
 
     id = Column(String(36), primary_key=True, default=_new_id)
@@ -127,6 +147,24 @@ class PitcherSeasonStats(Base):
     home_runs_allowed = Column(Integer, nullable=False, default=0)
     walks = Column(Integer, nullable=False, default=0)
     strikeouts = Column(Integer, nullable=False, default=0)
+    zone_pitches = Column(Integer, nullable=False, default=0)
+    zone_opportunities = Column(Integer, nullable=False, default=0)
+    zone_rate = Column(Numeric(7, 6), nullable=True)
+    first_pitch_strikes = Column(Integer, nullable=False, default=0)
+    first_pitch_opportunities = Column(Integer, nullable=False, default=0)
+    first_pitch_strike_rate = Column(Numeric(7, 6), nullable=True)
+    hit_by_pitches = Column(Integer, nullable=False, default=0)
+    hbp_opportunities = Column(Integer, nullable=False, default=0)
+    hbp_rate = Column(Numeric(7, 6), nullable=True)
+    walk_opportunities = Column(Integer, nullable=False, default=0)
+    walk_rate = Column(Numeric(7, 6), nullable=True)
+    strikeout_opportunities = Column(Integer, nullable=False, default=0)
+    strikeout_rate = Column(Numeric(7, 6), nullable=True)
+    called_strikes = Column(Integer, nullable=False, default=0)
+    whiffs = Column(Integer, nullable=False, default=0)
+    csw = Column(Integer, nullable=False, default=0)
+    csw_opportunities = Column(Integer, nullable=False, default=0)
+    csw_rate = Column(Numeric(7, 6), nullable=True)
     era = Column(Numeric(7, 4), nullable=True)
     whip = Column(Numeric(7, 4), nullable=True)
     woba_allowed = Column(Numeric(6, 5), nullable=True, index=True)

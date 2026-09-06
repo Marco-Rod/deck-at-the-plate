@@ -139,7 +139,22 @@ class PitcherCounter:
         self.home_runs_allowed = 0
         self.walks = 0
         self.strikeouts = 0
+        self.hit_by_pitches = 0
         self._populate_events(views)
+
+        zone_views = [p for p in views if p.pitch.statcast_zone is not None]
+        self.zone_pitches = sum(1 for p in zone_views if p.in_zone)
+        self.zone_opportunities = len(zone_views)
+        self.zone_rate = rate(self.zone_pitches, self.zone_opportunities)
+
+        first_pitch_views = [p for p in views if p.pitch.pitch_number == 1]
+        self.first_pitch_opportunities = len(first_pitch_views)
+        self.first_pitch_strikes = sum(
+            1 for p in first_pitch_views if self._is_strike_result(p)
+        )
+        self.first_pitch_strike_rate = rate(
+            self.first_pitch_strikes, self.first_pitch_opportunities
+        )
 
         speeds = [_f(p.pitch.release_speed) for p in views if p.pitch.release_speed is not None]
         spin = [_f(p.pitch.release_spin_rate) for p in views if p.pitch.release_spin_rate is not None]
@@ -160,6 +175,16 @@ class PitcherCounter:
         self.whiff_rate = rate(self.whiffs, self.swing_outs)
         self.chase_rate = rate(self.chase, len(out_zone_views))
         self.called_strike_rate = rate(self.strike_outs, len(views))
+        self.hbp_opportunities = self.p_batters_faced
+        self.hbp_rate = rate(self.hit_by_pitches, self.hbp_opportunities)
+        self.walk_opportunities = self.p_batters_faced
+        self.walk_rate = rate(self.walks, self.walk_opportunities)
+        self.strikeout_opportunities = self.p_batters_faced
+        self.strikeout_rate = rate(self.strikeouts, self.strikeout_opportunities)
+        self.called_strikes = self.strike_outs
+        self.csw = self.called_strikes + self.whiffs
+        self.csw_opportunities = self.pitches_total
+        self.csw_rate = rate(self.csw, self.csw_opportunities)
         self.hard_hit_rate_allowed = rate(self.hard_hit_allowed, len(bip_views))
         self.barrel_rate_allowed = rate(self.barrels_allowed, len(bip_views))
 
@@ -176,6 +201,16 @@ class PitcherCounter:
         if innings <= 0:
             return None
         return round((self.walks + self.hits_allowed) / innings, 4)
+
+    @staticmethod
+    def _is_strike_result(view: PitchView) -> bool:
+        description = (view.pitch.description or "").lower()
+        return (
+            view.called_strike
+            or view.whiff
+            or description.startswith("foul")
+            or description.startswith("hit_into_play")
+        )
 
     def _terminal_counts(self, views) -> tuple[int, int]:
         atbats: dict[tuple, _AtBatroll] = {}
@@ -205,6 +240,8 @@ class PitcherCounter:
                 self.home_runs_allowed += 1
             if event in _WALK_EVENTS:
                 self.walks += 1
+            if event in _HBP_EVENTS:
+                self.hit_by_pitches += 1
             if event in _SO_EVENTS:
                 self.strikeouts += 1
 

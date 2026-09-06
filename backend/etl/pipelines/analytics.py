@@ -57,7 +57,12 @@ _PROFILE_MODELS = (
 
 _RATE_FIELDS_BY_MODEL = {
     "BatterSeasonStats": ("hard_hit_rate", "barrel_rate", "swing_rate", "whiff_rate", "contact_rate", "chase_rate", "zone_swing_rate", "zone_contact_rate"),
-    "PitcherSeasonStats": ("whiff_rate", "chase_rate", "called_strike_rate", "hard_hit_rate_allowed", "barrel_rate_allowed"),
+    "PitcherSeasonStats": (
+        "whiff_rate", "chase_rate", "called_strike_rate",
+        "zone_rate", "first_pitch_strike_rate", "hbp_rate",
+        "walk_rate", "strikeout_rate", "csw_rate",
+        "hard_hit_rate_allowed", "barrel_rate_allowed",
+    ),
     "BatterZoneProfile": ("contact_rate", "whiff_rate", "hard_hit_rate", "barrel_rate"),
     "PitcherZoneProfile": ("whiff_rate", "called_strike_rate", "hard_hit_rate_allowed", "barrel_rate_allowed"),
     "BatterPitchFamilyProfile": ("contact_rate", "whiff_rate", "hard_hit_rate", "barrel_rate"),

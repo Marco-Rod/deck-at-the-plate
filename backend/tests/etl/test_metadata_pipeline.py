@@ -29,7 +29,7 @@ from etl.http.client import ExternalHttpClient
 from etl.loaders.core import upsert_player, upsert_player_season, upsert_team
 from etl.pipelines.metadata import MetadataPipeline
 from etl.sources.mlb import MLBStatsApiClient
-from etl.services.card_profiles import generate_profiles
+from etl.services.card_profiles import generate_profiles, validate_profiles
 
 W_FROM = dt.date(2026, 3, 20)
 W_TO = dt.date(2026, 8, 31)
@@ -238,6 +238,10 @@ class TestGenerateProfiles:
                 home_runs_allowed=0,
                 walks=2,
                 strikeouts=8,
+                hbp_opportunities=91,
+                walk_opportunities=91,
+                strikeout_opportunities=91,
+                csw_opportunities=91,
                 avg_velocity=94.25,
                 whiff_rate=0.28,
             )
@@ -283,3 +287,43 @@ class TestGenerateProfiles:
         assert third.unchanged == 1
         db.refresh(profile)
         assert profile.input_hash == stable_hash
+
+        pitcher_stats = db.query(PitcherSeasonStats).one()
+        pitcher_stats.avg_velocity = 95.75
+        db.commit()
+
+        changed = generate_profiles(db, season=SEASON, data_end_date=W_TO)
+        assert changed.created == 0
+        assert changed.updated == 1
+        assert changed.unchanged == 0
+        db.refresh(profile)
+        assert profile.input_hash != stable_hash
+
+        stable_again = generate_profiles(db, season=SEASON, data_end_date=W_TO)
+        assert stable_again.updated == 0
+        assert stable_again.unchanged == 1
+
+    def test_validate_filtra_por_rating_model(self, db):
+        self._seed_analytics(db)
+        generate_profiles(db, season=SEASON, rating_model_version="ratings-1.0")
+
+        result = validate_profiles(
+            db,
+            season=SEASON,
+            rating_model_version="ratings-2.0",
+        )
+
+        assert result.ok is False
+        assert any("rating_model=ratings-2.0" in issue for issue in result.detail)
+
+    def test_validate_detecta_input_hash_legacy(self, db):
+        self._seed_analytics(db)
+        generate_profiles(db, season=SEASON)
+        profile = db.query(CardGenerationProfile).one()
+        profile.input_hash = None
+        db.commit()
+
+        result = validate_profiles(db, season=SEASON)
+
+        assert result.ok is False
+        assert any("sin input_hash" in issue for issue in result.detail)

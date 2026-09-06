@@ -27,17 +27,17 @@ Este inventario aplica el checkpoint requerido por
 | Métrica | Fuente | Estado | Denominador | Uso |
 |---|---|---|---|---|
 | Avg Velocity | `PitcherSeasonStats.avg_velocity` | AVAILABLE | pitches con velocidad | Velocity |
-| BB% | `walks / batters_faced` | DERIVABLE | BF | Control |
-| Zone% | solo derivable desde RAW; no persistida en Analytics | MISSING | pitches | Control |
-| FirstPitchStrike% | no persistida en Analytics | MISSING | PA/BF | Control |
-| HBP% | contador interno no expuesto en `PitcherSeasonStats` | MISSING | BF | Control |
+| BB% | `PitcherSeasonStats.walks / walk_opportunities / walk_rate` | AVAILABLE | BF | Control |
+| Zone% | `zone_pitches / zone_opportunities / zone_rate` | AVAILABLE | pitches con zona Statcast | Control |
+| FirstPitchStrike% | `first_pitch_strikes / first_pitch_opportunities / first_pitch_strike_rate` | AVAILABLE | PA con pitch 1 | Control |
+| HBP% | `hit_by_pitches / hbp_opportunities / hbp_rate` | AVAILABLE | BF | Control |
 | Horizontal break | `PitcherPitchProfile.avg_horizontal_break` | AVAILABLE por pitch | pitch_count | Movement |
 | Vertical break | `PitcherPitchProfile.avg_vertical_break` | AVAILABLE por pitch | pitch_count | Movement |
 | Pitch usage | `PitcherPitchProfile.usage_rate` | AVAILABLE | pitch_count | Movement |
 | Whiff% | `PitcherSeasonStats.whiff_rate` | AVAILABLE | swings | Stuff |
 | CalledStrike% | `PitcherSeasonStats.called_strike_rate` | AVAILABLE | pitches | Stuff/CSW |
-| CSW% | called strikes + whiffs / pitches | DERIVABLE con contadores de arsenal | pitches | Stuff |
-| K% | `strikeouts / batters_faced` | DERIVABLE | BF | Stuff |
+| CSW% | `csw / csw_opportunities / csw_rate` (+ `called_strikes`, `whiffs`) | AVAILABLE | pitches | Stuff |
+| K% | `strikeouts / strikeout_opportunities / strikeout_rate` | AVAILABLE | BF | Stuff |
 | inverse Contact% | `1 - whiff_rate` solo si el denominador es swings | DERIVABLE | swings | Stuff |
 
 ## Infraestructura que falta
@@ -47,7 +47,6 @@ Este inventario aplica el checkpoint requerido por
   `pitch_family`.
 - Versión de baseline y versión de distribución incluidas en `input_hash`.
 - `stuff_rating` en `CardGenerationProfile` y en el contrato/snapshot de carta.
-- Métricas Analytics de `zone_rate`, `first_pitch_strike_rate` y `hbp_rate`.
 - Muestra situacional para Clutch; hasta entonces debe usarse neutral explícito.
 
 ## Gate

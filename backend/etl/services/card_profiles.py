@@ -338,23 +338,55 @@ def validate_profiles(
     rating_model_version: str = RATING_MODEL_VERSION,
 ) -> ValidationResult:
     """Gate §52: perfiles dentro de contrato y con identidad/equipo resueltos."""
+    rating_model_version = rating_model_version or RATING_MODEL_VERSION
     issues: list[str] = []
     query = (
         db.query(CardGenerationProfile)
         .join(PlayerSeason, CardGenerationProfile.player_season_id == PlayerSeason.id)
-        .filter(PlayerSeason.season == season)
+        .filter(
+            PlayerSeason.season == season,
+            CardGenerationProfile.rating_model_version == rating_model_version,
+        )
     )
     if data_end_date is not None:
         query = query.filter(PlayerSeason.data_end_date == data_end_date)
     profiles = query.all()
     if not profiles:
-        issues.append("sin perfiles para la temporada")
+        issues.append(
+            f"sin perfiles para temporada={season} rating_model={rating_model_version}"
+        )
     for profile in profiles:
         player = profile.player_season.player if profile.player_season else None
         if player is None:
             issues.append(f"perfil {profile.id} sin player_season/player")
         elif player.game_identity is None:
             issues.append(f"perfil de mlb_id={player.mlb_id} sin identidad pública")
+        if profile.input_hash is None:
+            issues.append(f"perfil {profile.id} sin input_hash")
         if profile.repertoire_payload and len(profile.repertoire_payload) > 4:
             issues.append(f"perfil {profile.id}: repertorio > 4 pitches")
+        pitcher = (
+            db.query(PitcherSeasonStats)
+            .filter(PitcherSeasonStats.player_season_id == profile.player_season_id)
+            .one_or_none()
+        )
+        batter = (
+            db.query(BatterSeasonStats)
+            .filter(BatterSeasonStats.player_season_id == profile.player_season_id)
+            .one_or_none()
+        )
+        if pitcher is not None and batter is None:
+            arsenal_count = (
+                db.query(PitcherPitchProfile)
+                .filter(
+                    PitcherPitchProfile.player_season_id == profile.player_season_id,
+                    PitcherPitchProfile.batter_side == "ALL",
+                )
+                .count()
+            )
+            if arsenal_count and not profile.repertoire_payload:
+                issues.append(
+                    f"perfil pitcher {profile.id}: Analytics tiene arsenal "
+                    "pero repertoire_payload está vacío"
+                )
     return ValidationResult(ok=not issues, detail=issues)

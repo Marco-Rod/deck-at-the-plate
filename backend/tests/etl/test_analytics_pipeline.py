@@ -31,6 +31,7 @@ from etl.sources.statcast import StatcastSourceAdapter
 from etl.loaders.core import upsert_player, upsert_player_season, upsert_team
 from etl.dto import PlayerSourceRecord, TeamSourceRecord
 from etl.pipelines.analytics import AnalyticsPipeline
+from etl.aggregators.metrics import PitcherCounter
 
 FIXTURES = pathlib.Path(__file__).parent / "fixtures"
 
@@ -114,6 +115,66 @@ def test_pitcher_baseline_from_fixture(db):
     assert row.home_runs_allowed == 1
     assert row.strikeouts == 0
     assert float(row.whiff_rate) == 0.5
+    assert row.zone_pitches == 6
+    assert row.zone_opportunities == 6
+    assert float(row.zone_rate) == 1.0
+    assert row.first_pitch_strikes == 1
+    assert row.first_pitch_opportunities == 2
+    assert float(row.first_pitch_strike_rate) == 0.5
+    assert row.hit_by_pitches == 0
+    assert row.hbp_opportunities == 2
+    assert float(row.hbp_rate) == 0.0
+    assert row.walk_opportunities == 2
+    assert float(row.walk_rate) == 0.0
+    assert row.strikeout_opportunities == 2
+    assert float(row.strikeout_rate) == 0.0
+    assert row.called_strikes == 1
+    assert row.whiffs == 2
+    assert row.csw == 3
+    assert row.csw_opportunities == 7
+    assert abs(float(row.csw_rate) - 3 / 7) < 1e-6
+
+
+def test_pitcher_rates_conservan_numerador_denominador_y_rate():
+    def pitch(at_bat, number, description, event, statcast_zone, game_zone):
+        return RawPitchEvent(
+            game_pk=1,
+            game_date=W_FROM,
+            season=SEASON,
+            at_bat_number=at_bat,
+            pitch_number=number,
+            batter_mlb_id=100 + at_bat,
+            pitcher_mlb_id=669373,
+            description=description,
+            event=event,
+            statcast_zone=statcast_zone,
+            game_zone=game_zone,
+        )
+
+    counter = PitcherCounter(
+        [
+            pitch(1, 1, "called_strike", None, 1, 1),
+            pitch(1, 2, "swinging_strike", "strikeout", 5, 5),
+            pitch(2, 1, "ball", None, 11, None),
+            pitch(2, 2, "ball", "walk", 12, None),
+            pitch(3, 1, "hit_by_pitch", "hit_by_pitch", None, None),
+        ]
+    )
+
+    assert (counter.zone_pitches, counter.zone_opportunities, counter.zone_rate) == (2, 4, 0.5)
+    assert (
+        counter.first_pitch_strikes,
+        counter.first_pitch_opportunities,
+        counter.first_pitch_strike_rate,
+    ) == (1, 3, 0.333333)
+    assert (counter.hit_by_pitches, counter.hbp_opportunities, counter.hbp_rate) == (1, 3, 0.333333)
+    assert (counter.walks, counter.walk_opportunities, counter.walk_rate) == (1, 3, 0.333333)
+    assert (
+        counter.strikeouts,
+        counter.strikeout_opportunities,
+        counter.strikeout_rate,
+    ) == (1, 3, 0.333333)
+    assert (counter.csw, counter.csw_opportunities, counter.csw_rate) == (2, 5, 0.4)
 
 
 def test_zona_familia_y_handedness_creados(db):
