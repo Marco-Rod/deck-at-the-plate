@@ -1,7 +1,7 @@
-"""Pruebas del backfill de cartas legacy (vision/clutch/edition/model_version).
+"""Pruebas del backfill de cartas legacy (vision/clutch/edition_type/model_version).
 
 Se usa sqlite en-memory con el esquema completo. Las cartas legacy sobreviven
-al ALTER con placeholders (vision=50, clutch=50, edition='BASE') porque los
+al ALTER con placeholders (vision=50, clutch=50, edition_type='BASE') porque los
 modelos tienen default; el backfill las sobrescribe y las firma con
 rating_model_version.
 """
@@ -54,7 +54,7 @@ class TestBackfill:
         # Pre-backfill: placeholders del ALTER (defaults del modelo).
         assert card.vision == 50
         assert card.clutch == 50
-        assert card.edition == "BASE"
+        assert card.edition_type == "BASE"
 
         summary = backfill_vision_clutch_edition(db)
         assert summary["updated"] == 1
@@ -62,7 +62,7 @@ class TestBackfill:
         card = db.query(PlayerCardModel).filter_by(id="legacy-1").one()
         assert card.vision == int(70 * 0.70 + 85 * 0.30)  # 74
         assert card.clutch == 50
-        assert card.edition == BASE_EDITION
+        assert card.edition_type == BASE_EDITION
         assert card.rating_model_version == LEGACY_MODEL_VERSION
 
     def test_idempotente(self, db):

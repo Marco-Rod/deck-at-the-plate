@@ -9,7 +9,7 @@ from datetime import date
 from sqlalchemy.orm import Session
 
 from app.core.enums import Handedness, ThrowHand
-from app.models import Player, PlayerSeason, PlayerTeamStint, Team
+from app.models import Player, PlayerSeason, PlayerTeamStint, Team, TeamRosterMember, TeamRosterSnapshot
 from etl.dto import PlayerSourceRecord, TeamSourceRecord
 
 logger = logging.getLogger("etl.loaders.core")
@@ -186,3 +186,77 @@ def upsert_player_team_stint(
         logger.info("stint upserted player=%s season=%s team=%s", player.id, season, team_id)
     db.flush()
     return stint
+
+
+def upsert_team_roster_snapshot(
+    db: Session,
+    *,
+    team_id: str,
+    season: int,
+    as_of_date: date,
+    roster_type: str = "ACTIVE",
+    source: str = "MLB_STATS_API",
+) -> TeamRosterSnapshot:
+    """Snapshot de roster idempotente por (team, season, as_of, roster_type).
+
+    Diferentes as_of_date generan snapshots distintos (historia), nunca se
+    sobrescribe un snapshot anterior (plan §43).
+    """
+    snapshot = (
+        db.query(TeamRosterSnapshot)
+        .filter(
+            TeamRosterSnapshot.team_id == team_id,
+            TeamRosterSnapshot.season == season,
+            TeamRosterSnapshot.as_of_date == as_of_date,
+            TeamRosterSnapshot.roster_type == roster_type,
+        )
+        .one_or_none()
+    )
+    if snapshot is None:
+        snapshot = TeamRosterSnapshot(
+            team_id=team_id,
+            season=season,
+            as_of_date=as_of_date,
+            roster_type=roster_type,
+            source=source,
+        )
+        db.add(snapshot)
+        db.flush()
+        logger.info("roster snapshot inserted team=%s season=%s as_of=%s", team_id, season, as_of_date)
+    return snapshot
+
+
+def upsert_team_roster_member(
+    db: Session,
+    *,
+    snapshot: TeamRosterSnapshot,
+    player: Player,
+    status: str | None = None,
+    position: str | None = None,
+    jersey_number: str | None = None,
+) -> TeamRosterMember:
+    member = (
+        db.query(TeamRosterMember)
+        .filter(
+            TeamRosterMember.roster_snapshot_id == snapshot.id,
+            TeamRosterMember.player_id == player.id,
+        )
+        .one_or_none()
+    )
+    if member is None:
+        member = TeamRosterMember(
+            roster_snapshot_id=snapshot.id,
+            player_id=player.id,
+            status=status,
+            position=position,
+            jersey_number=jersey_number,
+        )
+        db.add(member)
+        logger.info("roster member inserted snapshot=%s player=%s", snapshot.id, player.id)
+    else:
+        member.status = status
+        member.position = position
+        member.jersey_number = jersey_number
+        logger.info("roster member upserted snapshot=%s player=%s", snapshot.id, player.id)
+    db.flush()
+    return member

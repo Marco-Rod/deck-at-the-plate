@@ -1,6 +1,6 @@
 """
-Backfill de columnas nuevas en player_cards (vision/clutch/edition)
-===================================================================
+Backfill de columnas nuevas en player_cards (vision/clutch/edition_type)
+=======================================================================
 Migramos las cartas legacy a las columnas persistidas sin alterar la jugabilidad.
 
 Contexto:
@@ -16,8 +16,9 @@ Qué hace con cada carta legacy (rating_model_version IS NULL):
       cambia el gameplay de las cartas existentes → transición neutral.
     - clutch: neutral 50. El engine actual no lo consume; el valor real vendrá
       del pipeline de analytics del Matchup Engine V1.
-    - edition: 'BASE' (todos los legacy son base).
+    - edition_type: 'BASE' (todos los legacy son base).
     - rating_model_version: 'LEGACY' (firma del backfill).
+    - season: '2026' (catálogo actual del seed; la migración 0009 ya lo pobla).
 
 Idempotente: solo toca cartas sin rating_model_version. Reejecutable sin daño.
 
@@ -57,7 +58,7 @@ def backfill_vision_clutch_edition(db) -> dict:
     for card in cards:
         card.vision = int(card.contact * LEGACY_VISION_WEIGHT_CONTACT + card.overall * LEGACY_VISION_WEIGHT_OVERALL)
         card.clutch = NEUTRAL_CLUTCH
-        card.edition = BASE_EDITION
+        card.edition_type = BASE_EDITION
         card.rating_model_version = LEGACY_MODEL_VERSION
 
     db.commit()

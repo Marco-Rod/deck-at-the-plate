@@ -16,16 +16,20 @@ from sqlalchemy import (
     Column,
     String,
     Integer,
+    SmallInteger,
     Boolean,
     CheckConstraint,
     Enum,
+    UniqueConstraint,
     ForeignKey,
     JSON,
+    DateTime,
 )
 from sqlalchemy.orm import relationship
 import enum
 from app.database import Base
 from app.core.enums import PITCHER_POSITIONS
+from app.core.time import utcnow
 from app.models.player import Player
 
 
@@ -42,6 +46,13 @@ class PlayerCardModel(Base):
     __table_args__ = (
         CheckConstraint("vision >= 0 AND vision <= 99", name="ck_player_cards_vision_range"),
         CheckConstraint("clutch >= 0 AND clutch <= 99", name="ck_player_cards_clutch_range"),
+        # Catálogo versionado: una misma persona puede tener varias ediciones,
+        # pero (player_id, season, edition_type, edition_version) es único.
+        UniqueConstraint(
+            "player_id", "season", "edition_type", "edition_version", name="uq_player_cards_edition"
+        ),
+        CheckConstraint("season IS NULL OR (season >= 1900 AND season <= 2100)", name="ck_player_cards_season_range"),
+        CheckConstraint("edition_version >= 1", name="ck_player_cards_edition_version"),
     )
 
     id = Column(String, primary_key=True, index=True)
@@ -82,8 +93,16 @@ class PlayerCardModel(Base):
     player_id = Column(String(36), ForeignKey("players.id"), nullable=True, index=True)
     player_season_id = Column(String(36), ForeignKey("player_seasons.id"), nullable=True, index=True)
     generation_profile_id = Column(String(36), ForeignKey("card_generation_profiles.id"), nullable=True, index=True)
-    # Identifica edición, no rareza: "BASE_2026", "ALL_STAR_2026", etc.
-    edition = Column(String(50), nullable=False, default="BASE", index=True)
+    # Tipo de edición: "BASE", "ALL_STAR", etc. Legado: columna `edition`.
+    edition_type = Column(String(50), nullable=False, default="BASE", index=True)
+    # Versión de la edición dentro del mismo tipo (inmutable al publicar).
+    edition_version = Column(Integer, nullable=False, default=1)
+    # Temporada del catálogo. Nullable por compatibilidad con cartas legacy sin Player.
+    season = Column(SmallInteger, nullable=True, index=True)
+    # Publicación: activas en el catálogo actual y elegibles para packs/starter.
+    is_active = Column(Boolean, nullable=False, default=True, index=True)
+    is_pack_eligible = Column(Boolean, nullable=False, default=True, index=True)
+    published_at = Column(DateTime(timezone=True), nullable=True, index=True)
     # Snapshot legible del algoritmo de ratings (duplicación deliberada para auditoría).
     rating_model_version = Column(String(30), nullable=True, index=True)
 

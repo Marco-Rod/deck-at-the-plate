@@ -8,7 +8,17 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.database import Base
-from app.models import Player, PlayerSeason, PlayerTeamStint, Team, CardGenerationProfile, BatterSeasonStats, PitcherSeasonStats
+from app.models import (
+    Player,
+    PlayerSeason,
+    PlayerTeamStint,
+    Team,
+    TeamRosterMember,
+    TeamRosterSnapshot,
+    CardGenerationProfile,
+    BatterSeasonStats,
+    PitcherSeasonStats,
+)
 from app.core.enums import ImportStatus, PitchFamily
 from etl.dto import PlayerSourceRecord, TeamSourceRecord
 from etl.http.client import ExternalHttpClient
@@ -69,6 +79,50 @@ class TestMetadataPipeline:
         )
         assert db.query(Player).count() == 1
         assert db.query(PlayerSeason).count() == 1
+
+    def test_sync_teams_upserta_idempotente(self, db):
+        client = _client({"/teams": TEAMS})
+        pipeline = MetadataPipeline(db, client)
+        first = pipeline.run_teams(season=SEASON)
+        second = pipeline.run_teams(season=SEASON)
+        assert first.teams == 1
+        assert second.teams == 1
+        assert db.query(Team).count() == 1
+
+    def test_sync_rosters_crea_snapshot_y_miembros(self, db):
+        client = _client({"/teams": TEAMS, "/people/660271": PERSON, "/roster": ROSTER})
+        pipeline = MetadataPipeline(db, client)
+        result = pipeline.run_rosters(season=SEASON, data_start_date=W_FROM, data_end_date=W_TO)
+        assert result.players == 1
+        assert result.stints == 1
+        assert result.roster_snapshots == 1
+        assert result.roster_members == 1
+        assert db.query(Team).count() == 0  # sync-rosters NO upserta equipos
+        assert db.query(TeamRosterSnapshot).count() == 1
+        assert db.query(TeamRosterMember).count() == 1
+        snapshot = db.query(TeamRosterSnapshot).one()
+        assert snapshot.team_id == "LAD"
+        assert snapshot.season == SEASON
+        assert snapshot.as_of_date == W_TO
+        assert snapshot.roster_type == "ACTIVE"
+        member = db.query(TeamRosterMember).one()
+        assert member.status == "ACTIVE"
+        assert member.position == "P"
+
+    def test_sync_rosters_misma_fecha_es_idempotente(self, db):
+        client = _client({"/teams": TEAMS, "/people/660271": PERSON, "/roster": ROSTER})
+        pipeline = MetadataPipeline(db, client)
+        pipeline.run_rosters(season=SEASON, data_start_date=W_FROM, data_end_date=W_TO)
+        pipeline.run_rosters(season=SEASON, data_start_date=W_FROM, data_end_date=W_TO)
+        assert db.query(TeamRosterSnapshot).count() == 1
+        assert db.query(TeamRosterMember).count() == 1
+
+    def test_sync_rosters_fecha_distinta_genera_historial(self, db):
+        client = _client({"/teams": TEAMS, "/people/660271": PERSON, "/roster": ROSTER})
+        pipeline = MetadataPipeline(db, client)
+        pipeline.run_rosters(season=SEASON, data_start_date=W_FROM, data_end_date=W_TO)
+        pipeline.run_rosters(season=SEASON, data_start_date=W_FROM, data_end_date=dt.date(2026, 9, 15))
+        assert db.query(TeamRosterSnapshot).count() == 2
 
 
 class TestGenerateProfiles:

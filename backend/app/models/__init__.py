@@ -30,6 +30,7 @@ from app.models.player_analytics import (
     BatterPitcherMatchup,
 )
 from app.models.card_generation import CardGenerationProfile
+from app.models.roster import TeamRosterMember, TeamRosterSnapshot
 from app.models.pitch_log import PitchEventLog
 
 # Permite hacer: "from app.models import PlayerCardModel, GameSession"
@@ -62,5 +63,7 @@ __all__ = [
     "PitcherHandednessSplit",
     "BatterPitcherMatchup",
     "CardGenerationProfile",
+    "TeamRosterSnapshot",
+    "TeamRosterMember",
     "PitchEventLog",
 ]

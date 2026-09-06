@@ -31,10 +31,13 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="etl.cli", description="Deck at the Plate ETL")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    imp = sub.add_parser("import-players", help="Importa metadata MLB (equipos/rosters)")
+    imp = sub.add_parser("sync-teams", help="Sincroniza los equipos MLB (30)")
     imp.add_argument("--season", type=int, default=_default_season())
-    imp.add_argument("--start", type=_parse_date)
-    imp.add_argument("--end", default=None)
+
+    sr = sub.add_parser("sync-rosters", help="Sincroniza rosters (players+snapshots)")
+    sr.add_argument("--season", type=int, default=_default_season())
+    sr.add_argument("--start", type=_parse_date)
+    sr.add_argument("--end", type=_parse_date, default=None)
 
     st = sub.add_parser("import-statcast", help="Ingiere RawPitchEvent por rango")
     st.add_argument("--from", dest="date_from", type=_parse_date, required=True)
@@ -71,14 +74,26 @@ def main(argv=None) -> int:
 
     db = SessionLocal()
     try:
-        if args.command == "import-players":
-            start = args.start or date(args.season, 1, 1)
-            end = _parse_date(args.end) if args.end else date(args.season, 12, 31)
+        if args.command == "sync-teams":
             client = MLBStatsApiClient()
-            result = MetadataPipeline(db, client).run_teams_and_rosters(
+            result = MetadataPipeline(db, client).run_teams(season=args.season)
+            logger.info("sync-teams teams=%s", result.teams)
+
+        elif args.command == "sync-rosters":
+            start = args.start or date(args.season, 1, 1)
+            end = args.end or date(args.season, 12, 31)
+            client = MLBStatsApiClient()
+            result = MetadataPipeline(db, client).run_rosters(
                 season=args.season, data_start_date=start, data_end_date=end
             )
-            logger.info("metadata teams=%s players=%s unresolved=%s", result.teams, len(result.unresolved), result.unresolved)
+            logger.info(
+                "sync-rosters players=%s stints=%s snapshots=%s members=%s unresolved=%s",
+                result.players,
+                result.stints,
+                result.roster_snapshots,
+                result.roster_members,
+                result.unresolved,
+            )
 
         elif args.command == "import-statcast":
             adapter = StatcastSourceAdapter()

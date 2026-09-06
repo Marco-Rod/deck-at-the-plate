@@ -6,7 +6,8 @@ from etl.cli import _build_parser
 def test_parser_generates_subcomandos():
     parser = _build_parser()
     commands = {
-        "import-players": ["import-players", "--season", "2026"],
+        "sync-teams": ["sync-teams", "--season", "2026"],
+        "sync-rosters": ["sync-rosters", "--season", "2026", "--start", "2026-03-20", "--end", "2026-08-31"],
         "import-statcast": ["import-statcast", "--from", "2026-04-01", "--to", "2026-04-05"],
         "import-statcast-player": ["import-statcast-player", "--player-id", "660271", "--from", "2026-04-01", "--to", "2026-04-05"],
         "build-analytics": ["build-analytics", "--season", "2026", "--data-start-date", "2026-03-20", "--data-end-date", "2026-08-31"],
@@ -16,6 +17,14 @@ def test_parser_generates_subcomandos():
     for cmd in commands:
         args = parser.parse_args(commands[cmd])
         assert args.command == cmd
+
+
+def test_sync_rosters_fechas():
+    parser = _build_parser()
+    args = parser.parse_args(["sync-rosters", "--season", "2026", "--start", "2026-03-20", "--end", "2026-08-31"])
+    assert args.command == "sync-rosters"
+    assert args.start.isoformat() == "2026-03-20"
+    assert args.end.isoformat() == "2026-08-31"
 
 
 def test_import_statcast_flags():
