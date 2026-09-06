@@ -39,6 +39,7 @@ from etl.services.pitcher_velocity import calculate_velocity_candidate
 from etl.services.pitcher_stuff import calculate_stuff_candidate
 from etl.services.pitcher_ratings2 import calculate_pitcher_ratings2
 from etl.services.player_ratings import persist_pitcher_ratings2
+from etl.services.ratings2_card_profiles import generate_pitcher_card_profile_from_ratings2
 from etl.sources.mlb import MLBStatsApiClient
 from etl.sources.statcast import StatcastSourceAdapter
 
@@ -156,6 +157,10 @@ def _build_parser() -> argparse.ArgumentParser:
     generate_ratings2.add_argument("--from", dest="data_start_date", type=_parse_date, required=True)
     generate_ratings2.add_argument("--to", dest="data_end_date", type=_parse_date, required=True)
     generate_ratings2.add_argument("--distribution-version", dest="distribution_version", default=None)
+
+    profile_ratings2 = sub.add_parser("generate-card-profile-ratings2", help="Adapta PlayerRatings a perfil de carta")
+    profile_ratings2.add_argument("--player-ratings-id", dest="player_ratings_id", required=True)
+    profile_ratings2.add_argument("--player-season-id", dest="player_season_id", default=None)
 
     run = sub.add_parser("run", help="Pipeline completo")
     run.add_argument("--season", type=int, required=True)
@@ -448,6 +453,17 @@ def main(argv=None) -> int:
                 f"VELOCITY={ratings.velocity.rating} CONTROL={ratings.control.rating} "
                 f"MOVEMENT={ratings.movement.rating} STUFF={ratings.stuff.rating} "
                 f"OVERALL={ratings.overall} MODEL={ratings.rating_model_version}"
+            )
+
+        elif args.command == "generate-card-profile-ratings2":
+            result = generate_pitcher_card_profile_from_ratings2(
+                db,
+                player_ratings_id=args.player_ratings_id,
+                player_season_id=args.player_season_id,
+            )
+            print(
+                f"{result.status} card_generation_profile_id={result.card_generation_profile_id} "
+                f"player_ratings_id={result.player_ratings_id}"
             )
 
         elif args.command == "run":
