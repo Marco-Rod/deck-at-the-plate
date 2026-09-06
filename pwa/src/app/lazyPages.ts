@@ -21,6 +21,11 @@ export const CardShowcasePage = lazy(() =>
     default: m.CardShowcasePage,
   })),
 )
+export const CardDesignsPage = lazy(() =>
+  import('../features/cards/pages/CardDesignsPage').then((m) => ({
+    default: m.CardDesignsPage,
+  })),
+)
 export const StadiumPage = lazy(() =>
   import('../features/game/pages/StadiumPage').then((m) => ({ default: m.StadiumPage })),
 )

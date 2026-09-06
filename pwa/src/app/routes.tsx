@@ -6,6 +6,7 @@ import { RootRedirect } from './RootRedirect'
 import { AuthPage } from '@/features/auth/pages/AuthPage'
 import {
   CardShowcasePage,
+  CardDesignsPage,
   LobbyPage,
   MyTeamPage,
   OnboardingPage,
@@ -19,6 +20,7 @@ export const routes: RouteObject[] = [
     children: [
       { index: true, element: <RootRedirect /> },
       { path: '/auth', element: <AuthPage /> },
+      { path: '/cartas/disenios', element: <CardDesignsPage /> },
       {
         element: <ProtectedRoute />,
         children: [
