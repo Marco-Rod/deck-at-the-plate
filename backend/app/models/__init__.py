@@ -38,6 +38,7 @@ from app.models.source_team import SourceTeam, SourceTeamGameTeamMapping
 from app.models.game_identity import GamePlayerIdentity
 from app.models.card_catalog import CardCatalog
 from app.models.league_distribution import LeagueMetricDistribution
+from app.models.player_ratings import PlayerRatings
 
 # Permite hacer: "from app.models import PlayerCardModel, GameSession"
 __all__ = [
@@ -78,4 +79,5 @@ __all__ = [
     "GamePlayerIdentity",
     "CardCatalog",
     "LeagueMetricDistribution",
+    "PlayerRatings",
 ]
