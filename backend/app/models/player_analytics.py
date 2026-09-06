@@ -110,6 +110,8 @@ class PitcherSeasonStats(Base):
         CheckConstraint("hard_hit_rate_allowed >= 0 AND hard_hit_rate_allowed <= 1", name="ck_pitcher_season_stats_hhr"),
         CheckConstraint("barrel_rate_allowed >= 0 AND barrel_rate_allowed <= 1", name="ck_pitcher_season_stats_barrel"),
         CheckConstraint("whiff_rate >= 0 AND whiff_rate <= 1", name="ck_pitcher_season_stats_whiff_rate"),
+        CheckConstraint("swings >= 0 AND whiffs >= 0 AND whiffs <= swings", name="ck_pitcher_season_stats_whiff_counts"),
+        CheckConstraint("swings <= pitches", name="ck_pitcher_season_stats_swings_pitches"),
         CheckConstraint("chase_rate >= 0 AND chase_rate <= 1", name="ck_pitcher_season_stats_chase_rate"),
         CheckConstraint("called_strike_rate >= 0 AND called_strike_rate <= 1", name="ck_pitcher_season_stats_called_strike_rate"),
         CheckConstraint("zone_rate >= 0 AND zone_rate <= 1", name="ck_pitcher_season_stats_zone_rate"),
@@ -161,6 +163,7 @@ class PitcherSeasonStats(Base):
     strikeout_opportunities = Column(Integer, nullable=False, default=0)
     strikeout_rate = Column(Numeric(7, 6), nullable=True)
     called_strikes = Column(Integer, nullable=False, default=0)
+    swings = Column(Integer, nullable=False, default=0)
     whiffs = Column(Integer, nullable=False, default=0)
     csw = Column(Integer, nullable=False, default=0)
     csw_opportunities = Column(Integer, nullable=False, default=0)

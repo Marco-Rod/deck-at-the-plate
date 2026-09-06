@@ -13,7 +13,7 @@ DISTRIBUTION_MODEL_VERSION = "dist-1.0"
 class MetricDistributionConfig:
     direction: str
     sample_field: str
-    distribution_min_sample: int
+    min_sample: int
     stabilization: int
 
 
@@ -24,6 +24,8 @@ PITCHER_METRICS = {
     "strikeout_rate": MetricDistributionConfig("higher", "strikeout_opportunities", 15, 150),
     "hbp_rate": MetricDistributionConfig("lower", "hbp_opportunities", 15, 150),
     "csw_rate": MetricDistributionConfig("higher", "csw_opportunities", 50, 200),
+    "avg_velocity": MetricDistributionConfig("higher", "pitches", 50, 200),
+    "whiff_rate": MetricDistributionConfig("higher", "swings", 20, 100),
 }
 
 

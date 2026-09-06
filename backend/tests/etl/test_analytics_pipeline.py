@@ -114,6 +114,8 @@ def test_pitcher_baseline_from_fixture(db):
     assert row.hits_allowed == 2
     assert row.home_runs_allowed == 1
     assert row.strikeouts == 0
+    assert row.swings == 4
+    assert row.whiffs <= row.swings
     assert float(row.whiff_rate) == 0.5
     assert row.zone_pitches == 6
     assert row.zone_opportunities == 6
@@ -175,6 +177,9 @@ def test_pitcher_rates_conservan_numerador_denominador_y_rate():
         counter.strikeout_rate,
     ) == (1, 3, 0.333333)
     assert (counter.csw, counter.csw_opportunities, counter.csw_rate) == (2, 5, 0.4)
+    assert counter.swings == 1
+    assert counter.whiffs <= counter.swings
+    assert counter.whiff_rate == 1.0
 
 
 def test_zona_familia_y_handedness_creados(db):

@@ -98,6 +98,7 @@ def _pitcher_profile_inputs(
         "data_end_date": data_end_date,
         "season_stats": {
             "avg_velocity": pitcher.avg_velocity,
+            "swings": pitcher.swings,
             "whiff_rate": pitcher.whiff_rate,
             "walks": pitcher.walks,
             "strikeouts": pitcher.strikeouts,

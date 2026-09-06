@@ -9,7 +9,12 @@ from sqlalchemy.orm import sessionmaker
 from app.database import Base
 from app.models import LeagueMetricDistribution, PitcherSeasonStats, Player, PlayerSeason
 from etl.services.league_distributions import build_league_distributions
-from etl.services.percentiles import percentile, percentile_rank
+from etl.services.percentiles import (
+    distribution_percentile_rank,
+    percentile,
+    percentile_rank,
+    percentile_rating,
+)
 
 
 START = dt.date(2026, 8, 25)
@@ -44,6 +49,8 @@ def _pitcher(db, mlb_id: int, pitches: int, batters: int, factor: float):
     csw_rate = round(0.22 + factor * 0.10, 6)
     csw = round(pitches * csw_rate)
     called = csw // 2
+    whiffs = csw - called
+    swings = max(whiffs, round(pitches * 0.5))
     row = PitcherSeasonStats(
         player_season_id=season.id, pitches=pitches, batters_faced=batters,
         zone_pitches=round(pitches * zone), zone_opportunities=pitches, zone_rate=zone,
@@ -52,8 +59,10 @@ def _pitcher(db, mlb_id: int, pitches: int, batters: int, factor: float):
         walks=round(batters * walk), walk_opportunities=batters, walk_rate=walk,
         strikeouts=round(batters * strikeout), strikeout_opportunities=batters, strikeout_rate=strikeout,
         hit_by_pitches=round(batters * hbp), hbp_opportunities=batters, hbp_rate=hbp,
-        called_strikes=called, whiffs=csw - called, csw=csw,
+        called_strikes=called, swings=swings, whiffs=whiffs, csw=csw,
         csw_opportunities=pitches, csw_rate=csw_rate,
+        avg_velocity=round(90 + factor * 5, 2),
+        whiff_rate=round(whiffs / swings, 6),
     )
     db.add(row)
     return row
@@ -75,7 +84,7 @@ def test_builder_filtra_muestra_y_es_idempotente(db):
     first = build_league_distributions(
         db, season=2026, role="pitcher", data_start_date=START, data_end_date=END,
     )
-    assert (first.created, first.updated, first.unchanged, first.skipped) == (6, 0, 0, 0)
+    assert (first.created, first.updated, first.unchanged, first.skipped) == (8, 0, 0, 0)
     zone = db.query(LeagueMetricDistribution).filter_by(metric="zone_rate").one()
     assert zone.population_size == 3
     assert zone.sample_size_total == 600
@@ -87,14 +96,14 @@ def test_builder_filtra_muestra_y_es_idempotente(db):
     second = build_league_distributions(
         db, season=2026, role="pitcher", data_start_date=START, data_end_date=END,
     )
-    assert (second.created, second.updated, second.unchanged) == (0, 0, 6)
+    assert (second.created, second.updated, second.unchanged) == (0, 0, 8)
 
     rows[0].zone_rate = 0.43
     db.commit()
     changed = build_league_distributions(
         db, season=2026, role="pitcher", data_start_date=START, data_end_date=END,
     )
-    assert (changed.created, changed.updated, changed.unchanged) == (0, 1, 5)
+    assert (changed.created, changed.updated, changed.unchanged) == (0, 1, 7)
 
 
 def test_version_nueva_no_sobrescribe_historial(db):
@@ -105,8 +114,8 @@ def test_version_nueva_no_sobrescribe_historial(db):
         db, season=2026, role="pitcher", data_start_date=START, data_end_date=END,
         distribution_version="mlb-2026-v2",
     )
-    assert result.created == 6
-    assert db.query(LeagueMetricDistribution).count() == 12
+    assert result.created == 8
+    assert db.query(LeagueMetricDistribution).count() == 16
 
 
 def test_baseline_pondera_oportunidades_sin_alterar_distribucion(db):
@@ -118,3 +127,51 @@ def test_baseline_pondera_oportunidades_sin_alterar_distribucion(db):
     assert float(zone.population_mean) == 0.45
     assert float(zone.league_baseline) == 0.405
     assert float(zone.p50) == 0.45
+
+
+def test_velocity_y_whiff_usan_sus_denominadores_elegibles(db):
+    eligible = _pitcher(db, 1, 100, 20, 0.5)
+    few_pitches = _pitcher(db, 2, 49, 20, 0.8)
+    few_swings = _pitcher(db, 3, 100, 20, 0.2)
+    few_swings.swings = 19
+    few_swings.whiffs = 5
+    few_swings.whiff_rate = round(5 / 19, 6)
+    few_swings.csw = few_swings.called_strikes + few_swings.whiffs
+    few_swings.csw_rate = round(few_swings.csw / few_swings.csw_opportunities, 6)
+    db.commit()
+    build_league_distributions(db, season=2026, role="pitcher", data_start_date=START, data_end_date=END)
+
+    velocity = db.query(LeagueMetricDistribution).filter_by(metric="avg_velocity").one()
+    whiff = db.query(LeagueMetricDistribution).filter_by(metric="whiff_rate").one()
+    assert velocity.population_size == 2
+    assert velocity.sample_size_total == eligible.pitches + few_swings.pitches
+    assert whiff.population_size == 2
+    assert whiff.sample_size_total == eligible.swings + few_pitches.swings
+
+    rerun = build_league_distributions(
+        db, season=2026, role="pitcher", data_start_date=START, data_end_date=END
+    )
+    assert rerun.unchanged == 8
+
+
+def test_percentile_de_distribucion_usa_extremos_y_direccion():
+    class Distribution:
+        minimum = 0
+        p05 = 5
+        p10 = 10
+        p25 = 25
+        p50 = 50
+        p75 = 75
+        p90 = 90
+        p95 = 95
+        maximum = 100
+
+    distribution = Distribution()
+    assert distribution_percentile_rank(0, distribution) == 0
+    assert distribution_percentile_rank(50, distribution) == 0.5
+    assert distribution_percentile_rank(100, distribution) == 1
+    assert distribution_percentile_rank(82.5, distribution) == 0.825
+    assert distribution_percentile_rank(25, distribution, direction="lower") == 0.75
+    assert percentile_rating(0) == 40
+    assert percentile_rating(0.5) == 70
+    assert percentile_rating(1) == 99

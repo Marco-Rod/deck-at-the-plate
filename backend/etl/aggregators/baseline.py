@@ -64,6 +64,7 @@ def pitcher_season_row(player_season_id: str, counter: PitcherCounter) -> dict:
         "strikeout_opportunities": counter.strikeout_opportunities,
         "strikeout_rate": counter.strikeout_rate,
         "called_strikes": counter.called_strikes,
+        "swings": counter.swings,
         "whiffs": counter.whiffs,
         "csw": counter.csw,
         "csw_opportunities": counter.csw_opportunities,

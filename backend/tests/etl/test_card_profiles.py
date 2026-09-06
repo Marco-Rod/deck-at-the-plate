@@ -62,6 +62,7 @@ def test_batter_profile_acepta_numeric_como_decimal():
 def test_hash_de_arsenal_es_independiente_del_orden():
     pitcher = SimpleNamespace(
         avg_velocity=Decimal("94.25"),
+        swings=42,
         walks=2,
         batters_faced=91,
         whiff_rate=Decimal("0.280000"),
@@ -87,6 +88,15 @@ def test_hash_de_arsenal_es_independiente_del_orden():
     )
 
     assert _input_hash(first) == _input_hash(second)
+
+    pitcher.swings = 43
+    changed = _pitcher_profile_inputs(
+        pitcher,
+        rows,
+        rating_model_version="ratings-1.0",
+        data_end_date=date(2026, 9, 2),
+    )
+    assert _input_hash(first) != _input_hash(changed)
 
 
 def test_no_etiqueta_formulas_v1_como_ratings_2():

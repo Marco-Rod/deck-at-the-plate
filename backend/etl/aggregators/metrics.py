@@ -133,7 +133,8 @@ class PitcherCounter:
         self.p_batters_faced, self.outs_recorded = self._terminal_counts(views)
 
         self.strike_outs = sum(1 for p in views if p.called_strike)
-        self.swing_outs = sum(1 for p in views if p.swing)
+        self.swings = sum(1 for p in views if p.swing)
+        self.swing_outs = self.swings  # alias temporal para agregadores existentes
         self.whiffs = sum(1 for p in views if p.whiff)
         self.hits_allowed = 0
         self.home_runs_allowed = 0
@@ -172,7 +173,7 @@ class PitcherCounter:
         self.chase = sum(1 for p in out_zone_views if p.swing)
         self.zone_swings = sum(1 for p in in_zone_views if p.swing)
 
-        self.whiff_rate = rate(self.whiffs, self.swing_outs)
+        self.whiff_rate = rate(self.whiffs, self.swings)
         self.chase_rate = rate(self.chase, len(out_zone_views))
         self.called_strike_rate = rate(self.strike_outs, len(views))
         self.hbp_opportunities = self.p_batters_faced

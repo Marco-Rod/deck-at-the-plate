@@ -39,3 +39,28 @@ def percentile_rank(value: float, points: Sequence[tuple[float, float]], directi
                 break
     statistical = min(1.0, max(0.0, statistical))
     return statistical if direction == "higher" else 1.0 - statistical
+
+
+def distribution_points(distribution) -> list[tuple[float, float]]:
+    """Construye todos los anclajes, incluidos extremos P00 y P100."""
+    return [
+        (float(distribution.minimum), 0.00),
+        (float(distribution.p05), 0.05),
+        (float(distribution.p10), 0.10),
+        (float(distribution.p25), 0.25),
+        (float(distribution.p50), 0.50),
+        (float(distribution.p75), 0.75),
+        (float(distribution.p90), 0.90),
+        (float(distribution.p95), 0.95),
+        (float(distribution.maximum), 1.00),
+    ]
+
+
+def distribution_percentile_rank(value: float, distribution, direction: str = "higher") -> float:
+    return percentile_rank(value, distribution_points(distribution), direction)
+
+
+def percentile_rating(percentile_value: float) -> int:
+    """Convierte P00..P100 a la escala inclusiva 40..99."""
+    bounded = min(1.0, max(0.0, float(percentile_value)))
+    return round(40 + bounded * 59)

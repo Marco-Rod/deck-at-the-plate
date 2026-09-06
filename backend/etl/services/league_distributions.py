@@ -86,7 +86,7 @@ def build_league_distributions(
         eligible = [
             row for row in rows
             if getattr(row, metric) is not None
-            and getattr(row, config.sample_field) >= config.distribution_min_sample
+            and getattr(row, config.sample_field) >= config.min_sample
         ]
         if not eligible:
             skipped += 1
