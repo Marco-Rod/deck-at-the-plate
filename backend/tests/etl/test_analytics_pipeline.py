@@ -219,6 +219,31 @@ def test_arsenal_usage_y_velocidad(db):
     assert by_type["CH"].pitch_family == "OFFSPEED"
 
 
+def test_arsenal_persiste_pfx_source_por_pitch_type_y_handedness(db):
+    _seed(db)
+    pipeline = AnalyticsPipeline(db)
+    pipeline.rebuild(season=SEASON, data_start_date=W_FROM, data_end_date=W_TO)
+    rows = db.query(PitcherPitchProfile).filter_by(pitch_type="FF").all()
+    by_side = {str(row.batter_side.value if hasattr(row.batter_side, "value") else row.batter_side): row for row in rows}
+
+    assert set(by_side) == {"ALL", "L"}
+    assert float(by_side["ALL"].avg_pfx_x) == 1.075
+    assert float(by_side["ALL"].avg_pfx_z) == 5.05
+    assert by_side["ALL"].avg_pfx_x == by_side["L"].avg_pfx_x
+    assert by_side["ALL"].avg_pfx_z == by_side["L"].avg_pfx_z
+
+    snapshot = {
+        (row.pitch_type, str(row.batter_side)): (row.pitch_count, row.avg_pfx_x, row.avg_pfx_z)
+        for row in db.query(PitcherPitchProfile).all()
+    }
+    pipeline.rebuild(season=SEASON, data_start_date=W_FROM, data_end_date=W_TO)
+    rebuilt = {
+        (row.pitch_type, str(row.batter_side)): (row.pitch_count, row.avg_pfx_x, row.avg_pfx_z)
+        for row in db.query(PitcherPitchProfile).all()
+    }
+    assert rebuilt == snapshot
+
+
 def test_run_success_y_analytics_rechazos_cero(db):
     _seed(db)
     result = AnalyticsPipeline(db).rebuild(season=SEASON, data_start_date=W_FROM, data_end_date=W_TO)

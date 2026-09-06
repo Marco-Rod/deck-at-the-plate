@@ -133,8 +133,10 @@ class CellCounts:
             "avg_velocity": round(_avg(self.speeds), 2) if self.speeds else None,
             "max_velocity": round(max(self.speeds), 2) if self.speeds else None,
             "avg_spin_rate": round(_avg(self.spins), 2) if self.spins else None,
-            "avg_horizontal_break": round(_avg(self.pfx_x), 4) if self.pfx_x else None,
-            "avg_vertical_break": round(_avg(self.pfx_z), 4) if self.pfx_z else None,
+            # Statcast publica pfx_x/pfx_z en pies. Analytics conserva esa
+            # unidad SOURCE; no se mezclan aquí valores convertidos a pulgadas.
+            "avg_pfx_x": round(_avg(self.pfx_x), 4) if self.pfx_x else None,
+            "avg_pfx_z": round(_avg(self.pfx_z), 4) if self.pfx_z else None,
             "swings": self.swings,
             "whiffs": self.whiffs,
             "called_strikes": self.called_strikes,

@@ -327,7 +327,7 @@ class BatterPitchFamilyProfile(Base):
 
 
 class PitcherPitchProfile(Base):
-    """Estadística real de cada lanzamiento del pitcher. Se transforma al repertoire jugable."""
+    """Estadística real por lanzamiento; pfx se conserva en pies Statcast SOURCE."""
 
     __tablename__ = "pitcher_pitch_profiles"
     __table_args__ = (
@@ -344,6 +344,8 @@ class PitcherPitchProfile(Base):
         CheckConstraint("called_strike_rate >= 0 AND called_strike_rate <= 1", name="ck_pitcher_pitch_profiles_called_strike_rate"),
         CheckConstraint("hard_hit_rate_allowed >= 0 AND hard_hit_rate_allowed <= 1", name="ck_pitcher_pitch_profiles_hhr_rate"),
         CheckConstraint("barrel_rate_allowed >= 0 AND barrel_rate_allowed <= 1", name="ck_pitcher_pitch_profiles_barrel_rate"),
+        CheckConstraint("avg_pfx_x >= -10 AND avg_pfx_x <= 10", name="ck_pitcher_pitch_profiles_pfx_x"),
+        CheckConstraint("avg_pfx_z >= -10 AND avg_pfx_z <= 10", name="ck_pitcher_pitch_profiles_pfx_z"),
     )
 
     id = Column(String(36), primary_key=True, default=_new_id)
@@ -363,8 +365,10 @@ class PitcherPitchProfile(Base):
     avg_velocity = Column(Numeric(5, 2), nullable=True)
     max_velocity = Column(Numeric(5, 2), nullable=True)
     avg_spin_rate = Column(Numeric(7, 2), nullable=True)
-    avg_horizontal_break = Column(Numeric(7, 4), nullable=True)
-    avg_vertical_break = Column(Numeric(7, 4), nullable=True)
+    # Unidad canónica de Analytics para esta fase: pies, tal como llega de
+    # Statcast. Cualquier presentación en pulgadas debe multiplicar por 12.
+    avg_pfx_x = Column(Numeric(7, 4), nullable=True, comment="Statcast pfx_x promedio, en pies")
+    avg_pfx_z = Column(Numeric(7, 4), nullable=True, comment="Statcast pfx_z promedio, en pies")
     avg_extension = Column(Numeric(5, 2), nullable=True)
     swings = Column(Integer, nullable=False, default=0)
     whiffs = Column(Integer, nullable=False, default=0)
