@@ -56,7 +56,7 @@ class CreateTeamRequestSchema(BaseModel):
     primary_color: Optional[str] = "#C5A059"
     secondary_color: Optional[str] = "#1A3323"
     logo_id: Optional[str] = "logo_baseball_01"
-    base_franchise: str        # Ej. "LAD" o "NYY"
+    base_franchise: str        # Ej. "DLR" o "FRJ" (abreviatura GAME ficticia)
 
 
 class UserTeamResponseSchema(BaseModel):
@@ -77,4 +77,4 @@ class UserTeamResponseSchema(BaseModel):
 
 class UpdateBaseFranchiseRequestSchema(BaseModel):
     """Payload para fijar/cambiar la franquicia favorita del club del usuario."""
-    base_franchise: str        # Ej. "LAD" o "NYY"
+    base_franchise: str        # Ej. "DLR" o "FRJ" (abreviatura GAME ficticia)

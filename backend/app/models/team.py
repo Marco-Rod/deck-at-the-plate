@@ -13,7 +13,7 @@ class Team(Base):
     __tablename__ = "teams"
 
     id = Column(String(36), primary_key=True)
-    # Abreviatura pública ("NYM"), usada como badge en la UI.
+    # Abreviatura pública ficticia (Ej. "DLR" → Delfines de Los Ángeles), badge en la UI.
     abbreviation = Column(String(3), nullable=False, index=True)
     name = Column(String(100), nullable=False)
     city = Column(String(100), nullable=False)

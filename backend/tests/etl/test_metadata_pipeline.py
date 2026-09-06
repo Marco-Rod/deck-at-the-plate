@@ -114,9 +114,15 @@ class TestMetadataPipeline:
         result = MetadataPipeline(db, client).run_game_team_mappings(season=SEASON)
         assert result.source_teams == 1
         assert result.game_teams >= 1
-        lad = db.query(Team).filter(Team.abbreviation == "LAD").one()
+        delfines = db.query(Team).filter(Team.abbreviation == "DLR").one()
+        assert delfines.slug == "los-angeles-delfines"
+        assert delfines.name == "Delfines de Los Ángeles"
+        assert delfines.city == "Los Angeles"
+        assert delfines.primary_color.startswith("#")
+        assert delfines.secondary_color != delfines.primary_color
+        assert delfines.is_cpu is True
         mapping = db.query(SourceTeamGameTeamMapping).filter(
-            SourceTeamGameTeamMapping.team_id == lad.id,
+            SourceTeamGameTeamMapping.team_id == delfines.id,
             SourceTeamGameTeamMapping.valid_to.is_(None),
         ).one()
         assert mapping.source_team.external_id == 119

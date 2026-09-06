@@ -4,12 +4,14 @@ Cubre: persistencia gana, dry-run sin escrituras, validación y una integración
 de 300 identidades únicas con rerun estable.
 """
 
+from datetime import date
+
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.database import Base
-from app.models import GamePlayerIdentity
+from app.models import GamePlayerIdentity, PlayerSeason
 from etl.dto import PlayerSourceRecord
 from etl.loaders.core import upsert_player
 from etl.services.identity_generation import (
@@ -95,7 +97,43 @@ def test_player_id_filtra_batch(db):
     assert identity.player_id == p1.id
 
 
-def test_validacion_detecta_nombre_fuente(db):
+def test_season_sin_rosters_no_elige_a_nadie(db):
+    _player(db, 660276, "Shohei", "Ohtani")
+    result = generate_identity_batch(db, missing_only=True, season=2026)
+    assert result.created == 0
+    assert db.query(GamePlayerIdentity).count() == 0
+
+    with_roster = generate_identity_batch(db, missing_only=True)
+    assert with_roster.created == 1
+    assert db.query(GamePlayerIdentity).count() == 1
+
+
+def test_season_con_rosters_filtra_por_temporada(db):
+    player = _player(db, 660277, "Jose", "Ramirez")
+    db.add(
+        PlayerSeason(
+            player_id=player.id,
+            season=2026,
+            data_start_date=date(2026, 3, 1),
+            data_end_date=date(2026, 9, 30),
+            games=40,
+            plate_appearances=170,
+            batters_faced=0,
+            outs_recorded=0,
+        )
+    )
+    db.commit()
+    result = generate_identity_batch(db, missing_only=True, season=2026)
+    assert result.created == 1
+    identity = db.query(GamePlayerIdentity).one()
+    assert identity.player_id == player.id
+
+
+def test_validacion_season_sin_rosters_ok(db):
+    _player(db, 660278, "Wei", "Wang")
+    result = validate_game_identities(db, season=2026)
+    assert result.ok is True
+    assert result.detail == []
     p = _player(db, 660275, "Taylor", "Swiftfied")
     identity = GamePlayerIdentity(
         player_id=p.id,

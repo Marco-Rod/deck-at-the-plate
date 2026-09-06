@@ -67,7 +67,9 @@ def _eligible_players(
             .filter(PlayerSeason.season == season)
             .all()
         }
-        query = query.filter(Player.id.in_(player_ids)) if player_ids else query
+        if not player_ids:
+            return []
+        query = query.filter(Player.id.in_(player_ids))
     if limit is not None:
         query = query.limit(limit)
     return query.all()
