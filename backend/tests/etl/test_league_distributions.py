@@ -175,3 +175,33 @@ def test_percentile_de_distribucion_usa_extremos_y_direccion():
     assert percentile_rating(0) == 40
     assert percentile_rating(0.5) == 70
     assert percentile_rating(1) == 99
+
+
+def test_percentile_rank_colapsa_anclas_repetidas_al_centro_del_empate():
+    assert percentile_rank(
+        0,
+        [(0, 0.00), (0, 0.05), (0, 0.10), (1, 0.25), (1, 0.50), (1, 0.75), (2, 1.00)],
+    ) == 0.05
+    assert percentile_rank(
+        1,
+        [(0, 0.00), (0, 0.05), (0, 0.10), (1, 0.25), (1, 0.50), (1, 0.75), (2, 1.00)],
+    ) == 0.50
+
+
+def test_percentile_hbp_con_empate_en_cero_no_produce_p100_inverso():
+    class HbpDistribution:
+        minimum = 0
+        p05 = 0
+        p10 = 0
+        p25 = 0
+        p50 = 0
+        p75 = 0
+        p90 = 0.03
+        p95 = 0.04
+        maximum = 0.05
+
+    statistical = distribution_percentile_rank(0, HbpDistribution())
+    ability = distribution_percentile_rank(0, HbpDistribution(), direction="lower")
+    assert statistical == 0.375
+    assert ability == 0.625
+    assert ability < 1.0

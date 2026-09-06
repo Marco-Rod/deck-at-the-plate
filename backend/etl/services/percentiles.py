@@ -1,6 +1,7 @@
 """Interpolación determinista para distribuciones y percentiles de habilidad."""
 
 from collections.abc import Sequence
+from itertools import groupby
 
 
 def percentile(values: Sequence[float], quantile: float) -> float:
@@ -23,7 +24,14 @@ def percentile_rank(value: float, points: Sequence[tuple[float, float]], directi
         raise ValueError("percentile_rank requiere puntos")
     if direction not in {"higher", "lower"}:
         raise ValueError("direction debe ser higher o lower")
-    ordered = sorted((float(x), float(rank)) for x, rank in points)
+    raw_points = sorted((float(x), float(rank)) for x, rank in points)
+    # Una métrica discreta puede ocupar varios percentiles con el mismo valor.
+    # Ese empate se representa por el centro del rango que ocupa, no por su
+    # primera ancla (lo que convertiría, por ejemplo, HBP%=0 en P100 inverso).
+    ordered = []
+    for point_value, tied in groupby(raw_points, key=lambda point: point[0]):
+        ranks = [rank for _, rank in tied]
+        ordered.append((point_value, (min(ranks) + max(ranks)) / 2))
     if value <= ordered[0][0]:
         statistical = ordered[0][1]
     elif value >= ordered[-1][0]:
@@ -32,10 +40,7 @@ def percentile_rank(value: float, points: Sequence[tuple[float, float]], directi
         statistical = 0.0
         for (left, left_rank), (right, right_rank) in zip(ordered, ordered[1:]):
             if left <= value <= right:
-                if right == left:
-                    statistical = (left_rank + right_rank) / 2
-                else:
-                    statistical = left_rank + (value - left) / (right - left) * (right_rank - left_rank)
+                statistical = left_rank + (value - left) / (right - left) * (right_rank - left_rank)
                 break
     statistical = min(1.0, max(0.0, statistical))
     return statistical if direction == "higher" else 1.0 - statistical
