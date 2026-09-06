@@ -31,7 +31,8 @@ from etl.sources.statcast import StatcastSourceAdapter
 from etl.loaders.core import upsert_player, upsert_player_season, upsert_team
 from etl.dto import PlayerSourceRecord, TeamSourceRecord
 from etl.pipelines.analytics import AnalyticsPipeline
-from etl.aggregators.metrics import PitcherCounter
+from etl.aggregators.metrics import BatterCounter, PitcherCounter
+from etl.aggregators.baseline import batter_season_row
 
 FIXTURES = pathlib.Path(__file__).parent / "fixtures"
 
@@ -103,6 +104,61 @@ def test_batter_baseline_from_fixture(db):
     assert row.swings == 4
     assert row.whiffs == 2
     assert float(row.whiff_rate) == 0.5
+    assert row.hard_hits <= row.hard_hit_opportunities <= row.balls_in_play
+    assert row.barrels <= row.barrel_opportunities <= row.balls_in_play
+    assert row.chases <= row.chase_opportunities <= row.pitches_seen
+
+
+def test_batter_avanzadas_conservan_oportunidades_reales():
+    def pitch(
+        number,
+        description,
+        statcast_zone,
+        game_zone,
+        launch_speed=None,
+        launch_angle=None,
+    ):
+        return RawPitchEvent(
+            game_pk=1,
+            game_date=W_FROM,
+            season=SEASON,
+            at_bat_number=number,
+            pitch_number=1,
+            batter_mlb_id=660271,
+            pitcher_mlb_id=100 + number,
+            description=description,
+            statcast_zone=statcast_zone,
+            game_zone=game_zone,
+            launch_speed=launch_speed,
+            launch_angle=launch_angle,
+        )
+
+    counter = BatterCounter([
+        pitch(1, "swinging_strike", 11, None),
+        pitch(2, "ball", 12, None),
+        pitch(3, "swinging_strike", None, None),
+        pitch(4, "called_strike", 1, 1),
+        pitch(5, "hit_into_play", 1, 1, 100, 25),
+        pitch(6, "hit_into_play", 1, 1, 96, None),
+        pitch(7, "hit_into_play", 1, 1, 90, 20),
+        pitch(8, "hit_into_play", 1, 1, None, None),
+    ])
+
+    assert (counter.chases, counter.chase_opportunities, counter.chase_rate) == (1, 2, 0.5)
+    assert (
+        counter.hard_hits,
+        counter.hard_hit_opportunities,
+        counter.hard_hit_rate,
+    ) == (2, 3, 0.666667)
+    assert (
+        counter.barrels,
+        counter.barrel_opportunities,
+        counter.barrel_rate,
+    ) == (1, 2, 0.5)
+    row = batter_season_row("snapshot", counter)
+    assert (row["chases"], row["chase_opportunities"]) == (1, 2)
+    assert (row["hard_hits"], row["hard_hit_opportunities"]) == (2, 3)
+    assert (row["barrels"], row["barrel_opportunities"]) == (1, 2)
 
 
 def test_pitcher_baseline_from_fixture(db):

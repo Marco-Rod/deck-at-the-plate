@@ -77,6 +77,8 @@ class PitchView:
     take: bool
     in_zone: bool
     outside_zone: bool
+    hard_hit_opportunity: bool
+    barrel_opportunity: bool
     hard_hit: bool
     barrel: bool
 
@@ -90,6 +92,8 @@ def _view(pitch: RawPitchEvent) -> PitchView:
     in_zone = pitch.game_zone is not None
     launch_speed = _f(pitch.launch_speed)
     launch_angle = _f(pitch.launch_angle)
+    hard_hit_opportunity = in_play and launch_speed is not None
+    barrel_opportunity = hard_hit_opportunity and launch_angle is not None
     return PitchView(
         pitch=pitch,
         swing=swing,
@@ -99,9 +103,12 @@ def _view(pitch: RawPitchEvent) -> PitchView:
         called_strike=called_strike,
         take=not swing,
         in_zone=in_zone,
-        outside_zone=not in_zone,
-        hard_hit=in_play and launch_speed is not None and launch_speed >= _HARD_HIT_VELO,
-        barrel=in_play and is_barrel(launch_speed, launch_angle),
+        # Zona desconocida no es una oportunidad de chase. Statcast 11..14 sí.
+        outside_zone=pitch.statcast_zone in {11, 12, 13, 14},
+        hard_hit_opportunity=hard_hit_opportunity,
+        barrel_opportunity=barrel_opportunity,
+        hard_hit=hard_hit_opportunity and launch_speed >= _HARD_HIT_VELO,
+        barrel=barrel_opportunity and is_barrel(launch_speed, launch_angle),
     )
 
 
@@ -274,21 +281,24 @@ class BatterCounter:
         self._outs = 0
         self._populate_events(views)
 
-        hard = [p for p in views if p.in_play and p.hard_hit]
-        barrels = [p for p in views if p.in_play and p.barrel]
-        self.hard_hit_rate = rate(len(hard), self.balls_in_play)
-        self.barrel_rate = rate(len(barrels), self.balls_in_play)
+        self.hard_hits = sum(1 for p in views if p.hard_hit)
+        self.hard_hit_opportunities = sum(1 for p in views if p.hard_hit_opportunity)
+        self.barrels = sum(1 for p in views if p.barrel)
+        self.barrel_opportunities = sum(1 for p in views if p.barrel_opportunity)
+        self.hard_hit_rate = rate(self.hard_hits, self.hard_hit_opportunities)
+        self.barrel_rate = rate(self.barrels, self.barrel_opportunities)
 
         in_zone = [p for p in views if p.in_zone]
         out_zone = [p for p in views if p.outside_zone]
-        self.chase = sum(1 for p in out_zone if p.swing)
+        self.chases = sum(1 for p in out_zone if p.swing)
+        self.chase_opportunities = len(out_zone)
         self.zone_swings = sum(1 for p in in_zone if p.swing)
         self.zone_contacts = sum(1 for p in in_zone if p.swing and not p.whiff)
 
         self.swing_rate = rate(self.swings, self.pitches_seen)
         self.whiff_rate = rate(self.whiffs, self.swings)
         self.contact_rate = rate(self.swings - self.whiffs, self.swings)
-        self.chase_rate = rate(self.chase, len(out_zone))
+        self.chase_rate = rate(self.chases, self.chase_opportunities)
         self.zone_swing_rate = rate(self.zone_swings, len(in_zone))
         self.zone_contact_rate = rate(self.zone_contacts, self.zone_swings)
 

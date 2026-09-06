@@ -61,6 +61,12 @@ class BatterSeasonStats(Base):
         CheckConstraint("whiff_rate >= 0 AND whiff_rate <= 1", name="ck_batter_season_stats_whiff_rate"),
         CheckConstraint("contact_rate >= 0 AND contact_rate <= 1", name="ck_batter_season_stats_contact_rate"),
         CheckConstraint("chase_rate >= 0 AND chase_rate <= 1", name="ck_batter_season_stats_chase_rate"),
+        CheckConstraint("chases >= 0 AND chase_opportunities >= 0 AND chases <= chase_opportunities", name="ck_batter_season_stats_chase_counts"),
+        CheckConstraint("chase_opportunities <= pitches_seen", name="ck_batter_season_stats_chase_opportunities"),
+        CheckConstraint("hard_hits >= 0 AND hard_hit_opportunities >= 0 AND hard_hits <= hard_hit_opportunities", name="ck_batter_season_stats_hard_hit_counts"),
+        CheckConstraint("hard_hit_opportunities <= balls_in_play", name="ck_batter_season_stats_hard_hit_opportunities"),
+        CheckConstraint("barrels >= 0 AND barrel_opportunities >= 0 AND barrels <= barrel_opportunities", name="ck_batter_season_stats_barrel_counts"),
+        CheckConstraint("barrel_opportunities <= balls_in_play", name="ck_batter_season_stats_barrel_opportunities"),
         CheckConstraint("zone_swing_rate >= 0 AND zone_swing_rate <= 1", name="ck_batter_season_stats_zone_swing_rate"),
         CheckConstraint("zone_contact_rate >= 0 AND zone_contact_rate <= 1", name="ck_batter_season_stats_zone_contact_rate"),
     )
@@ -82,6 +88,12 @@ class BatterSeasonStats(Base):
     swings = Column(Integer, nullable=False, default=0)
     whiffs = Column(Integer, nullable=False, default=0)
     balls_in_play = Column(Integer, nullable=False, default=0)
+    chases = Column(Integer, nullable=False, default=0)
+    chase_opportunities = Column(Integer, nullable=False, default=0)
+    hard_hits = Column(Integer, nullable=False, default=0)
+    hard_hit_opportunities = Column(Integer, nullable=False, default=0)
+    barrels = Column(Integer, nullable=False, default=0)
+    barrel_opportunities = Column(Integer, nullable=False, default=0)
     avg = Column(Numeric(6, 5), nullable=True)
     obp = Column(Numeric(6, 5), nullable=True)
     slg = Column(Numeric(6, 5), nullable=True)
