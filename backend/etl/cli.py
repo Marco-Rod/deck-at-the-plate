@@ -35,6 +35,7 @@ from etl.services.quality import collect_quality, emit_quality_report
 from etl.services.statcast_population import import_statcast_population
 from etl.services.pitcher_movement import calculate_movement_candidate
 from etl.services.pitcher_control import calculate_control_candidate
+from etl.services.pitcher_velocity import calculate_velocity_candidate
 from etl.sources.mlb import MLBStatsApiClient
 from etl.sources.statcast import StatcastSourceAdapter
 
@@ -124,6 +125,13 @@ def _build_parser() -> argparse.ArgumentParser:
     control.add_argument("--from", dest="data_start_date", type=_parse_date, required=True)
     control.add_argument("--to", dest="data_end_date", type=_parse_date, required=True)
     control.add_argument("--distribution-version", dest="distribution_version", default=None)
+
+    velocity = sub.add_parser("calculate-pitcher-velocity", help="Inspecciona candidato Velocity sin persistir carta")
+    velocity.add_argument("--player-id", dest="player_id", type=int, required=True)
+    velocity.add_argument("--season", type=int, required=True)
+    velocity.add_argument("--from", dest="data_start_date", type=_parse_date, required=True)
+    velocity.add_argument("--to", dest="data_end_date", type=_parse_date, required=True)
+    velocity.add_argument("--distribution-version", dest="distribution_version", default=None)
 
     run = sub.add_parser("run", help="Pipeline completo")
     run.add_argument("--season", type=int, required=True)
@@ -351,6 +359,22 @@ def main(argv=None) -> int:
             if result.skipped_metrics:
                 print(f"skipped={','.join(result.skipped_metrics)}")
             print(f"coverage={result.weight_coverage:.2f} CONTROL={result.rating}")
+
+        elif args.command == "calculate-pitcher-velocity":
+            result = calculate_velocity_candidate(
+                db, mlb_id=args.player_id, season=args.season,
+                data_start_date=args.data_start_date, data_end_date=args.data_end_date,
+                distribution_version=args.distribution_version,
+            )
+            if result.rating is None:
+                print(f"avg_velocity unavailable={result.unavailable_reason} VELOCITY=None")
+            else:
+                print(
+                    f"avg_velocity raw={result.observed:.2f} baseline={result.league_baseline:.8f} "
+                    f"sample={result.sample_size} stabilization={result.stabilization} "
+                    f"weight={result.shrinkage_weight:.4f} adjusted={result.adjusted:.4f} "
+                    f"percentile={result.percentile:.4f} VELOCITY={result.rating}"
+                )
 
         elif args.command == "run":
             # Corrección A2: si RAW falla, run() propaga la excepción y aquí se
