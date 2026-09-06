@@ -120,7 +120,7 @@ def _build_batter_distributions(
         eligible = [
             (value, sample)
             for value, sample in observations
-            if value is not None and sample > 0
+            if value is not None and sample >= config.minimum_sample
         ]
         if not eligible:
             skipped += 1

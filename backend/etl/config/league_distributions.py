@@ -23,10 +23,11 @@ class MetricDistributionConfig:
 
 @dataclass(frozen=True)
 class BatterMetricDistributionConfig:
-    """Contrato descriptivo; eligibility/shrinkage se calibrarán después."""
+    """Contrato de distribución; shrinkage se calibrará por separado."""
 
     direction: str
     sample_field: str
+    minimum_sample: int
 
 
 PITCHER_METRICS = {
@@ -42,16 +43,16 @@ PITCHER_METRICS = {
 
 
 BATTER_METRICS = {
-    "contact_rate": BatterMetricDistributionConfig("higher", "swings"),
-    "avg": BatterMetricDistributionConfig("higher", "ab"),
-    "whiff_rate": BatterMetricDistributionConfig("lower", "swings"),
-    "iso": BatterMetricDistributionConfig("higher", "ab"),
-    "barrel_rate": BatterMetricDistributionConfig("higher", "barrel_opportunities"),
-    "hard_hit_rate": BatterMetricDistributionConfig("higher", "hard_hit_opportunities"),
-    "slg": BatterMetricDistributionConfig("higher", "ab"),
-    "chase_rate": BatterMetricDistributionConfig("lower", "chase_opportunities"),
-    "walk_rate": BatterMetricDistributionConfig("higher", "pa"),
-    "strikeout_rate": BatterMetricDistributionConfig("lower", "pa"),
+    "contact_rate": BatterMetricDistributionConfig("higher", "swings", 10),
+    "avg": BatterMetricDistributionConfig("higher", "ab", 10),
+    "whiff_rate": BatterMetricDistributionConfig("lower", "swings", 10),
+    "iso": BatterMetricDistributionConfig("higher", "ab", 10),
+    "barrel_rate": BatterMetricDistributionConfig("higher", "barrel_opportunities", 10),
+    "hard_hit_rate": BatterMetricDistributionConfig("higher", "hard_hit_opportunities", 10),
+    "slg": BatterMetricDistributionConfig("higher", "ab", 10),
+    "chase_rate": BatterMetricDistributionConfig("lower", "chase_opportunities", 10),
+    "walk_rate": BatterMetricDistributionConfig("higher", "pa", 10),
+    "strikeout_rate": BatterMetricDistributionConfig("lower", "pa", 10),
 }
 
 

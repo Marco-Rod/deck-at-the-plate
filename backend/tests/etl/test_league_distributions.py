@@ -253,6 +253,64 @@ def test_builder_batter_usa_denominador_real_como_sample(db):
         "walk_rate": "higher",
         "strikeout_rate": "lower",
     }
+    assert {config.minimum_sample for config in BATTER_METRICS.values()} == {10}
+
+
+def test_builder_batter_filtra_elegibilidad_por_denominador_de_cada_metrica(db):
+    eligible = _batter(db, 101, 0.0)
+    mixed = _batter(db, 102, 0.0)
+    mixed.pa = 12
+    mixed.ab = 10
+    mixed.swings = 9
+    mixed.whiffs = 3
+    mixed.contact_rate = round(6 / 9, 6)
+    mixed.whiff_rate = round(3 / 9, 6)
+    mixed.chases = 4
+    mixed.chase_opportunities = 14
+    mixed.chase_rate = round(4 / 14, 6)
+    mixed.hard_hits = 3
+    mixed.hard_hit_opportunities = 7
+    mixed.hard_hit_rate = round(3 / 7, 6)
+    mixed.barrels = 1
+    mixed.barrel_opportunities = 7
+    mixed.barrel_rate = round(1 / 7, 6)
+    db.commit()
+
+    build_league_distributions(
+        db,
+        season=2026,
+        role="batter",
+        data_start_date=START,
+        data_end_date=END,
+    )
+    distributions = {
+        row.metric: row
+        for row in db.query(LeagueMetricDistribution).filter_by(role="BATTER")
+    }
+
+    for metric in ("contact_rate", "whiff_rate", "hard_hit_rate", "barrel_rate"):
+        assert distributions[metric].population_size == 1
+    assert distributions["contact_rate"].sample_size_total == eligible.swings
+    assert float(distributions["contact_rate"].population_mean) == pytest.approx(
+        float(eligible.contact_rate)
+    )
+    assert float(distributions["contact_rate"].league_baseline) == pytest.approx(
+        float(eligible.contact_rate)
+    )
+
+    for metric in ("avg", "iso", "slg", "chase_rate", "walk_rate", "strikeout_rate"):
+        assert distributions[metric].population_size == 2
+    assert distributions["avg"].sample_size_total == eligible.ab + mixed.ab
+    assert distributions["chase_rate"].sample_size_total == (
+        eligible.chase_opportunities + mixed.chase_opportunities
+    )
+    assert distributions["walk_rate"].sample_size_total == eligible.pa + mixed.pa
+    expected_avg_baseline = (
+        float(eligible.avg) * eligible.ab + float(mixed.avg) * mixed.ab
+    ) / (eligible.ab + mixed.ab)
+    assert float(distributions["avg"].league_baseline) == pytest.approx(
+        expected_avg_baseline
+    )
 
 
 def test_version_nueva_no_sobrescribe_historial(db):
