@@ -21,6 +21,11 @@ Beneficios SOLID:
 import enum
 
 
+def enum_values(enum_class: type[enum.Enum]) -> list[str]:
+    """Use Enum member values, rather than Python member names, in SQLAlchemy."""
+    return [member.value for member in enum_class]
+
+
 class Event(str, enum.Enum):
     """Eventos que el motor puede producir en una jugada."""
 

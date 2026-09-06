@@ -9,6 +9,9 @@ from typing import Optional
 from etl.dto import PitchSourceRecord
 
 
+VALID_STATCAST_ZONES = frozenset((*range(1, 10), *range(11, 15)))
+
+
 def _err(messages: list[str], field: str, value, expectation: str) -> None:
     messages.append(f"{field}={value!r}: {expectation}")
 
@@ -40,8 +43,8 @@ def validate_raw_row(record: PitchSourceRecord) -> list[str]:
     if record.p_throws is not None and record.p_throws.strip().upper() not in {"L", "R"}:
         _err(errors, "p_throws", record.p_throws, "L/R")
 
-    if record.zone is not None and not (1 <= record.zone <= 9):
-        _err(errors, "zone(statcast)", record.zone, "None o 1..9")
+    if record.zone is not None and record.zone not in VALID_STATCAST_ZONES:
+        _err(errors, "zone(statcast)", record.zone, "None, 1..9 o 11..14")
 
     return errors
 

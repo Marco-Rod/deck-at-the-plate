@@ -4,7 +4,7 @@ import datetime as dt
 
 import pytest
 import httpx
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 from app.database import Base
@@ -128,6 +128,11 @@ class TestLoadersCore:
         db.commit()
         assert db.query(Player).count() == 1
         assert player.mlb_id == 660271
+        stored = db.execute(
+            text("SELECT bats, throws FROM players WHERE mlb_id = :mlb_id"),
+            {"mlb_id": 660271},
+        ).one()
+        assert stored == ("L", "L")
 
     def test_upsert_player_reutiliza_misma_fila(self, db):
         record = PlayerSourceRecord(mlb_id=660271, full_name="Shohei Ohtani")

@@ -54,7 +54,11 @@ class TestRawValidator:
     def test_stand_switch_valido(self):
         assert validate_raw_row(_record(stand="S")) == []
 
-    def test_zone_fuera_de_1_9_rechaza(self):
+    def test_zonas_statcast_exteriores_son_validas(self):
+        for zone in range(11, 15):
+            assert validate_raw_row(_record(zone=zone)) == []
+
+    def test_zone_desconocida_rechaza(self):
         errors = validate_raw_row(_record(zone=42))
         assert any("zone" in e for e in errors)
 

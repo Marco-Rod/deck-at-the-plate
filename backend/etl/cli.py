@@ -23,7 +23,7 @@ import logging
 from datetime import date
 
 from app.database import SessionLocal
-from etl.config import NAMES_GENERATOR_VERSION
+from etl.config import NAMES_GENERATOR_VERSION, RATING_MODEL_VERSION
 from etl.pipelines.analytics import AnalyticsPipeline
 from etl.pipelines.metadata import MetadataPipeline
 from etl.pipelines.statcast import StatcastRawPipeline
@@ -100,18 +100,33 @@ def _build_parser() -> argparse.ArgumentParser:
     gen = sub.add_parser("generate-card-profiles", help="Genera CardGenerationProfile (gate previo a publicar)")
     gen.add_argument("--season", type=int, required=True)
     gen.add_argument("--data-end-date", dest="data_end_date", type=_parse_date, default=None)
-    gen.add_argument("--rating-model", dest="rating_model", type=str, default=None)
+    gen.add_argument(
+        "--rating-model",
+        dest="rating_model",
+        type=str,
+        default=RATING_MODEL_VERSION,
+    )
 
     val = sub.add_parser("validate-card-profiles", help="Valida perfiles (gate §52)")
     val.add_argument("--season", type=int, required=True)
     val.add_argument("--data-end-date", dest="data_end_date", type=_parse_date, default=None)
-    val.add_argument("--rating-model", dest="rating_model", type=str, default=None)
+    val.add_argument(
+        "--rating-model",
+        dest="rating_model",
+        type=str,
+        default=RATING_MODEL_VERSION,
+    )
 
     pub = sub.add_parser("publish-card-catalog", help="Publica el catálogo (BUILDING→VALIDATING→ACTIVE)")
     pub.add_argument("--season", type=int, required=True)
     pub.add_argument("--edition", default="BASE")
     pub.add_argument("--data-end-date", dest="data_end_date", type=_parse_date, default=None)
-    pub.add_argument("--rating-model", dest="rating_model", type=str, default=None)
+    pub.add_argument(
+        "--rating-model",
+        dest="rating_model",
+        type=str,
+        default=RATING_MODEL_VERSION,
+    )
 
     vcpu = sub.add_parser("validate-cpu-rosters", help="Valida rosters CPU derivados (§53)")
     vcpu.add_argument("--season", type=int, required=True)
@@ -256,7 +271,16 @@ def main(argv=None) -> int:
                 rating_model_version=args.rating_model,
                 data_end_date=args.data_end_date,
             )
-            logger.info("card profiles created=%s skipped=%s version=%s", result.created, result.skipped, result.version)
+            logger.info(
+                "card profiles created=%s updated=%s unchanged=%s "
+                "skipped_no_data=%s rejected=%s version=%s",
+                result.created,
+                result.updated,
+                result.unchanged,
+                result.skipped_no_data,
+                result.rejected,
+                result.version,
+            )
 
         elif args.command == "validate-card-profiles":
             result = validate_profiles(

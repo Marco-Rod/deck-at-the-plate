@@ -1,12 +1,12 @@
 """
 Modelo CARD GENERATION: CardGenerationProfile
 =============================================
-Snapshot INMUTABLE de cómo un perfil estadístico se convirtió en ratings
+Derivado reproducible de cómo un perfil estadístico se convirtió en ratings
 jugables. Permite regenerar cartas, comparar algoritmos y explicar cada valor.
 
 Rules:
-    - Es inmutable (no onupdate). Crear una nueva carta; nunca mutar una carta
-      ya poseída cuando cambia el rating model.
+    - Un cambio de inputs Analytics actualiza el derivado de forma controlada;
+      un cambio del rating model crea una versión lógica diferente.
     - rating_model_version identifica el algoritmo; nunca reutilizar la misma
       versión con fórmulas diferentes.
     - La fórmula de ratings vive FUERA del modelo (en el pipeline ETL/ETL),
@@ -25,6 +25,7 @@ from sqlalchemy import (
     SmallInteger,
     String,
     UniqueConstraint,
+    func,
 )
 from sqlalchemy.orm import relationship
 from app.database import Base
@@ -58,6 +59,8 @@ class CardGenerationProfile(Base):
         String(36), ForeignKey("player_seasons.id"), nullable=False, index=True
     )
     rating_model_version = Column(String(30), nullable=False, index=True)
+    # Nullable para que perfiles legacy sin fingerprint se reconstruyan una vez.
+    input_hash = Column(String(64), nullable=True, index=True)
     contact_rating = Column(SmallInteger, nullable=False)
     power_rating = Column(SmallInteger, nullable=False)
     vision_rating = Column(SmallInteger, nullable=False)
@@ -80,5 +83,11 @@ class CardGenerationProfile(Base):
     # Percentiles/inputs/parámetros suficientes para explicar el cálculo.
     calculation_metadata = Column(JSON, nullable=False, default=dict)
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, index=True)
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=utcnow,
+    )
 
     player_season = relationship("PlayerSeason")

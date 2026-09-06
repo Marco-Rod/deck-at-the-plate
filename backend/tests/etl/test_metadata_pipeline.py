@@ -19,10 +19,11 @@ from app.models import (
     Team,
     CardGenerationProfile,
     BatterSeasonStats,
+    PitcherPitchProfile,
     PitcherSeasonStats,
     GamePlayerIdentity,
 )
-from app.core.enums import ImportStatus, PitchFamily
+from app.core.enums import ImportStatus, PitchFamily, SplitHand
 from etl.dto import PlayerSourceRecord, TeamSourceRecord
 from etl.http.client import ExternalHttpClient
 from etl.loaders.core import upsert_player, upsert_player_season, upsert_team
@@ -202,7 +203,7 @@ class TestGenerateProfiles:
         assert first.created == 1
         second = generate_profiles(db, season=SEASON)
         assert second.created == 0
-        assert second.skipped == 1
+        assert second.unchanged == 1
         profile = db.query(CardGenerationProfile).one()
         assert profile.player_season_id == ps.id
         assert 0 <= profile.overall_rating <= 99
@@ -212,3 +213,73 @@ class TestGenerateProfiles:
         from app.models import PlayerCardModel
 
         assert callable(getattr(PlayerCardModel, "get_rarity_by_overall", None))
+
+    def test_reconstruye_pitcher_stale_y_luego_es_idempotente(self, db):
+        pitcher = upsert_player(
+            db,
+            PlayerSourceRecord(mlb_id=650911, full_name="Cristopher Sanchez"),
+        )
+        ps = upsert_player_season(
+            db,
+            player=pitcher,
+            season=SEASON,
+            data_start_date=W_FROM,
+            data_end_date=W_TO,
+        )
+        db.add(
+            PitcherSeasonStats(
+                player_season_id=ps.id,
+                games=1,
+                starts=1,
+                batters_faced=91,
+                pitches=91,
+                outs_recorded=18,
+                hits_allowed=4,
+                home_runs_allowed=0,
+                walks=2,
+                strikeouts=8,
+                avg_velocity=94.25,
+                whiff_rate=0.28,
+            )
+        )
+        db.commit()
+
+        first = generate_profiles(db, season=SEASON, data_end_date=W_TO)
+        assert first.created == 1
+        profile = db.query(CardGenerationProfile).one()
+        assert profile.repertoire_payload is None
+        first_hash = profile.input_hash
+
+        for pitch_type, family, count in (
+            ("SI", PitchFamily.FASTBALL, 40),
+            ("CH", PitchFamily.OFFSPEED, 37),
+            ("SL", PitchFamily.BREAKING, 14),
+        ):
+            db.add(
+                PitcherPitchProfile(
+                    player_season_id=ps.id,
+                    pitch_type=pitch_type,
+                    pitch_family=family,
+                    batter_side=SplitHand.ALL,
+                    pitch_count=count,
+                    sample_size=count,
+                )
+            )
+        db.commit()
+
+        second = generate_profiles(db, season=SEASON, data_end_date=W_TO)
+        assert second.created == 0
+        assert second.updated == 1
+        assert second.unchanged == 0
+        db.refresh(profile)
+        assert profile.input_hash != first_hash
+        assert profile.calculation_metadata["pitches_in_arsenal"] == 3
+        assert [row["pitch_type"] for row in profile.repertoire_payload] == ["SI", "CH", "SL"]
+
+        stable_hash = profile.input_hash
+        third = generate_profiles(db, season=SEASON, data_end_date=W_TO)
+        assert third.created == 0
+        assert third.updated == 0
+        assert third.unchanged == 1
+        db.refresh(profile)
+        assert profile.input_hash == stable_hash

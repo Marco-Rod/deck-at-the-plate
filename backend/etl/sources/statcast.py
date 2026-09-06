@@ -127,7 +127,10 @@ class StatcastCSVParser:
     """Parsea el CSV crudo en PitchSourceRecord validando headers."""
 
     def parse(self, csv_text: str) -> list[PitchSourceRecord]:
-        reader = csv.DictReader(io.StringIO(csv_text))
+        # Baseball Savant puede anteponer un BOM UTF-8 al primer encabezado.
+        # Sin retirarlo, csv interpreta la clave como '\ufeff"pitch_type"' y
+        # todos los registros pierden silenciosamente el tipo de lanzamiento.
+        reader = csv.DictReader(io.StringIO(csv_text.lstrip("\ufeff")))
         validate_headers(reader.fieldnames or [])
         records = []
         for row in reader:

@@ -51,6 +51,16 @@ class TestQueryBuilder:
 
 
 class TestCSVParser:
+    def test_pitch_type_en_primer_header_con_bom(self):
+        csv_text = (
+            '\ufeff"pitch_type",game_pk,game_date,at_bat_number,pitch_number,batter,pitcher\n'
+            "SI,824230,2026-09-02,41,2,660271,650911\n"
+        )
+
+        record = StatcastCSVParser().parse(csv_text)[0]
+
+        assert record.pitch_type == "SI"
+
     def test_parse_fixture_con_landas_y_tipos(self):
         parser = StatcastCSVParser()
         records = parser.parse((FIXTURES / "statcast_small.csv").read_text())
@@ -60,6 +70,7 @@ class TestCSVParser:
         assert first.game_date == dt.date(2026, 4, 1)
         assert first.batter_mlb_id == 660271
         assert first.pitcher_mlb_id == 669373
+        assert first.pitch_type == "FF"
         assert first.stand == "L"
         assert first.description == "swinging_strike"
         assert first.release_speed is not None

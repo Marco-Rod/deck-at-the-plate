@@ -30,7 +30,7 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 from app.database import Base
-from app.core.enums import Handedness, ImportStatus, PitchFamily, ThrowHand
+from app.core.enums import Handedness, ImportStatus, PitchFamily, ThrowHand, enum_values
 from app.core.time import utcnow
 
 
@@ -101,13 +101,21 @@ class RawPitchEvent(Base):
     pitch_number = Column(SmallInteger, nullable=False)
     batter_mlb_id = Column(Integer, nullable=False, index=True)
     pitcher_mlb_id = Column(Integer, nullable=False, index=True)
-    stand = Column(Enum(Handedness, name="handedness", create_type=False), nullable=True, index=True)
-    p_throws = Column(Enum(ThrowHand, name="throwhand", create_type=False), nullable=True, index=True)
+    stand = Column(
+        Enum(Handedness, name="handedness", create_type=False, values_callable=enum_values),
+        nullable=True,
+        index=True,
+    )
+    p_throws = Column(
+        Enum(ThrowHand, name="throwhand", create_type=False, values_callable=enum_values),
+        nullable=True,
+        index=True,
+    )
     balls = Column(SmallInteger, nullable=True)
     strikes = Column(SmallInteger, nullable=True)
     outs_when_up = Column(SmallInteger, nullable=True)
     inning = Column(SmallInteger, nullable=True)
-    inning_topbot = Column(String(3), nullable=True)
+    inning_topbot = Column(String(10), nullable=True)
     pitch_type = Column(String(12), nullable=True, index=True)
     pitch_family = Column(
         Enum(PitchFamily, name="pitchfamily", create_type=False), nullable=True, index=True

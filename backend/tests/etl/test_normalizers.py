@@ -82,6 +82,7 @@ class TestInningTopBot:
     def test_normalize(self):
         assert normalize_inning_topbot("Top") == "Top"
         assert normalize_inning_topbot("bottom") == "Bottom"
+        assert normalize_inning_topbot("Bot") == "Bottom"
         assert normalize_inning_topbot(None) is None
 
 
@@ -153,6 +154,21 @@ class TestRawMapper:
         record = dataclasses.replace(record, pitch_type="ff")
         row = normalize_row(record)
         assert row["pitch_type"] == "FF"
+
+    def test_pitch_type_ausente_sigue_siendo_valido(self):
+        import dataclasses
+
+        record = dataclasses.replace(self._record(), pitch_type=None)
+
+        assert normalize_row(record)["pitch_type"] is None
+
+    def test_cambio_de_pitch_type_cambia_hash(self):
+        import dataclasses
+
+        missing = dataclasses.replace(self._record(), pitch_type=None)
+        classified = dataclasses.replace(missing, pitch_type="SI")
+
+        assert normalize_row(missing)["raw_payload_hash"] != normalize_row(classified)["raw_payload_hash"]
 
     def test_familia_desconocida_none_y_zona_fuera(self):
         import dataclasses

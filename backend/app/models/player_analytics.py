@@ -32,7 +32,14 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 from app.database import Base
-from app.core.enums import BatterSide, PitchFamily, PitchFamilySplit, SplitHand, ThrowHand
+from app.core.enums import (
+    BatterSide,
+    PitchFamily,
+    PitchFamilySplit,
+    SplitHand,
+    ThrowHand,
+    enum_values,
+)
 from app.core.time import utcnow
 
 
@@ -160,7 +167,7 @@ class BatterZoneProfile(Base):
     )
     zone = Column(SmallInteger, nullable=False, index=True)
     pitcher_hand = Column(
-        Enum(SplitHand, name="sorthand", create_type=False), nullable=False, default=SplitHand.ALL, index=True
+        Enum(SplitHand, name="sorthand", create_type=False, values_callable=enum_values), nullable=False, default=SplitHand.ALL, index=True
     )
     pitch_family = Column(
         Enum(PitchFamilySplit, name="pitchfamilysplit", create_type=False), nullable=False, default=PitchFamilySplit.ALL, index=True
@@ -212,7 +219,7 @@ class PitcherZoneProfile(Base):
     )
     zone = Column(SmallInteger, nullable=False, index=True)
     batter_side = Column(
-        Enum(SplitHand, name="sorthand", create_type=False), nullable=False, default=SplitHand.ALL, index=True
+        Enum(SplitHand, name="sorthand", create_type=False, values_callable=enum_values), nullable=False, default=SplitHand.ALL, index=True
     )
     pitch_family = Column(
         Enum(PitchFamilySplit, name="pitchfamilysplit", create_type=False), nullable=False, default=PitchFamilySplit.ALL, index=True
@@ -260,7 +267,7 @@ class BatterPitchFamilyProfile(Base):
         Enum(PitchFamily, name="pitchfamily", create_type=False), nullable=False, index=True
     )
     pitcher_hand = Column(
-        Enum(SplitHand, name="sorthand", create_type=False), nullable=False, default=SplitHand.ALL, index=True
+        Enum(SplitHand, name="sorthand", create_type=False, values_callable=enum_values), nullable=False, default=SplitHand.ALL, index=True
     )
     pitches_seen = Column(Integer, nullable=False, default=0)
     swings = Column(Integer, nullable=False, default=0)
@@ -307,7 +314,7 @@ class PitcherPitchProfile(Base):
         Enum(PitchFamily, name="pitchfamily", create_type=False), nullable=False, index=True
     )
     batter_side = Column(
-        Enum(SplitHand, name="sorthand", create_type=False), nullable=False, default=SplitHand.ALL, index=True
+        Enum(SplitHand, name="sorthand", create_type=False, values_callable=enum_values), nullable=False, default=SplitHand.ALL, index=True
     )
     pitch_count = Column(Integer, nullable=False, default=0)
     sample_size = Column(Integer, nullable=False, default=0)  # alias V1: pitch_count
@@ -350,7 +357,7 @@ class BatterHandednessSplit(Base):
         String(36), ForeignKey("player_seasons.id"), nullable=False, index=True
     )
     pitcher_hand = Column(
-        Enum(ThrowHand, name="throwhand", create_type=False), nullable=False, index=True
+        Enum(ThrowHand, name="throwhand", create_type=False, values_callable=enum_values), nullable=False, index=True
     )
     pa = Column(Integer, nullable=False, default=0)
     sample_size = Column(Integer, nullable=False, default=0)  # alias V1: pa
@@ -388,7 +395,7 @@ class PitcherHandednessSplit(Base):
         String(36), ForeignKey("player_seasons.id"), nullable=False, index=True
     )
     batter_side = Column(
-        Enum(BatterSide, name="batter_side_enum", create_type=False), nullable=False, index=True
+        Enum(BatterSide, name="batter_side_enum", create_type=False, values_callable=enum_values), nullable=False, index=True
     )
     batters_faced = Column(Integer, nullable=False, default=0)
     sample_size = Column(Integer, nullable=False, default=0)  # alias V1: batters_faced

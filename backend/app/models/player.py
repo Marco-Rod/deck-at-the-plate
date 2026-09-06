@@ -28,7 +28,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship
 from app.database import Base
-from app.core.enums import Handedness, ThrowHand
+from app.core.enums import Handedness, ThrowHand, enum_values
 from app.core.time import utcnow
 
 
@@ -49,8 +49,16 @@ class Player(Base):
     birth_date = Column(Date, nullable=True)
     # Código MLB/game: SP, RP, C, 1B, etc. Actual/general, puede variar por temporada.
     primary_position = Column(String(5), nullable=True, index=True)
-    bats = Column(Enum(Handedness, name="handedness", create_type=False), nullable=True, index=True)
-    throws = Column(Enum(ThrowHand, name="throwhand", create_type=False), nullable=True, index=True)
+    bats = Column(
+        Enum(Handedness, name="handedness", create_type=False, values_callable=enum_values),
+        nullable=True,
+        index=True,
+    )
+    throws = Column(
+        Enum(ThrowHand, name="throwhand", create_type=False, values_callable=enum_values),
+        nullable=True,
+        index=True,
+    )
     is_active = Column(Boolean, nullable=False, default=True, index=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
     updated_at = Column(

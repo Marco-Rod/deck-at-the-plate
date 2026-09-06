@@ -1,6 +1,7 @@
 """Prueba del parser CLI (spec §35) sin ejecutar red."""
 
 from etl.cli import _build_parser
+from etl.config import RATING_MODEL_VERSION
 
 
 def test_parser_generates_subcomandos():
@@ -56,6 +57,17 @@ def test_generate_card_profiles_flags():
     assert args.command == "generate-card-profiles"
     assert args.data_end_date.isoformat() == "2026-08-31"
     assert args.rating_model == "v2"
+
+
+def test_card_profile_commands_usan_rating_model_configurado_por_default():
+    parser = _build_parser()
+    for command in (
+        "generate-card-profiles",
+        "validate-card-profiles",
+        "publish-card-catalog",
+    ):
+        args = parser.parse_args([command, "--season", "2026"])
+        assert args.rating_model == RATING_MODEL_VERSION
 
 
 def test_generate_game_identities_all():
