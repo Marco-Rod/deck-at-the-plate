@@ -266,3 +266,25 @@ def test_movement_excluye_poca_muestra_pitchout_y_splits(db):
     db.commit()
     build_league_distributions(db, season=2026, role="pitcher", data_start_date=START, data_end_date=END)
     assert db.query(LeagueMetricDistribution).filter_by(metric="movement_magnitude").count() == 0
+
+
+def test_fallback_family_agrega_pitch_types_antes_de_contar_pitchers(db):
+    pitcher_a = _movement_profile(db, 1, "FF", PitchFamily.FASTBALL, 20, 1.0, 0.0)
+    db.add(PitcherPitchProfile(
+        player_season_id=pitcher_a.player_season_id,
+        pitch_type="SI", pitch_family=PitchFamily.FASTBALL, batter_side=SplitHand.ALL,
+        pitch_count=30, sample_size=30, usage_rate=0.6, avg_pfx_x=2.0, avg_pfx_z=0.0,
+    ))
+    for index in range(14):
+        _movement_profile(db, 100 + index, "FF", PitchFamily.FASTBALL, 40, 1.0, 0.0)
+    db.commit()
+
+    build_league_distributions(db, season=2026, role="pitcher", data_start_date=START, data_end_date=END)
+    family = db.query(LeagueMetricDistribution).filter_by(
+        metric="movement_magnitude", pitch_type=None, pitch_family="FASTBALL"
+    ).one()
+    # Pitcher A aporta (1*20 + 2*30)/50 = 1.6 como una sola observación.
+    assert family.population_size == 15
+    assert family.sample_size_total == 610
+    assert abs(float(family.population_mean) - 1.04) < 1e-8
+    assert abs(float(family.league_baseline) - (640 / 610)) < 1e-8

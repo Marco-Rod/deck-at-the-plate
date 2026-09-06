@@ -35,6 +35,12 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # La identidad anterior no puede representar scopes. Se eliminan únicamente
+    # las filas que dependen de las columnas introducidas por esta migración.
+    op.execute(
+        "DELETE FROM league_metric_distributions "
+        "WHERE pitch_type IS NOT NULL OR pitch_family IS NOT NULL"
+    )
     op.drop_index("ix_league_metric_distributions_pitch_family", table_name="league_metric_distributions")
     op.drop_index("ix_league_metric_distributions_pitch_type", table_name="league_metric_distributions")
     op.drop_index("uq_league_metric_distributions_identity", table_name="league_metric_distributions")

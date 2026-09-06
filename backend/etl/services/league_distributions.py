@@ -147,18 +147,15 @@ def build_league_distributions(
         )
         .all()
     )
-    scoped_profiles: dict[tuple[str | None, str], list[PitcherPitchProfile]] = {}
+    type_profiles: dict[tuple[str, str], list[PitcherPitchProfile]] = {}
+    family_pitcher_profiles: dict[tuple[str, str], list[PitcherPitchProfile]] = {}
     for profile in profiles:
         family = profile.pitch_family.value if hasattr(profile.pitch_family, "value") else str(profile.pitch_family)
-        scoped_profiles.setdefault((profile.pitch_type, family), []).append(profile)
-        scoped_profiles.setdefault((None, family), []).append(profile)
+        type_profiles.setdefault((profile.pitch_type, family), []).append(profile)
+        family_pitcher_profiles.setdefault((family, profile.player_season_id), []).append(profile)
 
-    for (pitch_type, pitch_family), scoped in sorted(scoped_profiles.items(), key=lambda item: (item[0][1], item[0][0] or "")):
-        min_population = (
-            MOVEMENT_PITCH_TYPE_MIN_POPULATION if pitch_type is not None
-            else MOVEMENT_FAMILY_MIN_POPULATION
-        )
-        if len(scoped) < min_population:
+    for (pitch_type, pitch_family), scoped in sorted(type_profiles.items(), key=lambda item: (item[0][1], item[0][0])):
+        if len(scoped) < MOVEMENT_PITCH_TYPE_MIN_POPULATION:
             continue
         values = [hypot(float(row.avg_pfx_x), float(row.avg_pfx_z)) for row in scoped]
         samples = [row.pitch_count for row in scoped]
@@ -167,6 +164,41 @@ def build_league_distributions(
             "role": normalized_role,
             "metric": "movement_magnitude",
             "pitch_type": pitch_type,
+            "pitch_family": pitch_family,
+            "distribution_version": version,
+            "data_start_date": data_start_date,
+            "data_end_date": data_end_date,
+        }
+        outcome = _upsert_distribution(db, identity, _summary(values, samples))
+        if outcome == "created":
+            created += 1
+        elif outcome == "updated":
+            updated += 1
+        else:
+            unchanged += 1
+
+    # El fallback agrupa primero todos los pitch types de cada pitcher. Así los
+    # percentiles dan un voto por pitcher, aunque use FF+SI+FC, mientras que el
+    # baseline conserva como peso el total de pitches de la familia.
+    family_observations: dict[str, list[tuple[float, int]]] = {}
+    for (pitch_family, _player_season_id), pitcher_profiles in family_pitcher_profiles.items():
+        sample = sum(row.pitch_count for row in pitcher_profiles)
+        weighted_magnitude = sum(
+            hypot(float(row.avg_pfx_x), float(row.avg_pfx_z)) * row.pitch_count
+            for row in pitcher_profiles
+        ) / sample
+        family_observations.setdefault(pitch_family, []).append((weighted_magnitude, sample))
+
+    for pitch_family, observations in sorted(family_observations.items()):
+        if len(observations) < MOVEMENT_FAMILY_MIN_POPULATION:
+            continue
+        values = [value for value, _sample in observations]
+        samples = [sample for _value, sample in observations]
+        identity = {
+            "season": season,
+            "role": normalized_role,
+            "metric": "movement_magnitude",
+            "pitch_type": None,
             "pitch_family": pitch_family,
             "distribution_version": version,
             "data_start_date": data_start_date,
