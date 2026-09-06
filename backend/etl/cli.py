@@ -40,6 +40,7 @@ from etl.services.pitcher_stuff import calculate_stuff_candidate
 from etl.services.pitcher_ratings2 import calculate_pitcher_ratings2
 from etl.services.player_ratings import persist_pitcher_ratings2
 from etl.services.ratings2_card_profiles import generate_pitcher_card_profile_from_ratings2
+from etl.services.rating_distributions import build_overall_rating_distribution
 from etl.sources.mlb import MLBStatsApiClient
 from etl.sources.statcast import StatcastSourceAdapter
 
@@ -115,6 +116,18 @@ def _build_parser() -> argparse.ArgumentParser:
     dist.add_argument("--from", dest="data_start_date", type=_parse_date, required=True)
     dist.add_argument("--to", dest="data_end_date", type=_parse_date, required=True)
     dist.add_argument("--distribution-version", dest="distribution_version", default=None)
+
+    rating_dist = sub.add_parser(
+        "build-rating-distributions",
+        help="Construye distribuciones de ratings oficiales para calibrar rarity",
+    )
+    rating_dist.add_argument("--season", type=int, required=True)
+    rating_dist.add_argument("--role", choices=("pitcher",), default="pitcher")
+    rating_dist.add_argument("--from", dest="data_start_date", type=_parse_date, required=True)
+    rating_dist.add_argument("--to", dest="data_end_date", type=_parse_date, required=True)
+    rating_dist.add_argument("--rating-model-version", dest="rating_model_version", default="ratings-2.0")
+    rating_dist.add_argument("--source-distribution-version", dest="source_distribution_version", default=None)
+    rating_dist.add_argument("--rarity-model-version", dest="rarity_model_version", default="rarity-2.0")
 
     movement = sub.add_parser("calculate-pitcher-movement", help="Inspecciona candidato Movement sin persistir carta")
     movement.add_argument("--player-id", dest="player_id", type=int, required=True)
@@ -352,6 +365,23 @@ def main(argv=None) -> int:
             logger.info(
                 "league distributions created=%s updated=%s unchanged=%s skipped=%s version=%s",
                 result.created, result.updated, result.unchanged, result.skipped, result.version,
+            )
+
+        elif args.command == "build-rating-distributions":
+            result = build_overall_rating_distribution(
+                db,
+                season=args.season,
+                role=args.role,
+                data_start_date=args.data_start_date,
+                data_end_date=args.data_end_date,
+                rating_model_version=args.rating_model_version,
+                source_distribution_version=args.source_distribution_version,
+                rarity_model_version=args.rarity_model_version,
+            )
+            print(
+                f"{result.status} population_size={result.population_size} "
+                f"rating_distribution_id={result.rating_distribution_id} "
+                f"RARITY_MODEL={result.rarity_model_version}"
             )
 
         elif args.command == "calculate-pitcher-movement":
