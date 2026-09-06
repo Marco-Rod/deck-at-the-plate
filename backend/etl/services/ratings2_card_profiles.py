@@ -6,27 +6,32 @@ from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
 
-from app.models import CardGenerationProfile, PlayerRatings, PlayerSeason
-from app.models.card import CardRarity
+from app.models import CardGenerationProfile, PlayerRatings, PlayerSeason, RatingDistribution
+from etl.config.rarity_2 import OVERALL_RATING_METRIC, RARITY_MODEL_VERSION
 from etl.config.ratings_2 import RATING_MODEL_VERSION
 from etl.services.pitcher_traits2 import (
     PITCHER_TRAIT_MODEL_VERSION,
     calculate_pitcher_trait,
 )
+from etl.services.rarity2 import RarityResult, calculate_rarity
 
 
-ADAPTER_VERSION = "pitcher-ratings2-card-profile-1.0"
-TRANSITIONAL_RARITY_POLICY = "COMMON_PLACEHOLDER_PENDING_RARITY_2.0"
+ADAPTER_VERSION = "pitcher-ratings2-card-profile-2.0"
 
 
 @dataclass(frozen=True)
 class Ratings2CardProfileResult:
     status: str
-    card_generation_profile_id: str
+    card_generation_profile_id: str | None
     player_ratings_id: str
 
 
-def _adapter_input_hash(ratings: PlayerRatings, pitcher_trait: str | None) -> str:
+def _adapter_input_hash(
+    ratings: PlayerRatings,
+    pitcher_trait: str | None,
+    rating_distribution: RatingDistribution,
+    rarity: RarityResult,
+) -> str:
     payload = {
         "adapter_version": ADAPTER_VERSION,
         "player_ratings_id": ratings.id,
@@ -42,7 +47,12 @@ def _adapter_input_hash(ratings: PlayerRatings, pitcher_trait: str | None) -> st
         },
         "pitcher_trait_model_version": PITCHER_TRAIT_MODEL_VERSION,
         "pitcher_trait": pitcher_trait,
-        "rarity_policy": TRANSITIONAL_RARITY_POLICY,
+        "rarity_model_version": rarity.rarity_model_version,
+        "rating_distribution_id": rating_distribution.id,
+        "rating_distribution_population_size": rating_distribution.population_size,
+        "rating_distribution_histogram": rating_distribution.population_histogram,
+        "rarity": rarity.rarity.value,
+        "rarity_percentile": rarity.percentile,
     }
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
@@ -75,13 +85,31 @@ def generate_pitcher_card_profile_from_ratings2(
     if player_season is None:
         raise ValueError("PlayerRatings no coincide con el jugador/snapshot solicitado")
 
+    rating_distribution = db.query(RatingDistribution).filter_by(
+        season=ratings.season,
+        role=ratings.role,
+        metric=OVERALL_RATING_METRIC,
+        rating_model_version=ratings.rating_model_version,
+        source_distribution_version=ratings.distribution_version,
+        rarity_model_version=RARITY_MODEL_VERSION,
+        data_start_date=ratings.data_start_date,
+        data_end_date=ratings.data_end_date,
+    ).one_or_none()
+    if rating_distribution is None:
+        return Ratings2CardProfileResult(
+            "SKIPPED_NO_RATING_DISTRIBUTION", None, ratings.id
+        )
+    rarity = calculate_rarity(ratings.overall_rating, rating_distribution)
+
     pitcher_trait = calculate_pitcher_trait(
         ratings.velocity_rating,
         ratings.control_rating,
         ratings.movement_rating,
         ratings.stuff_rating,
     )
-    input_hash = _adapter_input_hash(ratings, pitcher_trait)
+    input_hash = _adapter_input_hash(
+        ratings, pitcher_trait, rating_distribution, rarity
+    )
     values = {
         "player_ratings_id": ratings.id,
         "input_hash": input_hash,
@@ -95,14 +123,17 @@ def generate_pitcher_card_profile_from_ratings2(
         "movement_rating": ratings.movement_rating,
         "stuff_rating": ratings.stuff_rating,
         "overall_rating": ratings.overall_rating,
-        "calculated_rarity": CardRarity.COMMON,
+        "calculated_rarity": rarity.rarity,
         "primary_batter_trait": None,
         "primary_pitcher_trait": pitcher_trait,
         "repertoire_payload": None,
         "calculation_metadata": {
             "adapter_version": ADAPTER_VERSION,
             "distribution_version": ratings.distribution_version,
-            "rarity_policy": TRANSITIONAL_RARITY_POLICY,
+            "rarity_model_version": rarity.rarity_model_version,
+            "rating_distribution_id": rating_distribution.id,
+            "rarity_percentile": rarity.percentile,
+            "rarity": rarity.rarity.value,
             "pitcher_trait_model_version": PITCHER_TRAIT_MODEL_VERSION,
             "traits_status": "ASSIGNED" if pitcher_trait is not None else "NO_TRAIT",
         },
