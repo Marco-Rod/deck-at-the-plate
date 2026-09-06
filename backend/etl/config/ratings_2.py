@@ -15,3 +15,10 @@ CONTROL_WEIGHTS = {
     "hbp_rate": 0.10,
 }
 MIN_CONTROL_WEIGHT_COVERAGE = 0.75
+
+STUFF_WEIGHTS = {
+    "whiff_rate": 0.50,
+    "csw_rate": 0.30,
+    "strikeout_rate": 0.20,
+}
+MIN_STUFF_WEIGHT_COVERAGE = 0.75

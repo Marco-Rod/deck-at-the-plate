@@ -19,6 +19,7 @@ def test_parser_generates_subcomandos():
         "calculate-pitcher-movement": ["calculate-pitcher-movement", "--player-id", "650911", "--season", "2026", "--from", "2026-03-20", "--to", "2026-08-31"],
         "calculate-pitcher-control": ["calculate-pitcher-control", "--player-id", "650911", "--season", "2026", "--from", "2026-03-20", "--to", "2026-08-31"],
         "calculate-pitcher-velocity": ["calculate-pitcher-velocity", "--player-id", "650911", "--season", "2026", "--from", "2026-03-20", "--to", "2026-08-31"],
+        "calculate-pitcher-stuff": ["calculate-pitcher-stuff", "--player-id", "650911", "--season", "2026", "--from", "2026-03-20", "--to", "2026-08-31"],
         "run": ["run", "--season", "2026", "--from", "2026-04-01", "--to", "2026-04-05"],
         "generate-card-profiles": ["generate-card-profiles", "--season", "2026"],
         "validate-card-profiles": ["validate-card-profiles", "--season", "2026"],

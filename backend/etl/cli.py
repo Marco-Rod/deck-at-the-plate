@@ -36,6 +36,7 @@ from etl.services.statcast_population import import_statcast_population
 from etl.services.pitcher_movement import calculate_movement_candidate
 from etl.services.pitcher_control import calculate_control_candidate
 from etl.services.pitcher_velocity import calculate_velocity_candidate
+from etl.services.pitcher_stuff import calculate_stuff_candidate
 from etl.sources.mlb import MLBStatsApiClient
 from etl.sources.statcast import StatcastSourceAdapter
 
@@ -132,6 +133,13 @@ def _build_parser() -> argparse.ArgumentParser:
     velocity.add_argument("--from", dest="data_start_date", type=_parse_date, required=True)
     velocity.add_argument("--to", dest="data_end_date", type=_parse_date, required=True)
     velocity.add_argument("--distribution-version", dest="distribution_version", default=None)
+
+    stuff = sub.add_parser("calculate-pitcher-stuff", help="Inspecciona candidato Stuff sin persistir carta")
+    stuff.add_argument("--player-id", dest="player_id", type=int, required=True)
+    stuff.add_argument("--season", type=int, required=True)
+    stuff.add_argument("--from", dest="data_start_date", type=_parse_date, required=True)
+    stuff.add_argument("--to", dest="data_end_date", type=_parse_date, required=True)
+    stuff.add_argument("--distribution-version", dest="distribution_version", default=None)
 
     run = sub.add_parser("run", help="Pipeline completo")
     run.add_argument("--season", type=int, required=True)
@@ -375,6 +383,24 @@ def main(argv=None) -> int:
                     f"weight={result.shrinkage_weight:.4f} adjusted={result.adjusted:.4f} "
                     f"percentile={result.percentile:.4f} VELOCITY={result.rating}"
                 )
+
+        elif args.command == "calculate-pitcher-stuff":
+            result = calculate_stuff_candidate(
+                db, mlb_id=args.player_id, season=args.season,
+                data_start_date=args.data_start_date, data_end_date=args.data_end_date,
+                distribution_version=args.distribution_version,
+            )
+            for component in result.components:
+                print(
+                    f"{component.metric} raw={component.observed:.6f} "
+                    f"baseline={component.league_baseline:.6f} sample={component.sample_size} "
+                    f"stabilization={component.stabilization} weight={component.shrinkage_weight:.4f} "
+                    f"adjusted={component.adjusted:.6f} percentile={component.percentile:.4f} "
+                    f"rating={component.rating} component_weight={component.component_weight:.2f}"
+                )
+            if result.skipped_metrics:
+                print(f"skipped={','.join(result.skipped_metrics)}")
+            print(f"coverage={result.weight_coverage:.2f} STUFF={result.rating}")
 
         elif args.command == "run":
             # Corrección A2: si RAW falla, run() propaga la excepción y aquí se
