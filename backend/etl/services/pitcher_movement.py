@@ -10,6 +10,7 @@ from app.models import LeagueMetricDistribution, PitcherPitchProfile, Player, Pl
 from etl.config.league_distributions import MOVEMENT_EXCLUDED_PITCH_TYPES, default_distribution_version
 from etl.config.ratings_2 import MOVEMENT_STABILIZATION_PITCHES, RATING_MODEL_VERSION
 from etl.services.percentiles import distribution_percentile_rank, percentile_rating
+from etl.services.rating_math import round_rating
 
 
 @dataclass(frozen=True)
@@ -36,6 +37,11 @@ class MovementCandidateResult:
     evaluable_usage: float
     pitches: list[PitchMovementCandidate] = field(default_factory=list)
     skipped_pitch_types: list[str] = field(default_factory=list)
+
+    @property
+    def rating(self) -> int | None:
+        """Interfaz uniforme para el ensamblador ratings-2.0."""
+        return self.movement_rating
 
 
 def _distribution(
@@ -140,7 +146,7 @@ def calculate_movement_candidate(
 
     evaluable_usage = sum(candidate.usage for candidate in candidates)
     movement_rating = (
-        round(sum(candidate.rating * candidate.usage for candidate in candidates) / evaluable_usage)
+        round_rating(sum(candidate.rating * candidate.usage for candidate in candidates) / evaluable_usage)
         if evaluable_usage > 0 else None
     )
     return MovementCandidateResult(

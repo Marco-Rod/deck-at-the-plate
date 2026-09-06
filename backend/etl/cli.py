@@ -37,6 +37,7 @@ from etl.services.pitcher_movement import calculate_movement_candidate
 from etl.services.pitcher_control import calculate_control_candidate
 from etl.services.pitcher_velocity import calculate_velocity_candidate
 from etl.services.pitcher_stuff import calculate_stuff_candidate
+from etl.services.pitcher_ratings2 import calculate_pitcher_ratings2
 from etl.sources.mlb import MLBStatsApiClient
 from etl.sources.statcast import StatcastSourceAdapter
 
@@ -140,6 +141,13 @@ def _build_parser() -> argparse.ArgumentParser:
     stuff.add_argument("--from", dest="data_start_date", type=_parse_date, required=True)
     stuff.add_argument("--to", dest="data_end_date", type=_parse_date, required=True)
     stuff.add_argument("--distribution-version", dest="distribution_version", default=None)
+
+    ratings2 = sub.add_parser("calculate-pitcher-ratings2", help="Ensambla ratings-2.0 sin persistir carta")
+    ratings2.add_argument("--player-id", dest="player_id", type=int, required=True)
+    ratings2.add_argument("--season", type=int, required=True)
+    ratings2.add_argument("--from", dest="data_start_date", type=_parse_date, required=True)
+    ratings2.add_argument("--to", dest="data_end_date", type=_parse_date, required=True)
+    ratings2.add_argument("--distribution-version", dest="distribution_version", default=None)
 
     run = sub.add_parser("run", help="Pipeline completo")
     run.add_argument("--season", type=int, required=True)
@@ -401,6 +409,21 @@ def main(argv=None) -> int:
             if result.skipped_metrics:
                 print(f"skipped={','.join(result.skipped_metrics)}")
             print(f"coverage={result.weight_coverage:.2f} STUFF={result.rating}")
+
+        elif args.command == "calculate-pitcher-ratings2":
+            result = calculate_pitcher_ratings2(
+                db, mlb_id=args.player_id, season=args.season,
+                data_start_date=args.data_start_date, data_end_date=args.data_end_date,
+                distribution_version=args.distribution_version,
+            )
+            print(f"VELOCITY={result.velocity.rating}")
+            print(f"CONTROL={result.control.rating}")
+            print(f"MOVEMENT={result.movement.rating}")
+            print(f"STUFF={result.stuff.rating}")
+            print(f"OVERALL={result.overall}")
+            print(f"MODEL={result.rating_model_version}")
+            if result.unavailable_attributes:
+                print(f"unavailable={','.join(result.unavailable_attributes)}")
 
         elif args.command == "run":
             # Corrección A2: si RAW falla, run() propaga la excepción y aquí se

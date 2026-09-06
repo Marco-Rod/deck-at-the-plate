@@ -9,6 +9,7 @@ from app.models import LeagueMetricDistribution, PitcherSeasonStats, Player, Pla
 from etl.config.league_distributions import PITCHER_METRICS, default_distribution_version
 from etl.config.ratings_2 import MIN_STUFF_WEIGHT_COVERAGE, RATING_MODEL_VERSION, STUFF_WEIGHTS
 from etl.services.percentiles import distribution_percentile_rank, percentile_rating
+from etl.services.rating_math import round_rating
 
 
 @dataclass(frozen=True)
@@ -105,7 +106,7 @@ def calculate_stuff_candidate(
             shrinkage_weight, adjusted, percentile, component_rating, component_weight,
         ) in pending
     ]
-    rating = round(sum(component.contribution for component in components)) if sufficient else None
+    rating = round_rating(sum(component.contribution for component in components)) if sufficient else None
     return PitcherStuffResult(
         mlb_id=mlb_id, rating_model_version=RATING_MODEL_VERSION,
         distribution_version=version, rating=rating, weight_coverage=coverage,
