@@ -13,6 +13,7 @@ def test_parser_generates_subcomandos():
         "sync-rosters": ["sync-rosters", "--season", "2026", "--start", "2026-03-20", "--end", "2026-08-31"],
         "import-statcast": ["import-statcast", "--from", "2026-04-01", "--to", "2026-04-05"],
         "import-statcast-player": ["import-statcast-player", "--player-id", "660271", "--from", "2026-04-01", "--to", "2026-04-05"],
+        "import-statcast-population": ["import-statcast-population", "--season", "2026", "--role", "pitcher", "--from", "2026-04-01", "--to", "2026-04-05", "--limit", "40"],
         "build-analytics": ["build-analytics", "--season", "2026", "--data-start-date", "2026-03-20", "--data-end-date", "2026-08-31"],
         "build-league-distributions": ["build-league-distributions", "--season", "2026", "--role", "pitcher", "--from", "2026-03-20", "--to", "2026-08-31"],
         "run": ["run", "--season", "2026", "--from", "2026-04-01", "--to", "2026-04-05"],
@@ -40,6 +41,18 @@ def test_import_statcast_flags():
     args = parser.parse_args(["import-statcast", "--from", "2026-04-01", "--to", "2026-04-05", "--refresh"])
     assert args.date_from.isoformat() == "2026-04-01"
     assert args.date_to.isoformat() == "2026-04-05"
+    assert args.refresh is True
+
+
+def test_import_statcast_population_flags():
+    parser = _build_parser()
+    args = parser.parse_args([
+        "import-statcast-population", "--season", "2026", "--role", "pitcher",
+        "--from", "2026-08-25", "--to", "2026-09-02", "--limit", "35", "--refresh",
+    ])
+    assert args.season == 2026
+    assert args.role == "pitcher"
+    assert args.limit == 35
     assert args.refresh is True
 
 

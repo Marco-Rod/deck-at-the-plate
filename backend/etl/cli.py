@@ -32,6 +32,7 @@ from etl.services.card_profiles import generate_profiles, validate_profiles
 from etl.services.identity_generation import validate_game_identities
 from etl.services.league_distributions import build_league_distributions
 from etl.services.quality import collect_quality, emit_quality_report
+from etl.services.statcast_population import import_statcast_population
 from etl.sources.mlb import MLBStatsApiClient
 from etl.sources.statcast import StatcastSourceAdapter
 
@@ -87,6 +88,14 @@ def _build_parser() -> argparse.ArgumentParser:
     stp.add_argument("--from", dest="date_from", type=_parse_date, required=True)
     stp.add_argument("--to", dest="date_to", type=_parse_date, required=True)
     stp.add_argument("--refresh", action="store_true")
+
+    pop = sub.add_parser("import-statcast-population", help="Ingiere Statcast para una población SOURCE")
+    pop.add_argument("--season", type=int, required=True)
+    pop.add_argument("--role", choices=("pitcher",), default="pitcher")
+    pop.add_argument("--from", dest="date_from", type=_parse_date, required=True)
+    pop.add_argument("--to", dest="date_to", type=_parse_date, required=True)
+    pop.add_argument("--limit", type=int, default=40)
+    pop.add_argument("--refresh", action="store_true")
 
     an = sub.add_parser("build-analytics", help="Regenera perfiles analytics del snapshot")
     an.add_argument("--season", type=int, required=True)
@@ -243,6 +252,33 @@ def main(argv=None) -> int:
                 raw.rows_updated,
                 raw.rows_rejected,
             )
+
+        elif args.command == "import-statcast-population":
+            result = import_statcast_population(
+                db,
+                StatcastSourceAdapter(),
+                season=args.season,
+                role=args.role,
+                date_from=args.date_from,
+                date_to=args.date_to,
+                limit=args.limit,
+                refresh=args.refresh,
+            )
+            logger.info(
+                "statcast-population selected=%s completed=%s no_data=%s failed=%s "
+                "extracted=%s inserted=%s updated=%s unchanged=%s rejected=%s",
+                result.players_selected,
+                result.players_completed,
+                result.players_no_data,
+                result.players_failed,
+                result.rows_extracted,
+                result.rows_inserted,
+                result.rows_updated,
+                result.rows_unchanged,
+                result.rows_rejected,
+            )
+            for failure in result.failures:
+                logger.warning("statcast-population failed mlb_id=%s error=%s", failure.mlb_id, failure.error)
 
         elif args.command == "build-analytics":
             pipeline = AnalyticsPipeline(db)
