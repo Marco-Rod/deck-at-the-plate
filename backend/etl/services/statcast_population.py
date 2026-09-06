@@ -14,7 +14,8 @@ from etl.pipelines.statcast import StatcastRawPipeline, StatcastRunResult
 
 logger = logging.getLogger("etl.services.statcast_population")
 
-PITCHER_POSITIONS = ("P", "SP", "RP", "CP", "TWP")
+PITCHER_POSITIONS = ("P", "SP", "RP", "SU", "CP", "CL", "TWP")
+BATTER_POSITIONS = ("C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "DH", "TWP")
 
 
 @dataclass(frozen=True)
@@ -41,19 +42,24 @@ def select_population_players(
     db: Session, *, season: int, role: str, limit: int
 ) -> list[Player]:
     """Selecciona una población SOURCE conocida, estable y sin duplicados."""
-    if role != "pitcher":
-        raise ValueError("la primera versión solo soporta role=pitcher")
+    if role not in {"batter", "pitcher"}:
+        raise ValueError("role debe ser batter o pitcher")
     if limit < 1:
         raise ValueError("limit debe ser mayor que cero")
 
     season_players = select(PlayerSeason.player_id).where(PlayerSeason.season == season)
+    query = db.query(Player).filter(
+        Player.id.in_(season_players),
+        Player.mlb_id.isnot(None),
+        Player.primary_position.isnot(None),
+    )
+    if role == "pitcher":
+        query = query.filter(Player.primary_position.in_(PITCHER_POSITIONS))
+    else:
+        # TWP es elegible en ambos roles; pitchers puros no están en esta lista.
+        query = query.filter(Player.primary_position.in_(BATTER_POSITIONS))
     return (
-        db.query(Player)
-        .filter(
-            Player.id.in_(season_players),
-            Player.mlb_id.isnot(None),
-            Player.primary_position.in_(PITCHER_POSITIONS),
-        )
+        query
         .order_by(Player.mlb_id.asc())
         .limit(limit)
         .all()
@@ -94,7 +100,9 @@ def import_statcast_population(
             db.rollback()
             result.players_failed += 1
             result.failures.append(PopulationFailure(player.mlb_id, str(exc)[:500]))
-            logger.warning("population pitcher falló mlb_id=%s error=%s", player.mlb_id, exc)
+            logger.warning(
+                "population %s falló mlb_id=%s error=%s", role, player.mlb_id, exc
+            )
             continue
 
         result.rows_extracted += run.rows_extracted

@@ -50,6 +50,52 @@ def test_seleccion_es_de_pitchers_determinista_y_limitada(db):
     assert [player.mlb_id for player in selected] == [10, 20]
 
 
+def test_seleccion_batter_excluye_pitchers_puros_e_incluye_twp(db):
+    _player(db, 30, "DH")
+    _player(db, 10, "SP")
+    _player(db, 20, "TWP")
+    _player(db, 5, "SS")
+    _player(db, 40, "RP")
+    _player(db, 1, "CF", season=2025)
+    db.commit()
+
+    selected = select_population_players(db, season=2026, role="batter", limit=40)
+
+    assert [player.mlb_id for player in selected] == [5, 20, 30]
+
+
+def test_importacion_batter_propaga_role_y_conserva_contadores(db):
+    _player(db, 10, "TWP")
+    _player(db, 20, "DH")
+    _player(db, 30, "SP")
+    db.commit()
+    calls = []
+
+    class FakeBatterPipeline:
+        def __init__(self, _db, _adapter):
+            pass
+
+        def run_player(self, *, mlb_id, role, **_kwargs):
+            calls.append((mlb_id, role))
+            return StatcastRunResult(rows_extracted=5, rows_inserted=5)
+
+    result = import_statcast_population(
+        db,
+        object(),
+        season=2026,
+        role="batter",
+        date_from=START,
+        date_to=END,
+        limit=40,
+        pipeline_factory=FakeBatterPipeline,
+    )
+
+    assert calls == [(10, "batter"), (20, "batter")]
+    assert result.players_selected == 2
+    assert result.players_completed == 2
+    assert result.rows_inserted == 10
+
+
 def test_importacion_aisla_fallos_y_agrega_resultados(db):
     for mlb_id in (10, 20, 30):
         _player(db, mlb_id, "SP")

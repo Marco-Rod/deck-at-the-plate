@@ -65,6 +65,15 @@ def test_import_statcast_population_flags():
     assert args.refresh is True
 
 
+def test_import_statcast_population_acepta_batter():
+    parser = _build_parser()
+    args = parser.parse_args([
+        "import-statcast-population", "--season", "2026", "--role", "batter",
+        "--from", "2026-08-25", "--to", "2026-09-02", "--limit", "40",
+    ])
+    assert args.role == "batter"
+
+
 def test_build_analytics_fechas():
     parser = _build_parser()
     args = parser.parse_args(["build-analytics", "--season", "2026", "--data-start-date", "2026-03-20", "--data-end-date", "2026-08-31"])

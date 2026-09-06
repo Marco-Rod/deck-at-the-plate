@@ -100,7 +100,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     pop = sub.add_parser("import-statcast-population", help="Ingiere Statcast para una población SOURCE")
     pop.add_argument("--season", type=int, required=True)
-    pop.add_argument("--role", choices=("pitcher",), default="pitcher")
+    pop.add_argument("--role", choices=("batter", "pitcher"), default="pitcher")
     pop.add_argument("--from", dest="date_from", type=_parse_date, required=True)
     pop.add_argument("--to", dest="date_to", type=_parse_date, required=True)
     pop.add_argument("--limit", type=int, default=40)
