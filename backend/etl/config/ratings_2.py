@@ -80,3 +80,10 @@ BATTER_VISION_STABILIZATIONS = {
 # Temporal hasta disponer de datos situacionales reproducibles para Clutch.
 CLUTCH_NEUTRAL_RATING = 70
 CLUTCH_SOURCE = "NEUTRAL_BASELINE_PENDING_SITUATIONAL_DATA"
+
+BATTER_OVERALL_WEIGHTS = {
+    "contact": 0.30,
+    "power": 0.30,
+    "vision": 0.25,
+    "clutch": 0.15,
+}

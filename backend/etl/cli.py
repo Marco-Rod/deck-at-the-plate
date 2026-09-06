@@ -45,6 +45,7 @@ from etl.services.pitcher_ratings2_population import generate_pitcher_ratings2_p
 from etl.services.batter_contact import calculate_batter_contact
 from etl.services.batter_power import calculate_batter_power
 from etl.services.batter_vision import calculate_batter_vision
+from etl.services.batter_ratings2 import calculate_batter_ratings2
 from etl.sources.mlb import MLBStatsApiClient
 from etl.sources.statcast import StatcastSourceAdapter
 
@@ -190,6 +191,16 @@ def _build_parser() -> argparse.ArgumentParser:
     batter_vision.add_argument("--from", dest="data_start_date", type=_parse_date, required=True)
     batter_vision.add_argument("--to", dest="data_end_date", type=_parse_date, required=True)
     batter_vision.add_argument("--distribution-version", dest="distribution_version", default=None)
+
+    batter_ratings = sub.add_parser(
+        "calculate-batter-ratings",
+        help="Ensambla batter ratings-2.0 sin persistir",
+    )
+    batter_ratings.add_argument("--player-id", dest="player_id", type=int, required=True)
+    batter_ratings.add_argument("--season", type=int, required=True)
+    batter_ratings.add_argument("--from", dest="data_start_date", type=_parse_date, required=True)
+    batter_ratings.add_argument("--to", dest="data_end_date", type=_parse_date, required=True)
+    batter_ratings.add_argument("--distribution-version", dest="distribution_version", default=None)
 
     ratings2 = sub.add_parser("calculate-pitcher-ratings2", help="Ensambla ratings-2.0 sin persistir carta")
     ratings2.add_argument("--player-id", dest="player_id", type=int, required=True)
@@ -565,6 +576,23 @@ def main(argv=None) -> int:
             if result.skipped_metrics:
                 print(f"skipped={','.join(result.skipped_metrics)}")
             print(f"VISION={result.rating} MODEL={result.rating_model_version}")
+
+        elif args.command == "calculate-batter-ratings":
+            result = calculate_batter_ratings2(
+                db,
+                mlb_id=args.player_id,
+                season=args.season,
+                data_start_date=args.data_start_date,
+                data_end_date=args.data_end_date,
+                distribution_version=args.distribution_version,
+            )
+            print(
+                f"CONTACT={result.contact.rating} POWER={result.power.rating} "
+                f"VISION={result.vision.rating} CLUTCH={result.clutch.rating} "
+                f"OVERALL={result.overall_rating} MODEL={result.model_version}"
+            )
+            if result.skipped_components:
+                print(f"skipped={','.join(result.skipped_components)}")
 
         elif args.command == "calculate-pitcher-ratings2":
             result = calculate_pitcher_ratings2(
