@@ -134,6 +134,9 @@ def test_validacion_season_sin_rosters_ok(db):
     result = validate_game_identities(db, season=2026)
     assert result.ok is True
     assert result.detail == []
+
+
+def test_validacion_detecta_nombre_fuente(db):
     p = _player(db, 660275, "Taylor", "Swiftfied")
     identity = GamePlayerIdentity(
         player_id=p.id,
@@ -148,6 +151,58 @@ def test_validacion_season_sin_rosters_ok(db):
     result = validate_game_identities(db)
     assert result.ok is False
     assert any("coincide con nombre fuente" in issue for issue in result.detail)
+
+
+def _add_season(db, player, year):
+    db.add(
+        PlayerSeason(
+            player_id=player.id,
+            season=year,
+            data_start_date=date(year, 3, 1),
+            data_end_date=date(year, 9, 30),
+            games=40,
+            plate_appearances=170,
+            batters_faced=0,
+            outs_recorded=0,
+        )
+    )
+    db.commit()
+
+
+def test_validate_season_no_marca_huerfana_de_otra_temporada(db):
+    player_2025 = _player(db, 660280, "Shohei", "Ohtani")
+    _add_season(db, player_2025, 2025)
+    player_2026 = _player(db, 660281, "Jose", "Ramirez")
+    _add_season(db, player_2026, 2026)
+
+    generate_identity_batch(db, missing_only=True)
+    assert db.query(GamePlayerIdentity).count() == 2
+
+    result = validate_game_identities(db, season=2026)
+    assert result.ok is True, result.detail
+    assert not any("huérfana" in issue for issue in result.detail)
+
+
+def test_validate_season_detecta_huerfana_real(db):
+    player_2026 = _player(db, 660282, "Wei", "Wang")
+    _add_season(db, player_2026, 2026)
+    generate_identity_batch(db, missing_only=True)
+
+    db.add(
+        GamePlayerIdentity(
+            player_id="identidad-sin-player",
+            display_first_name="Fantasma",
+            display_last_name="Fantasma",
+            display_name="Fantasma Fantasma",
+            name_profile="UNKNOWN",
+            generator_version="names-1.0",
+        )
+    )
+    db.commit()
+
+    result = validate_game_identities(db, season=2026)
+    assert result.ok is False
+    assert any("identidad huérfana" in issue for issue in result.detail)
 
 
 SURNAMES = ["Ramirez", "Kim", "Wang", "Smith", "Yamamoto", "Muller", "Kovalenko", "Dupont", "De Vries", "Bell"]

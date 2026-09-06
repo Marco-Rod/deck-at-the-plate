@@ -159,6 +159,8 @@ def validate_game_identities(
     issues: list[str] = []
 
     players = _eligible_players(db, season=season, player_id=None, limit=None)
+    eligible_player_ids = {p.id for p in players}
+    all_player_ids = {row[0] for row in db.query(Player.id).all()}
     existing: dict[str, GamePlayerIdentity] = {}
     for identity in db.query(GamePlayerIdentity).all():
         existing.setdefault(identity.player_id, identity)
@@ -214,7 +216,7 @@ def validate_game_identities(
         seen_display[low] = player.id
 
     for identity in existing.values():
-        if identity.player_id not in {p.id for p in players}:
+        if identity.player_id not in all_player_ids:
             issues.append(f"identidad huérfana de player_id={identity.player_id}")
 
     return ValidationResult(ok=not issues, detail=issues)
