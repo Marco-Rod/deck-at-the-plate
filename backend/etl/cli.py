@@ -41,6 +41,7 @@ from etl.services.pitcher_ratings2 import calculate_pitcher_ratings2
 from etl.services.player_ratings import persist_pitcher_ratings2
 from etl.services.ratings2_card_profiles import generate_pitcher_card_profile_from_ratings2
 from etl.services.rating_distributions import build_overall_rating_distribution
+from etl.services.pitcher_ratings2_population import generate_pitcher_ratings2_population
 from etl.sources.mlb import MLBStatsApiClient
 from etl.sources.statcast import StatcastSourceAdapter
 
@@ -170,6 +171,16 @@ def _build_parser() -> argparse.ArgumentParser:
     generate_ratings2.add_argument("--from", dest="data_start_date", type=_parse_date, required=True)
     generate_ratings2.add_argument("--to", dest="data_end_date", type=_parse_date, required=True)
     generate_ratings2.add_argument("--distribution-version", dest="distribution_version", default=None)
+
+    ratings2_population = sub.add_parser(
+        "generate-pitcher-ratings2-population",
+        help="Calcula y persiste ratings-2.0 para pitchers con Analytics",
+    )
+    ratings2_population.add_argument("--season", type=int, required=True)
+    ratings2_population.add_argument("--from", dest="data_start_date", type=_parse_date, required=True)
+    ratings2_population.add_argument("--to", dest="data_end_date", type=_parse_date, required=True)
+    ratings2_population.add_argument("--distribution-version", dest="distribution_version", default=None)
+    ratings2_population.add_argument("--limit", type=int, default=None)
 
     profile_ratings2 = sub.add_parser("generate-card-profile-ratings2", help="Adapta PlayerRatings a perfil de carta")
     profile_ratings2.add_argument("--player-ratings-id", dest="player_ratings_id", required=True)
@@ -484,6 +495,28 @@ def main(argv=None) -> int:
                 f"MOVEMENT={ratings.movement.rating} STUFF={ratings.stuff.rating} "
                 f"OVERALL={ratings.overall} MODEL={ratings.rating_model_version}"
             )
+
+        elif args.command == "generate-pitcher-ratings2-population":
+            result = generate_pitcher_ratings2_population(
+                db,
+                season=args.season,
+                data_start_date=args.data_start_date,
+                data_end_date=args.data_end_date,
+                distribution_version=args.distribution_version,
+                limit=args.limit,
+            )
+            print(
+                f"selected={result.selected} completed={result.completed} "
+                f"created={result.created} updated={result.updated} "
+                f"unchanged={result.unchanged} "
+                f"skipped_incomplete={result.skipped_incomplete} failed={result.failed}"
+            )
+            for failure in result.failures:
+                logger.warning(
+                    "pitcher ratings-2.0 failed mlb_id=%s error=%s",
+                    failure.mlb_id,
+                    failure.error,
+                )
 
         elif args.command == "generate-card-profile-ratings2":
             result = generate_pitcher_card_profile_from_ratings2(

@@ -23,6 +23,7 @@ def test_parser_generates_subcomandos():
         "calculate-pitcher-stuff": ["calculate-pitcher-stuff", "--player-id", "650911", "--season", "2026", "--from", "2026-03-20", "--to", "2026-08-31"],
         "calculate-pitcher-ratings2": ["calculate-pitcher-ratings2", "--player-id", "650911", "--season", "2026", "--from", "2026-03-20", "--to", "2026-08-31"],
         "generate-pitcher-ratings2": ["generate-pitcher-ratings2", "--player-id", "650911", "--season", "2026", "--from", "2026-03-20", "--to", "2026-08-31"],
+        "generate-pitcher-ratings2-population": ["generate-pitcher-ratings2-population", "--season", "2026", "--from", "2026-03-20", "--to", "2026-08-31"],
         "generate-card-profile-ratings2": ["generate-card-profile-ratings2", "--player-ratings-id", "ratings-id"],
         "run": ["run", "--season", "2026", "--from", "2026-04-01", "--to", "2026-04-05"],
         "generate-card-profiles": ["generate-card-profiles", "--season", "2026"],
