@@ -3,6 +3,12 @@
 from dataclasses import dataclass
 
 
+# Debe cambiar cuando cambien elegibilidad, estabilización, definición de
+# métricas o algoritmo de percentiles. La temporada ya forma parte de la
+# identidad de la distribución y no necesita codificarse aquí.
+DISTRIBUTION_MODEL_VERSION = "dist-1.0"
+
+
 @dataclass(frozen=True)
 class MetricDistributionConfig:
     direction: str
@@ -21,5 +27,5 @@ PITCHER_METRICS = {
 }
 
 
-def default_distribution_version(season: int) -> str:
-    return f"mlb-{season}-v1"
+def default_distribution_version() -> str:
+    return DISTRIBUTION_MODEL_VERSION

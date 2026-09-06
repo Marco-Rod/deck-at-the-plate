@@ -80,7 +80,9 @@ def test_builder_filtra_muestra_y_es_idempotente(db):
     assert zone.population_size == 3
     assert zone.sample_size_total == 600
     assert float(zone.p50) == 0.45
-    assert zone.distribution_version == "mlb-2026-v1"
+    assert float(zone.population_mean) == 0.45
+    assert abs(float(zone.league_baseline) - 0.46666667) < 1e-8
+    assert zone.distribution_version == "dist-1.0"
 
     second = build_league_distributions(
         db, season=2026, role="pitcher", data_start_date=START, data_end_date=END,
@@ -105,3 +107,14 @@ def test_version_nueva_no_sobrescribe_historial(db):
     )
     assert result.created == 6
     assert db.query(LeagueMetricDistribution).count() == 12
+
+
+def test_baseline_pondera_oportunidades_sin_alterar_distribucion(db):
+    _pitcher(db, 1, 50, 20, 1.0)   # zone_rate=.50
+    _pitcher(db, 2, 950, 40, 0.0)  # zone_rate=.40
+    db.commit()
+    build_league_distributions(db, season=2026, role="pitcher", data_start_date=START, data_end_date=END)
+    zone = db.query(LeagueMetricDistribution).filter_by(metric="zone_rate").one()
+    assert float(zone.population_mean) == 0.45
+    assert float(zone.league_baseline) == 0.405
+    assert float(zone.p50) == 0.45

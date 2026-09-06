@@ -29,10 +29,17 @@ def _decimal(value: float) -> Decimal:
 
 
 def _summary(values: list[float], samples: list[int]) -> dict:
+    sample_size_total = sum(samples)
     return {
         "population_size": len(values),
-        "sample_size_total": sum(samples),
-        "mean": _decimal(fmean(values)),
+        "sample_size_total": sample_size_total,
+        # Los percentiles y este promedio describen la población de pitchers:
+        # cada pitcher es una observación con el mismo peso.
+        "population_mean": _decimal(fmean(values)),
+        # El prior de shrinkage representa oportunidades MLB agregadas.
+        "league_baseline": _decimal(
+            sum(value * sample for value, sample in zip(values, samples)) / sample_size_total
+        ),
         "median": _decimal(median(values)),
         "stddev": _decimal(pstdev(values)),
         "p05": _decimal(percentile(values, 0.05)),
@@ -62,7 +69,7 @@ def build_league_distributions(
     if data_end_date < data_start_date:
         raise ValueError("data_end_date debe ser igual o posterior a data_start_date")
 
-    version = distribution_version or default_distribution_version(season)
+    version = distribution_version or default_distribution_version()
     rows = (
         db.query(PitcherSeasonStats)
         .join(PlayerSeason, PlayerSeason.id == PitcherSeasonStats.player_season_id)
