@@ -39,3 +39,22 @@ BATTER_CONTACT_STABILIZATIONS = {
     "avg": AVG_STABILIZATION,
     "whiff_rate": WHIFF_RATE_STABILIZATION,
 }
+
+ISO_STABILIZATION = 40  # AB
+BARREL_RATE_STABILIZATION = 30  # batted balls con EV + launch angle
+HARD_HIT_RATE_STABILIZATION = 30  # batted balls con EV
+SLG_STABILIZATION = 40  # AB
+
+BATTER_POWER_WEIGHTS = {
+    "iso": 0.40,
+    "barrel_rate": 0.30,
+    "hard_hit_rate": 0.20,
+    "slg": 0.10,
+}
+
+BATTER_POWER_STABILIZATIONS = {
+    "iso": ISO_STABILIZATION,
+    "barrel_rate": BARREL_RATE_STABILIZATION,
+    "hard_hit_rate": HARD_HIT_RATE_STABILIZATION,
+    "slg": SLG_STABILIZATION,
+}

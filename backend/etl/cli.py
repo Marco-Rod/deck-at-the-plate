@@ -43,6 +43,7 @@ from etl.services.ratings2_card_profiles import generate_pitcher_card_profile_fr
 from etl.services.rating_distributions import build_overall_rating_distribution
 from etl.services.pitcher_ratings2_population import generate_pitcher_ratings2_population
 from etl.services.batter_contact import calculate_batter_contact
+from etl.services.batter_power import calculate_batter_power
 from etl.sources.mlb import MLBStatsApiClient
 from etl.sources.statcast import StatcastSourceAdapter
 
@@ -168,6 +169,16 @@ def _build_parser() -> argparse.ArgumentParser:
     batter_contact.add_argument("--from", dest="data_start_date", type=_parse_date, required=True)
     batter_contact.add_argument("--to", dest="data_end_date", type=_parse_date, required=True)
     batter_contact.add_argument("--distribution-version", dest="distribution_version", default=None)
+
+    batter_power = sub.add_parser(
+        "calculate-batter-power",
+        help="Inspecciona candidato Power de batter sin persistir",
+    )
+    batter_power.add_argument("--player-id", dest="player_id", type=int, required=True)
+    batter_power.add_argument("--season", type=int, required=True)
+    batter_power.add_argument("--from", dest="data_start_date", type=_parse_date, required=True)
+    batter_power.add_argument("--to", dest="data_end_date", type=_parse_date, required=True)
+    batter_power.add_argument("--distribution-version", dest="distribution_version", default=None)
 
     ratings2 = sub.add_parser("calculate-pitcher-ratings2", help="Ensambla ratings-2.0 sin persistir carta")
     ratings2.add_argument("--player-id", dest="player_id", type=int, required=True)
@@ -497,6 +508,29 @@ def main(argv=None) -> int:
             if result.skipped_metrics:
                 print(f"skipped={','.join(result.skipped_metrics)}")
             print(f"CONTACT={result.rating} MODEL={result.rating_model_version}")
+
+        elif args.command == "calculate-batter-power":
+            result = calculate_batter_power(
+                db,
+                mlb_id=args.player_id,
+                season=args.season,
+                data_start_date=args.data_start_date,
+                data_end_date=args.data_end_date,
+                distribution_version=args.distribution_version,
+            )
+            for component in result.components:
+                print(
+                    f"{component.metric} raw={component.observed:.6f} "
+                    f"baseline={component.league_baseline:.6f} "
+                    f"sample={component.sample_size} "
+                    f"stabilization={component.stabilization} "
+                    f"weight={component.shrinkage_weight:.4f} "
+                    f"adjusted={component.adjusted:.6f} "
+                    f"percentile={component.percentile:.4f} rating={component.rating}"
+                )
+            if result.skipped_metrics:
+                print(f"skipped={','.join(result.skipped_metrics)}")
+            print(f"POWER={result.rating} MODEL={result.rating_model_version}")
 
         elif args.command == "calculate-pitcher-ratings2":
             result = calculate_pitcher_ratings2(

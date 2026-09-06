@@ -22,6 +22,7 @@ def test_parser_generates_subcomandos():
         "calculate-pitcher-velocity": ["calculate-pitcher-velocity", "--player-id", "650911", "--season", "2026", "--from", "2026-03-20", "--to", "2026-08-31"],
         "calculate-pitcher-stuff": ["calculate-pitcher-stuff", "--player-id", "650911", "--season", "2026", "--from", "2026-03-20", "--to", "2026-08-31"],
         "calculate-batter-contact": ["calculate-batter-contact", "--player-id", "660271", "--season", "2026", "--from", "2026-03-20", "--to", "2026-08-31"],
+        "calculate-batter-power": ["calculate-batter-power", "--player-id", "660271", "--season", "2026", "--from", "2026-03-20", "--to", "2026-08-31"],
         "calculate-pitcher-ratings2": ["calculate-pitcher-ratings2", "--player-id", "650911", "--season", "2026", "--from", "2026-03-20", "--to", "2026-08-31"],
         "generate-pitcher-ratings2": ["generate-pitcher-ratings2", "--player-id", "650911", "--season", "2026", "--from", "2026-03-20", "--to", "2026-08-31"],
         "generate-pitcher-ratings2-population": ["generate-pitcher-ratings2-population", "--season", "2026", "--from", "2026-03-20", "--to", "2026-08-31"],
