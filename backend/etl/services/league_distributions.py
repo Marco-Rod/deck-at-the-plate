@@ -4,11 +4,19 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
 from statistics import fmean, median, pstdev
+from math import hypot
 
 from sqlalchemy.orm import Session
 
-from app.models import LeagueMetricDistribution, PitcherSeasonStats, PlayerSeason
-from etl.config.league_distributions import PITCHER_METRICS, default_distribution_version
+from app.models import LeagueMetricDistribution, PitcherPitchProfile, PitcherSeasonStats, PlayerSeason
+from etl.config.league_distributions import (
+    MOVEMENT_EXCLUDED_PITCH_TYPES,
+    MOVEMENT_FAMILY_MIN_POPULATION,
+    MOVEMENT_PITCH_TYPE_MIN_POPULATION,
+    MOVEMENT_PROFILE_MIN_PITCHES,
+    PITCHER_METRICS,
+    default_distribution_version,
+)
 from etl.services.percentiles import percentile
 
 
@@ -52,6 +60,18 @@ def _summary(values: list[float], samples: list[int]) -> dict:
         "minimum": _decimal(min(values)),
         "maximum": _decimal(max(values)),
     }
+
+
+def _upsert_distribution(db: Session, identity: dict, payload: dict) -> str:
+    existing = db.query(LeagueMetricDistribution).filter_by(**identity).one_or_none()
+    if existing is None:
+        db.add(LeagueMetricDistribution(**identity, **payload))
+        return "created"
+    if all(getattr(existing, field) == value for field, value in payload.items()):
+        return "unchanged"
+    for field, value in payload.items():
+        setattr(existing, field, value)
+    return "updated"
 
 
 def build_league_distributions(
@@ -98,20 +118,67 @@ def build_league_distributions(
             "season": season,
             "role": normalized_role,
             "metric": metric,
+            "pitch_type": None,
+            "pitch_family": None,
             "distribution_version": version,
             "data_start_date": data_start_date,
             "data_end_date": data_end_date,
         }
-        existing = db.query(LeagueMetricDistribution).filter_by(**identity).one_or_none()
-        if existing is None:
-            db.add(LeagueMetricDistribution(**identity, **payload))
+        outcome = _upsert_distribution(db, identity, payload)
+        if outcome == "created":
             created += 1
-        elif all(getattr(existing, field) == value for field, value in payload.items()):
-            unchanged += 1
-        else:
-            for field, value in payload.items():
-                setattr(existing, field, value)
+        elif outcome == "updated":
             updated += 1
+        else:
+            unchanged += 1
+
+    profiles = (
+        db.query(PitcherPitchProfile)
+        .join(PlayerSeason, PlayerSeason.id == PitcherPitchProfile.player_season_id)
+        .filter(
+            PlayerSeason.season == season,
+            PlayerSeason.data_start_date == data_start_date,
+            PlayerSeason.data_end_date == data_end_date,
+            PitcherPitchProfile.batter_side == "ALL",
+            PitcherPitchProfile.pitch_count >= MOVEMENT_PROFILE_MIN_PITCHES,
+            PitcherPitchProfile.avg_pfx_x.isnot(None),
+            PitcherPitchProfile.avg_pfx_z.isnot(None),
+            ~PitcherPitchProfile.pitch_type.in_(MOVEMENT_EXCLUDED_PITCH_TYPES),
+        )
+        .all()
+    )
+    scoped_profiles: dict[tuple[str | None, str], list[PitcherPitchProfile]] = {}
+    for profile in profiles:
+        family = profile.pitch_family.value if hasattr(profile.pitch_family, "value") else str(profile.pitch_family)
+        scoped_profiles.setdefault((profile.pitch_type, family), []).append(profile)
+        scoped_profiles.setdefault((None, family), []).append(profile)
+
+    for (pitch_type, pitch_family), scoped in sorted(scoped_profiles.items(), key=lambda item: (item[0][1], item[0][0] or "")):
+        min_population = (
+            MOVEMENT_PITCH_TYPE_MIN_POPULATION if pitch_type is not None
+            else MOVEMENT_FAMILY_MIN_POPULATION
+        )
+        if len(scoped) < min_population:
+            continue
+        values = [hypot(float(row.avg_pfx_x), float(row.avg_pfx_z)) for row in scoped]
+        samples = [row.pitch_count for row in scoped]
+        identity = {
+            "season": season,
+            "role": normalized_role,
+            "metric": "movement_magnitude",
+            "pitch_type": pitch_type,
+            "pitch_family": pitch_family,
+            "distribution_version": version,
+            "data_start_date": data_start_date,
+            "data_end_date": data_end_date,
+        }
+        outcome = _upsert_distribution(db, identity, _summary(values, samples))
+        if outcome == "created":
+            created += 1
+        elif outcome == "updated":
+            updated += 1
+        else:
+            unchanged += 1
 
     db.commit()
     return DistributionBuildResult(created, updated, unchanged, skipped, version)

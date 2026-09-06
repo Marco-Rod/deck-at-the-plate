@@ -7,11 +7,12 @@ from sqlalchemy import (
     Column,
     Date,
     DateTime,
+    Index,
     Integer,
     Numeric,
     SmallInteger,
     String,
-    UniqueConstraint,
+    text,
 )
 
 from app.core.time import utcnow
@@ -27,14 +28,17 @@ class LeagueMetricDistribution(Base):
 
     __tablename__ = "league_metric_distributions"
     __table_args__ = (
-        UniqueConstraint(
+        Index(
+            "uq_league_metric_distributions_identity",
             "season",
             "role",
             "metric",
             "distribution_version",
             "data_start_date",
             "data_end_date",
-            name="uq_league_metric_distributions_identity",
+            text("COALESCE(pitch_type, '')"),
+            text("COALESCE(pitch_family, '')"),
+            unique=True,
         ),
         CheckConstraint("season >= 1900 AND season <= 2100", name="ck_league_metric_distributions_season"),
         CheckConstraint("population_size > 0", name="ck_league_metric_distributions_population"),
@@ -51,6 +55,8 @@ class LeagueMetricDistribution(Base):
     season = Column(SmallInteger, nullable=False, index=True)
     role = Column(String(20), nullable=False, index=True)
     metric = Column(String(64), nullable=False, index=True)
+    pitch_type = Column(String(12), nullable=True, index=True)
+    pitch_family = Column(String(20), nullable=True, index=True)
     population_size = Column(Integer, nullable=False)
     sample_size_total = Column(Integer, nullable=False)
     population_mean = Column(Numeric(12, 8), nullable=False)

@@ -7,7 +7,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.database import Base
-from app.models import LeagueMetricDistribution, PitcherSeasonStats, Player, PlayerSeason
+from app.core.enums import PitchFamily, SplitHand
+from app.models import LeagueMetricDistribution, PitcherPitchProfile, PitcherSeasonStats, Player, PlayerSeason
 from etl.services.league_distributions import build_league_distributions
 from etl.services.percentiles import (
     distribution_percentile_rank,
@@ -66,6 +67,23 @@ def _pitcher(db, mlb_id: int, pitches: int, batters: int, factor: float):
     )
     db.add(row)
     return row
+
+
+def _movement_profile(db, mlb_id: int, pitch_type: str, family, count: int, x: float, z: float):
+    stats = _pitcher(db, mlb_id, max(count, 50), 20, 0.5)
+    profile = PitcherPitchProfile(
+        player_season_id=stats.player_season_id,
+        pitch_type=pitch_type,
+        pitch_family=family,
+        batter_side=SplitHand.ALL,
+        pitch_count=count,
+        sample_size=count,
+        usage_rate=1,
+        avg_pfx_x=x,
+        avg_pfx_z=z,
+    )
+    db.add(profile)
+    return profile
 
 
 def test_percentiles_interpolan_e_invierten_direccion():
@@ -205,3 +223,46 @@ def test_percentile_hbp_con_empate_en_cero_no_produce_p100_inverso():
     assert statistical == 0.375
     assert ability == 0.625
     assert ability < 1.0
+
+
+def test_movement_crea_scope_pitch_type_y_fallback_family(db):
+    profiles = [
+        _movement_profile(db, 100 + index, "SI", PitchFamily.FASTBALL, 10 + index, 1 + index / 10, 0.5)
+        for index in range(10)
+    ]
+    for index in range(5):
+        _movement_profile(db, 200 + index, "FF", PitchFamily.FASTBALL, 20, 0.8, 1.2 + index / 10)
+    db.commit()
+
+    result = build_league_distributions(
+        db, season=2026, role="pitcher", data_start_date=START, data_end_date=END
+    )
+    sinker = db.query(LeagueMetricDistribution).filter_by(
+        metric="movement_magnitude", pitch_type="SI", pitch_family="FASTBALL"
+    ).one()
+    family = db.query(LeagueMetricDistribution).filter_by(
+        metric="movement_magnitude", pitch_type=None, pitch_family="FASTBALL"
+    ).one()
+    assert sinker.population_size == 10
+    assert sinker.sample_size_total == sum(profile.pitch_count for profile in profiles)
+    assert family.population_size == 15
+    assert abs(float(sinker.minimum) - (1 ** 2 + 0.5 ** 2) ** 0.5) < 1e-8
+    assert result.created == 10  # ocho globales + SI + FASTBALL fallback
+
+    rerun = build_league_distributions(
+        db, season=2026, role="pitcher", data_start_date=START, data_end_date=END
+    )
+    assert rerun.unchanged == 10
+
+
+def test_movement_excluye_poca_muestra_pitchout_y_splits(db):
+    base = _movement_profile(db, 1, "SI", PitchFamily.FASTBALL, 9, 1.5, 0.4)
+    db.add(PitcherPitchProfile(
+        player_season_id=base.player_season_id,
+        pitch_type="SI", pitch_family=PitchFamily.FASTBALL, batter_side=SplitHand.LEFT,
+        pitch_count=20, sample_size=20, usage_rate=1, avg_pfx_x=1.5, avg_pfx_z=0.4,
+    ))
+    _movement_profile(db, 2, "PO", PitchFamily.OTHER, 20, 1.0, 1.0)
+    db.commit()
+    build_league_distributions(db, season=2026, role="pitcher", data_start_date=START, data_end_date=END)
+    assert db.query(LeagueMetricDistribution).filter_by(metric="movement_magnitude").count() == 0

@@ -7,6 +7,10 @@ from dataclasses import dataclass
 # métricas o algoritmo de percentiles. La temporada ya forma parte de la
 # identidad de la distribución y no necesita codificarse aquí.
 DISTRIBUTION_MODEL_VERSION = "dist-1.0"
+MOVEMENT_PROFILE_MIN_PITCHES = 10
+MOVEMENT_PITCH_TYPE_MIN_POPULATION = 10
+MOVEMENT_FAMILY_MIN_POPULATION = 15
+MOVEMENT_EXCLUDED_PITCH_TYPES = frozenset({"PO"})
 
 
 @dataclass(frozen=True)
