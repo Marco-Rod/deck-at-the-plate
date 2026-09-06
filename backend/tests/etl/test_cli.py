@@ -16,6 +16,7 @@ def test_parser_generates_subcomandos():
         "import-statcast-population": ["import-statcast-population", "--season", "2026", "--role", "pitcher", "--from", "2026-04-01", "--to", "2026-04-05", "--limit", "40"],
         "build-analytics": ["build-analytics", "--season", "2026", "--data-start-date", "2026-03-20", "--data-end-date", "2026-08-31"],
         "build-league-distributions": ["build-league-distributions", "--season", "2026", "--role", "pitcher", "--from", "2026-03-20", "--to", "2026-08-31"],
+        "calculate-pitcher-movement": ["calculate-pitcher-movement", "--player-id", "650911", "--season", "2026", "--from", "2026-03-20", "--to", "2026-08-31"],
         "run": ["run", "--season", "2026", "--from", "2026-04-01", "--to", "2026-04-05"],
         "generate-card-profiles": ["generate-card-profiles", "--season", "2026"],
         "validate-card-profiles": ["validate-card-profiles", "--season", "2026"],

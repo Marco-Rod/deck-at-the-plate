@@ -33,6 +33,7 @@ from etl.services.identity_generation import validate_game_identities
 from etl.services.league_distributions import build_league_distributions
 from etl.services.quality import collect_quality, emit_quality_report
 from etl.services.statcast_population import import_statcast_population
+from etl.services.pitcher_movement import calculate_movement_candidate
 from etl.sources.mlb import MLBStatsApiClient
 from etl.sources.statcast import StatcastSourceAdapter
 
@@ -108,6 +109,13 @@ def _build_parser() -> argparse.ArgumentParser:
     dist.add_argument("--from", dest="data_start_date", type=_parse_date, required=True)
     dist.add_argument("--to", dest="data_end_date", type=_parse_date, required=True)
     dist.add_argument("--distribution-version", dest="distribution_version", default=None)
+
+    movement = sub.add_parser("calculate-pitcher-movement", help="Inspecciona candidato Movement sin persistir carta")
+    movement.add_argument("--player-id", dest="player_id", type=int, required=True)
+    movement.add_argument("--season", type=int, required=True)
+    movement.add_argument("--from", dest="data_start_date", type=_parse_date, required=True)
+    movement.add_argument("--to", dest="data_end_date", type=_parse_date, required=True)
+    movement.add_argument("--distribution-version", dest="distribution_version", default=None)
 
     run = sub.add_parser("run", help="Pipeline completo")
     run.add_argument("--season", type=int, required=True)
@@ -300,6 +308,23 @@ def main(argv=None) -> int:
                 "league distributions created=%s updated=%s unchanged=%s skipped=%s version=%s",
                 result.created, result.updated, result.unchanged, result.skipped, result.version,
             )
+
+        elif args.command == "calculate-pitcher-movement":
+            result = calculate_movement_candidate(
+                db, mlb_id=args.player_id, season=args.season,
+                data_start_date=args.data_start_date, data_end_date=args.data_end_date,
+                distribution_version=args.distribution_version,
+            )
+            for pitch in result.pitches:
+                print(
+                    f"{pitch.pitch_type} scope={pitch.scope} raw={pitch.raw_magnitude:.4f} "
+                    f"baseline={pitch.league_baseline:.4f} sample={pitch.pitch_count} "
+                    f"weight={pitch.shrinkage_weight:.4f} adjusted={pitch.adjusted_magnitude:.4f} "
+                    f"percentile={pitch.percentile:.4f} rating={pitch.rating} usage={pitch.usage:.6f}"
+                )
+            if result.skipped_pitch_types:
+                print(f"skipped={','.join(result.skipped_pitch_types)}")
+            print(f"MOVEMENT={result.movement_rating}")
 
         elif args.command == "run":
             # Corrección A2: si RAW falla, run() propaga la excepción y aquí se
