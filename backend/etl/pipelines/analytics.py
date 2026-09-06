@@ -121,9 +121,11 @@ class AnalyticsPipeline:
             run.status = ImportStatus.FAILED
             run.error_summary = str(exc)[:2000]
             logger.exception("analytics pipeline falló")
-        finally:
             run.finished_at = utcnow()
             self._db.commit()
+            raise
+        run.finished_at = utcnow()
+        self._db.commit()
         return result
 
     # -------------------------------------------------------------- helpers

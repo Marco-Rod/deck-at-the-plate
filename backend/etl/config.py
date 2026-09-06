@@ -23,5 +23,8 @@ ETL_MAX_RETRIES = int(os.getenv("ETL_MAX_RETRIES", "3"))
 STATCAST_CHUNK_DAYS = int(os.getenv("STATCAST_CHUNK_DAYS", "5"))
 STATCAST_SAFE_ROW_THRESHOLD = int(os.getenv("STATCAST_SAFE_ROW_THRESHOLD", "25000"))
 
+# Tamaño de lote del bulk UPSERT de raw_pitch_events (corrección §4).
+BULK_UPSERT_BATCH_SIZE = int(os.getenv("BULK_UPSERT_BATCH_SIZE", "1000"))
+
 # Rating model que usan los perfiles de carta generados por el ETL.
 RATING_MODEL_VERSION = os.getenv("ETL_RATING_MODEL_VERSION", "ratings-1.0")

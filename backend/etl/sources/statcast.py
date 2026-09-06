@@ -200,28 +200,43 @@ class StatcastSourceAdapter(PitchSource):
     def get_pitches(self, date_from: date, date_to: date):
         return self.fetch_date_range(date_from, date_to)
 
-    def fetch_date_range(self, date_from: date, date_to: date, *, player_type: str = "pitcher") -> list[PitchSourceRecord]:
-        params = self._query_builder.build_date_range(date_from, date_to, player_type=player_type)
-        return self._fetch_csv(params)
+    def fetch_date_range(self, date_from: date, date_to: date, *, player_type: str = "pitcher", chunk_days: int | None = None) -> list[PitchSourceRecord]:
+        """Ruta pública SEGURA (corrección §3): único punto de acceso por rango.
+
+        Aplica internamente: chunking base (chunk_days o STATCAST_CHUNK_DAYS),
+        umbral de seguridad (STATCAST_SAFE_ROW_THRESHOLD) con subdivisión, y
+        combinación de subchunks. No existe ruta insegura pública.
+        """
+        days = chunk_days or self._chunk_days
+        build = lambda wf, wt: self._query_builder.build_date_range(wf, wt, player_type=player_type)
+        records: list[PitchSourceRecord] = []
+        for window_from, window_to in split_date_ranges(date_from, date_to, days):
+            records.extend(self._fetch_chunk_guarded(window_from, window_to, build=build))
+        return records
+
+    def fetch_date_range_chunked(self, date_from: date, date_to: date) -> list[PitchSourceRecord]:
+        """Deprecado: alias de fetch_date_range (ruta segura)."""
+        return self.fetch_date_range(date_from, date_to)
 
     def fetch_batter(self, mlb_id: int, date_from: date, date_to: date) -> list[PitchSourceRecord]:
-        return self._fetch_csv(self._query_builder.build_batter(mlb_id, date_from, date_to))
+        build = lambda wf, wt: self._query_builder.build_batter(mlb_id, wf, wt)
+        return self._fetch_player_range(date_from, date_to, build)
 
     def fetch_pitcher(self, mlb_id: int, date_from: date, date_to: date) -> list[PitchSourceRecord]:
-        return self._fetch_csv(self._query_builder.build_pitcher(mlb_id, date_from, date_to))
+        build = lambda wf, wt: self._query_builder.build_pitcher(mlb_id, wf, wt)
+        return self._fetch_player_range(date_from, date_to, build)
+
+    def _fetch_player_range(self, date_from: date, date_to: date, build) -> list[PitchSourceRecord]:
+        records: list[PitchSourceRecord] = []
+        for window_from, window_to in split_date_ranges(date_from, date_to, self._chunk_days):
+            records.extend(self._fetch_chunk_guarded(window_from, window_to, build=build))
+        return records
 
     def fetch_game(self, game_pk: int) -> list[PitchSourceRecord]:
         return self._fetch_csv(self._query_builder.build_game(game_pk))
 
-    def fetch_date_range_chunked(self, date_from: date, date_to: date) -> list[PitchSourceRecord]:
-        """Ventana completa con auto-división si un chunk se aproxima al umbral."""
-        records: list[PitchSourceRecord] = []
-        for window_from, window_to in split_date_ranges(date_from, date_to, self._chunk_days):
-            records.extend(self._fetch_chunk_guarded(window_from, window_to))
-        return records
-
-    def _fetch_chunk_guarded(self, window_from: date, window_to: date) -> list[PitchSourceRecord]:
-        records = self.fetch_date_range(window_from, window_to)
+    def _fetch_chunk_guarded(self, window_from: date, window_to: date, *, build) -> list[PitchSourceRecord]:
+        records = self._fetch_csv(build(window_from, window_to))
         if len(records) >= self._safe_row_threshold and window_from != window_to:
             half = window_from + timedelta(days=(window_to - window_from).days // 2)
             logger.info(
@@ -230,5 +245,7 @@ class StatcastSourceAdapter(PitchSource):
                 window_from,
                 window_to,
             )
-            return self._fetch_chunk_guarded(window_from, half) + self._fetch_chunk_guarded(half + timedelta(days=1), window_to)
+            return self._fetch_chunk_guarded(window_from, half, build=build) + self._fetch_chunk_guarded(
+                half + timedelta(days=1), window_to, build=build
+            )
         return records

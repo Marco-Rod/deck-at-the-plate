@@ -9,7 +9,6 @@ from dataclasses import dataclass, field
 
 from app.models import RawPitchEvent
 from etl.pipelines.statcast import StatcastRunResult
-from etl.aggregators.metrics import PitchView
 
 logger = logging.getLogger("etl.services.quality")
 

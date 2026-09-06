@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.core.enums import ImportStatus
 from app.core.time import utcnow
-from app.models import DataImportRun
+from app.models import DataImportRun, Player
 from etl.config import ETL_PIPELINE_VERSION
 from etl.loaders.core import upsert_player, upsert_player_season, upsert_player_team_stint, upsert_team
 from etl.sources.mlb import MLBStatsApiClient, PlayerMetadataCache
@@ -82,9 +82,11 @@ class MetadataPipeline:
             run.status = ImportStatus.FAILED
             run.error_summary = str(exc)[:2000]
             logger.exception("metadata pipeline falló")
-        finally:
             run.finished_at = utcnow()
             self._db.commit()
+            raise
+        run.finished_at = utcnow()
+        self._db.commit()
         return result
 
     def _persist_player_and_snapshot(self, mlb_id, season, w_from, w_to, run_id, rosters) -> None:
@@ -133,7 +135,91 @@ class MetadataPipeline:
             self._db.rollback()
             run.status = ImportStatus.FAILED
             run.error_summary = str(exc)[:2000]
-        finally:
+            logger.exception("metadata snapshot falló")
             run.finished_at = utcnow()
             self._db.commit()
+            raise
+        run.finished_at = utcnow()
+        self._db.commit()
         return result
+
+    def resolve_players_from_raw(
+        self, *, season: int, data_start_date: date, data_end_date: date
+    ) -> MetadataRunResult:
+        """Resuelve en BD únicamente los Player que aparecen en RAW (corrección §6).
+
+        mlb_ids distintos del RAW (batter/pitcher) → existentes → resolver por
+        cache/API SOLO los faltantes → upsert. Sin consultas de rosters/equipos:
+        analytics necesita únicamente Player (+ PlayerSeason, que él mismo
+        asegura vía _ensure_player_seasons).
+        """
+        result = MetadataRunResult()
+        run = DataImportRun(
+            source="MLB_STATS_API",
+            pipeline_version=ETL_PIPELINE_VERSION,
+            season=season,
+            date_from=data_start_date,
+            date_to=data_end_date,
+            status=ImportStatus.RUNNING,
+        )
+        self._db.add(run)
+        self._db.commit()
+        result.import_run_id = run.id
+        self._result = result
+        try:
+            from app.models import RawPitchEvent
+
+            ids = self._db.query(RawPitchEvent.batter_mlb_id).filter(
+                RawPitchEvent.season == season,
+                RawPitchEvent.game_date >= data_start_date,
+                RawPitchEvent.game_date <= data_end_date,
+            ).distinct().all()
+            ids.extend(
+                self._db.query(RawPitchEvent.pitcher_mlb_id)
+                .filter(
+                    RawPitchEvent.season == season,
+                    RawPitchEvent.game_date >= data_start_date,
+                    RawPitchEvent.game_date <= data_end_date,
+                )
+                .distinct()
+                .all()
+            )
+            mlb_ids = {row[0] for row in ids}
+            existing = {
+                p.mlb_id
+                for p in self._db.query(Player).filter(Player.mlb_id.in_(mlb_ids)).all()
+            } if mlb_ids else set()
+            unknown = sorted(mlb_ids - existing)
+            logger.info("resolve players: %s conocidos, %s a resolver", len(existing), len(unknown))
+
+            for mlb_id in unknown:
+                self._persist_player_only(mlb_id, season, data_start_date, data_end_date, run.id)
+                result.players += 1
+
+            run.status = ImportStatus.SUCCESS if not result.unresolved else ImportStatus.PARTIAL
+            if result.unresolved:
+                run.error_summary = f"sin resolver: {sorted(result.unresolved)[:50]}"
+        except Exception as exc:
+            self._db.rollback()
+            run.status = ImportStatus.FAILED
+            run.error_summary = str(exc)[:2000]
+            logger.exception("resolve players falló")
+            run.finished_at = utcnow()
+            self._db.commit()
+            raise
+        run.finished_at = utcnow()
+        self._db.commit()
+        return result
+
+    def _persist_player_only(self, mlb_id, season, w_from, w_to, run_id) -> None:
+        record = self._cache.get_player(mlb_id)
+        if record is None:
+            if self._result is not None:
+                self._result.unresolved.append(mlb_id)
+            logger.warning("mlb_id sin resolver: %s", mlb_id)
+            return
+        player = upsert_player(self._db, record)
+        upsert_player_season(
+            self._db, player=player, season=season, data_start_date=w_from, data_end_date=w_to, import_run_id=run_id
+        )
+        self._db.commit()

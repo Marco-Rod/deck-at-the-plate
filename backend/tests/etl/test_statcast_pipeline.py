@@ -125,7 +125,7 @@ class TestRechazosYCounters:
         assert raw_run.rows_inserted == 7
         assert raw_run.finished_at is not None
 
-    def test_fallo_http_queda_failed_con_error_summary(self, db):
+    def test_fallo_http_queda_failed_y_propaga_error(self, db):
         def handler(request):
             return httpx.Response(500, request=request)
 
@@ -136,11 +136,12 @@ class TestRechazosYCounters:
         pipeline = StatcastRawPipeline(db, adapter, chunk_days=10)
         from datetime import date
 
-        result = pipeline.run(date_from=date(2026, 4, 1), date_to=date(2026, 4, 7))
-        assert result.rows_extracted == 0
+        with pytest.raises(httpx.HTTPStatusError):
+            pipeline.run(date_from=date(2026, 4, 1), date_to=date(2026, 4, 7))
         raw_run = db.query(DataImportRun).one()
         assert raw_run.status == ImportStatus.FAILED
         assert raw_run.error_summary
+        assert raw_run.finished_at is not None
         assert db.query(RawPitchEvent).count() == 0
 
 

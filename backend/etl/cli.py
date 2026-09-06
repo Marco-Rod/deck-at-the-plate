@@ -6,17 +6,15 @@ Uso (desde backend/):  python -m etl.cli <subcomando> --opciones
 import argparse
 import logging
 from datetime import date
-from datetime import timedelta
 
 from app.database import SessionLocal
-from etl.http.client import ExternalHttpClient
-from etl.sources.mlb import MLBStatsApiClient
-from etl.sources.statcast import StatcastSourceAdapter
+from etl.pipelines.analytics import AnalyticsPipeline
 from etl.pipelines.metadata import MetadataPipeline
 from etl.pipelines.statcast import StatcastRawPipeline
-from etl.pipelines.analytics import AnalyticsPipeline
-from etl.services.card_profiles import ProfileRunResult, generate_profiles
-from etl.services.quality import QualitySummary, collect_quality, emit_quality_report
+from etl.services.card_profiles import generate_profiles
+from etl.services.quality import collect_quality, emit_quality_report
+from etl.sources.mlb import MLBStatsApiClient
+from etl.sources.statcast import StatcastSourceAdapter
 
 logger = logging.getLogger("etl.cli")
 
@@ -67,14 +65,6 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _summary(result, source: str) -> QualitySummary:
-    summary = QualitySummary()
-    summary.source = source
-    if hasattr(result, "import_run_id"):
-        summary.run_id = result.import_run_id
-    return summary
-
-
 def main(argv=None) -> int:
     args = _build_parser().parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -102,58 +92,30 @@ def main(argv=None) -> int:
 
         elif args.command == "import-statcast-player":
             adapter = StatcastSourceAdapter()
-            version = args.role
-            # Resolver metadata del jugador primero (nunca hardcodear mlb_id aquí).
-            from etl.sources.mlb import PlayerMetadataCache
-
             client = MLBStatsApiClient()
-            cache = PlayerMetadataCache(client)
-            record = cache.get_player(args.player_id)
-            if record is None:
-                logger.error("mlb_id sin resolver: %s", args.player_id)
-                return 2
-            from etl.loaders.core import upsert_player, upsert_player_season
-
-            player = upsert_player(db, record)
-            upsert_player_season(db, player=player, season=args.date_from.year, data_start_date=args.date_from, data_end_date=args.date_to)
-            db.commit()
-
-            if args.role == "batter":
-                records = adapter.fetch_batter(args.player_id, args.date_from, args.date_to)
-            else:
-                records = adapter.fetch_pitcher(args.player_id, args.date_from, args.date_to)
-            from etl.normalizers.raw_mapper import normalize_row
-            from etl.validators.raw import validate_raw_row
-            from etl.pipelines.statcast import StatcastRunResult
-            from etl.loaders.raw import upsert_raw_pitch_events
-            from app.core.enums import ImportStatus
-            from app.models import DataImportRun
-            from app.core.time import utcnow
-
-            run = DataImportRun(source="STATCAST", pipeline_version="1.0.0", season=args.date_from.year, date_from=args.date_from, date_to=args.date_to, status=ImportStatus.RUNNING)
-            db.add(run)
-            db.commit()
-            result = StatcastRunResult(rows_extracted=len(records))
-            rows = []
-            rejected = 0
-            for rec in records:
-                errors = validate_raw_row(rec)
-                if errors:
-                    rejected += 1
-                    continue
-                rows.append(normalize_row(rec))
-            upsert = upsert_raw_pitch_events(db, import_run_id=run.id, rows=rows, refresh=args.refresh)
-            result.rows_inserted = upsert.inserted
-            result.rows_updated = upsert.updated
-            result.rows_rejected = rejected
-            run.rows_extracted = result.rows_extracted
-            run.rows_inserted = upsert.inserted
-            run.rows_updated = upsert.updated
-            run.rows_rejected = rejected
-            run.status = ImportStatus.SUCCESS
-            run.finished_at = utcnow()
-            db.commit()
-            logger.info("statcast-player inserted=%s updated=%s rejected=%s", upsert.inserted, upsert.updated, rejected)
+            metadata = MetadataPipeline(db, client)
+            meta_result = metadata.run_season_snapshot_for(
+                args.player_id,
+                season=args.date_from.year,
+                data_start_date=args.date_from,
+                data_end_date=args.date_to,
+            )
+            raw = StatcastRawPipeline(db, adapter).run_player(
+                mlb_id=args.player_id,
+                role=args.role,
+                date_from=args.date_from,
+                date_to=args.date_to,
+                refresh=args.refresh,
+            )
+            logger.info(
+                "statcast-player role=%s mlb_id=%s metadata_players=%s inserted=%s updated=%s rejected=%s",
+                args.role,
+                args.player_id,
+                meta_result.players,
+                raw.rows_inserted,
+                raw.rows_updated,
+                raw.rows_rejected,
+            )
 
         elif args.command == "build-analytics":
             pipeline = AnalyticsPipeline(db)
@@ -163,11 +125,25 @@ def main(argv=None) -> int:
             logger.info("analytics players=%s profiles=%s rejected=%s", result.players_processed, result.profiles_created, result.analytics_rejected)
 
         elif args.command == "run":
+            # Corrección A2: si RAW falla, run() propaga la excepción y aquí se
+            # corta la cadena (no se ejecutan metadata ni analytics).
             adapter = StatcastSourceAdapter()
-            raw = StatcastRawPipeline(db, adapter).run(date_from=args.date_from, date_to=args.date_to, season=args.season)
-            logger.info("raw done inserted=%s", raw.rows_inserted)
-            # Analytics para el snapshot completo de la temporada.
-            analytics = AnalyticsPipeline(db).rebuild(season=args.season, data_start_date=date(args.season, 1, 1), data_end_date=args.date_to)
+            raw = StatcastRawPipeline(db, adapter).run(
+                date_from=args.date_from, date_to=args.date_to, season=args.season
+            )
+            logger.info("raw done source=%s inserted=%s updated=%s rejected=%s", raw.import_run_id, raw.rows_inserted, raw.rows_updated, raw.rows_rejected)
+
+            # Corrección §6: resolver SOLO los Players presentes en el RAW (sin rosters).
+            client = MLBStatsApiClient()
+            meta = MetadataPipeline(db, client).resolve_players_from_raw(
+                season=args.season, data_start_date=args.date_from, data_end_date=args.date_to
+            )
+            logger.info("players resolve=%s unresolved=%s", meta.players, meta.unresolved)
+
+            # Analytics sobre el snapshot completo de la temporada.
+            analytics = AnalyticsPipeline(db).rebuild(
+                season=args.season, data_start_date=date(args.season, 1, 1), data_end_date=args.date_to
+            )
             logger.info("analytics players=%s profiles=%s", analytics.players_processed, analytics.profiles_created)
 
         elif args.command == "generate-profiles":
