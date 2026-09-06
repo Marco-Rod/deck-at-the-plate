@@ -26,6 +26,7 @@ from sqlalchemy import (
     String,
     UniqueConstraint,
 )
+from sqlalchemy.orm import relationship
 from app.database import Base
 from app.core.enums import Handedness, ThrowHand
 from app.core.time import utcnow
@@ -55,6 +56,8 @@ class Player(Base):
     updated_at = Column(
         DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow
     )
+
+    game_identity = relationship("GamePlayerIdentity", back_populates="player", uselist=False)
 
 
 class PlayerSeason(Base):
@@ -99,6 +102,8 @@ class PlayerSeason(Base):
         DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow
     )
 
+    player = relationship("Player")
+
 
 class PlayerTeamStint(Base):
     """Afiliación de un jugador a un equipo dentro de una temporada.
@@ -111,7 +116,7 @@ class PlayerTeamStint(Base):
         UniqueConstraint(
             "player_id",
             "season",
-            "team_id",
+            "source_team_id",
             "start_date",
             name="uq_player_team_stint",
         ),
@@ -127,7 +132,10 @@ class PlayerTeamStint(Base):
         String(36), ForeignKey("players.id", ondelete="RESTRICT"), nullable=False, index=True
     )
     season = Column(SmallInteger, nullable=False, index=True)
-    team_id = Column(String(3), ForeignKey("teams.id"), nullable=False, index=True)
+    # V2: la afiliación apunta a la franquicia REAL (SourceTeam), no a la GAME.
+    source_team_id = Column(
+        String(36), ForeignKey("source_teams.id"), nullable=False, index=True
+    )
     start_date = Column(Date, nullable=False)
     # NULL significa que sigue activo al corte.
     end_date = Column(Date, nullable=True)

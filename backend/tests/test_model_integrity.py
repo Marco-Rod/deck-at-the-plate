@@ -27,6 +27,7 @@ from app.models import (
     Player,
     PlayerSeason,
     PlayerTeamStint,
+    SourceTeam,
 )
 
 
@@ -38,6 +39,20 @@ def db():
     yield session
     session.close()
     engine.dispose()
+
+
+def _source_team(db, source_team_id="src-LAD"):
+    st = SourceTeam(
+        id=source_team_id,
+        source="MLB",
+        external_id=119,
+        source_abbreviation="LAD",
+        source_name="Dodgers",
+        is_active=True,
+    )
+    db.add(st)
+    db.flush()
+    return st
 
 
 def _player(db, **overrides):
@@ -70,10 +85,11 @@ def _player_season(db, player=None, **overrides):
 class TestPlayerTeamStint:
     def test_stint_duplicado_rechazado(self, db):
         player = _player(db)
+        source_team_id = _source_team(db).id
         base = {
             "player_id": player.id,
             "season": 2026,
-            "team_id": "LAD",
+            "source_team_id": source_team_id,
             "start_date": dt.date(2026, 4, 1),
         }
         db.add(PlayerTeamStint(**base))
@@ -89,7 +105,7 @@ class TestPlayerTeamStint:
         db.add(PlayerTeamStint(
             player_id=player.id,
             season=2026,
-            team_id="LAD",
+            source_team_id=_source_team(db).id,
             start_date=None,
         ))
         with pytest.raises(IntegrityError):
@@ -105,11 +121,12 @@ class TestPlayerTeamStint:
         NOT NULL, cada reintento falla y nunca queda más de una fila.
         """
         player = _player(db)
+        source_team_id = _source_team(db).id
         for _ in range(2):
             db.add(PlayerTeamStint(
                 player_id=player.id,
                 season=2026,
-                team_id="LAD",
+                source_team_id=source_team_id,
                 start_date=None,
             ))
             with pytest.raises(IntegrityError):
@@ -122,7 +139,7 @@ class TestPlayerTeamStint:
         db.add(PlayerTeamStint(
             player_id=player.id,
             season=2026,
-            team_id="LAD",
+            source_team_id=_source_team(db).id,
             start_date=dt.date(2026, 6, 1),
             end_date=dt.date(2026, 4, 1),
         ))
@@ -135,7 +152,7 @@ class TestPlayerTeamStint:
         stint = PlayerTeamStint(
             player_id=player.id,
             season=2026,
-            team_id="LAD",
+            source_team_id=_source_team(db).id,
             start_date=dt.date(2026, 4, 1),
             end_date=None,
         )

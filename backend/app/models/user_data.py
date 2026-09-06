@@ -15,7 +15,7 @@ class User(Base):
     # Relaciones 1:1 con Cartera y 1:N con Inventario
     wallet = relationship("UserWallet", back_populates="user", uselist=False, cascade="all, delete-orphan")
     inventory = relationship("UserCardInventory", back_populates="user", cascade="all, delete-orphan")
-    favorite_team_id = Column(String(3), ForeignKey("teams.id"), nullable=True)
+    favorite_team_id = Column(String(36), ForeignKey("teams.id"), nullable=True)
     has_completed_onboarding = Column(Boolean, default=False)
     lineups = relationship("UserLineup", back_populates="user", cascade="all, delete-orphan")
     team = relationship("UserTeam", back_populates="user", uselist=False)
@@ -77,8 +77,9 @@ class UserTeam(Base):
     secondary_color = Column(String(7), default="#1A3323") # Hex
     logo_id = Column(String(50), default="logo_baseball_01")
     
-    # Franquicia MLB seleccionada para el sobre base (Dodgers, Yankees, etc.)
-    base_franchise = Column(String(10), nullable=False, default="LAD")
+    # Franquicia pública (GAME) que concede el sobre base. Nunca expone el
+    # código SOURCE (antes `base_franchise` guardaba "LAD").
+    base_team_id = Column(String(36), ForeignKey("teams.id"), nullable=True, index=True)
     
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

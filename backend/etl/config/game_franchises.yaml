@@ -1,0 +1,282 @@
+# Configuración versionada de franquicias públicas (plan V2 §37)
+# ==============================================================
+# 30 franquicias GAME (una por franquicia SOURCE/MLB). Este archivo es la
+# fuente de verdad del branding público: nombre, slug, colores. La abreviatura
+# pública es estable (coincide con los ids de teams previos al re-key UUID,
+# lo que hace el backfill determinístico). source_team_external_id es el
+# mlb_team_id de MLB Stats API.
+#
+# Regla de transición: sync-game-team-mappings upsertea `teams` con
+# id = uuid5(ns, "team:<public_abbreviation>") (app/core/identities.py).
+schema_version: 1
+game_franchises:
+  - source_team_external_id: 133
+    public_abbreviation: ATH
+    slug: athletics
+    name: Athletics
+    city: Oakland
+    primary_color: "#003831"
+    secondary_color: "#C5A059"
+    logo_asset: null
+    is_cpu: true
+  - source_team_external_id: 144
+    public_abbreviation: ATL
+    slug: atlanta-bravos
+    name: Bravos de Atlanta
+    city: Atlanta
+    primary_color: "#002B5C"
+    secondary_color: "#C5A059"
+    logo_asset: null
+    is_cpu: true
+  - source_team_external_id: 109
+    public_abbreviation: AZ
+    slug: arizona-diamondbacks
+    name: Diamantes de Arizona
+    city: Arizona
+    primary_color: "#A71930"
+    secondary_color: "#C5A059"
+    logo_asset: null
+    is_cpu: true
+  - source_team_external_id: 110
+    public_abbreviation: BAL
+    slug: baltimore-orioles
+    name: Águilas de Baltimore
+    city: Baltimore
+    primary_color: "#DF4601"
+    secondary_color: "#C5A059"
+    logo_asset: null
+    is_cpu: true
+  - source_team_external_id: 111
+    public_abbreviation: BOS
+    slug: boston-pirates
+    name: Piratas de Boston
+    city: Boston
+    primary_color: "#BD3039"
+    secondary_color: "#C5A059"
+    logo_asset: null
+    is_cpu: true
+  - source_team_external_id: 112
+    public_abbreviation: CHC
+    slug: chicago-cubs
+    name: Cachorros de Chicago
+    city: Chicago
+    primary_color: "#0E3386"
+    secondary_color: "#C5A059"
+    logo_asset: null
+    is_cpu: true
+  - source_team_external_id: 113
+    public_abbreviation: CIN
+    slug: cincinnati-reds
+    name: Rojos de Cincinnati
+    city: Cincinnati
+    primary_color: "#C6011F"
+    secondary_color: "#C5A059"
+    logo_asset: null
+    is_cpu: true
+  - source_team_external_id: 114
+    public_abbreviation: CLE
+    slug: cleveland-guardians
+    name: Guardias de Cleveland
+    city: Cleveland
+    primary_color: "#00385D"
+    secondary_color: "#C5A059"
+    logo_asset: null
+    is_cpu: true
+  - source_team_external_id: 115
+    public_abbreviation: COL
+    slug: colorado-rockies
+    name: Montañeses de Colorado
+    city: Colorado
+    primary_color: "#33006F"
+    secondary_color: "#C5A059"
+    logo_asset: null
+    is_cpu: true
+  - source_team_external_id: 145
+    public_abbreviation: CWS
+    slug: chicago-white-sox
+    name: Calcetines Blancos de Chicago
+    city: Chicago
+    primary_color: "#27251F"
+    secondary_color: "#C5A059"
+    logo_asset: null
+    is_cpu: true
+  - source_team_external_id: 116
+    public_abbreviation: DET
+    slug: detroit-tigers
+    name: Tigres de Detroit
+    city: Detroit
+    primary_color: "#0C2C56"
+    secondary_color: "#C5A059"
+    logo_asset: null
+    is_cpu: true
+  - source_team_external_id: 117
+    public_abbreviation: HOU
+    slug: houston-astros
+    name: Astros de Houston
+    city: Houston
+    primary_color: "#EB6E1F"
+    secondary_color: "#C5A059"
+    logo_asset: null
+    is_cpu: true
+  - source_team_external_id: 118
+    public_abbreviation: KC
+    slug: kansas-city-royals
+    name: Realeza de Kansas City
+    city: Kansas City
+    primary_color: "#12284B"
+    secondary_color: "#C5A059"
+    logo_asset: null
+    is_cpu: true
+  - source_team_external_id: 108
+    public_abbreviation: LAA
+    slug: los-angeles-angels
+    name: Ángeles de Los Ángeles
+    city: Los Angeles
+    primary_color: "#BA0021"
+    secondary_color: "#C5A059"
+    logo_asset: null
+    is_cpu: true
+  - source_team_external_id: 119
+    public_abbreviation: LAD
+    slug: los-angeles-dodgers
+    name: Dodgers de Los Ángeles
+    city: Los Angeles
+    primary_color: "#005A9C"
+    secondary_color: "#C5A059"
+    logo_asset: null
+    is_cpu: true
+  - source_team_external_id: 146
+    public_abbreviation: MIA
+    slug: miami-marlins
+    name: Marlinos de Miami
+    city: Miami
+    primary_color: "#00A3E0"
+    secondary_color: "#C5A059"
+    logo_asset: null
+    is_cpu: true
+  - source_team_external_id: 158
+    public_abbreviation: MIL
+    slug: milwaukee-brewers
+    name: Cerveceros de Milwaukee
+    city: Milwaukee
+    primary_color: "#12284B"
+    secondary_color: "#C5A059"
+    logo_asset: null
+    is_cpu: true
+  - source_team_external_id: 142
+    public_abbreviation: MIN
+    slug: minnesota-twins
+    name: Gemelos de Minnesota
+    city: Minnesota
+    primary_color: "#002B5C"
+    secondary_color: "#C5A059"
+    logo_asset: null
+    is_cpu: true
+  - source_team_external_id: 121
+    public_abbreviation: NYM
+    slug: new-york-mets
+    name: Meteoros de Nueva York
+    city: New York
+    primary_color: "#002D72"
+    secondary_color: "#C5A059"
+    logo_asset: null
+    is_cpu: true
+  - source_team_external_id: 147
+    public_abbreviation: NYY
+    slug: new-york-titans
+    name: Titanes de Nueva York
+    city: New York
+    primary_color: "#0C2C56"
+    secondary_color: "#C5A059"
+    logo_asset: null
+    is_cpu: true
+  - source_team_external_id: 143
+    public_abbreviation: PHI
+    slug: philadelphia-phillies
+    name: Filis de Filadelfia
+    city: Philadelphia
+    primary_color: "#CE1141"
+    secondary_color: "#C5A059"
+    logo_asset: null
+    is_cpu: true
+  - source_team_external_id: 134
+    public_abbreviation: PIT
+    slug: pittsburgh-pirates
+    name: Piratas de Pittsburgh
+    city: Pittsburgh
+    primary_color: "#27251F"
+    secondary_color: "#C5A059"
+    logo_asset: null
+    is_cpu: true
+  - source_team_external_id: 135
+    public_abbreviation: SD
+    slug: san-diego-padres
+    name: Padres de San Diego
+    city: San Diego
+    primary_color: "#2F241D"
+    secondary_color: "#C5A059"
+    logo_asset: null
+    is_cpu: true
+  - source_team_external_id: 136
+    public_abbreviation: SEA
+    slug: seattle-mariners
+    name: Marineros de Seattle
+    city: Seattle
+    primary_color: "#0C2C56"
+    secondary_color: "#C5A059"
+    logo_asset: null
+    is_cpu: true
+  - source_team_external_id: 137
+    public_abbreviation: SF
+    slug: san-francisco-giants
+    name: Gigantes de San Francisco
+    city: San Francisco
+    primary_color: "#FD5000"
+    secondary_color: "#C5A059"
+    logo_asset: null
+    is_cpu: true
+  - source_team_external_id: 138
+    public_abbreviation: STL
+    slug: st-louis-cardinals
+    name: Cardenales de St. Louis
+    city: St. Louis
+    primary_color: "#C41E3A"
+    secondary_color: "#C5A059"
+    logo_asset: null
+    is_cpu: true
+  - source_team_external_id: 139
+    public_abbreviation: TB
+    slug: tampa-bay-rays
+    name: Tormentas de Tampa
+    city: Tampa Bay
+    primary_color: "#092C5E"
+    secondary_color: "#C5A059"
+    logo_asset: null
+    is_cpu: true
+  - source_team_external_id: 140
+    public_abbreviation: TEX
+    slug: texas-rangers
+    name: Rangers de Texas
+    city: Texas
+    primary_color: "#003278"
+    secondary_color: "#C5A059"
+    logo_asset: null
+    is_cpu: true
+  - source_team_external_id: 141
+    public_abbreviation: TOR
+    slug: toronto-blue-jays
+    name: Azulejos de Toronto
+    city: Toronto
+    primary_color: "#134687"
+    secondary_color: "#C5A059"
+    logo_asset: null
+    is_cpu: true
+  - source_team_external_id: 120
+    public_abbreviation: WSH
+    slug: washington-nationals
+    name: Nacionalistas de Washington
+    city: Washington
+    primary_color: "#AB0003"
+    secondary_color: "#C5A059"
+    logo_asset: null
+    is_cpu: true

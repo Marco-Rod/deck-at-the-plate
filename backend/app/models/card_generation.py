@@ -26,6 +26,7 @@ from sqlalchemy import (
     String,
     UniqueConstraint,
 )
+from sqlalchemy.orm import relationship
 from app.database import Base
 from app.models.card import CardRarity
 from app.core.time import utcnow
@@ -79,3 +80,5 @@ class CardGenerationProfile(Base):
     # Percentiles/inputs/parámetros suficientes para explicar el cálculo.
     calculation_metadata = Column(JSON, nullable=False, default=dict)
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, index=True)
+
+    player_season = relationship("PlayerSeason")

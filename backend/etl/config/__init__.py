@@ -28,3 +28,12 @@ BULK_UPSERT_BATCH_SIZE = int(os.getenv("BULK_UPSERT_BATCH_SIZE", "1000"))
 
 # Rating model que usan los perfiles de carta generados por el ETL.
 RATING_MODEL_VERSION = os.getenv("ETL_RATING_MODEL_VERSION", "ratings-1.0")
+
+# Generador de identidades GAME (§63-§93): versión determinista de pools.
+NAMES_GENERATOR_VERSION = os.getenv("ETL_NAMES_GENERATOR_VERSION", "names-1.0")
+# Confianza mínima para aceptar la clasificación lingüística (§87).
+NAME_CLASSIFIER_THRESHOLD = float(os.getenv("ETL_NAME_CLASSIFIER_THRESHOLD", "0.62"))
+# Intentos máximos del generador por jugador (colisión/bloqueado) (§70).
+NAMES_MAX_ATTEMPTS = int(os.getenv("ETL_NAMES_MAX_ATTEMPTS", "20"))
+# Probabilidad de conservar la inicial del nombre fuente (§73).
+NAMES_PRESERVE_INITIALS = float(os.getenv("ETL_NAMES_PRESERVE_INITIALS", "0.20"))

@@ -35,34 +35,36 @@ try:
     from app.database import SessionLocal
     from app.models import PlayerCardModel, Team
     from app.core.enums import PITCHER_POSITIONS, Position
+    from app.core.identities import game_team_id_for
 except ModuleNotFoundError:
     from database import SessionLocal
     from models import PlayerCardModel, Team
     from core.enums import PITCHER_POSITIONS, Position
+    from core.identities import game_team_id_for
 
 
-# Mapeo de equipos reales a nombres ficticios
+# Mapeo de equipos reales a nombres ficticios (keys = abreviaturas oficiales MLB).
 TEAM_FICTIONS = {
     "NYY": ("NYY", "Titanes de Nueva York", "New York", "#0C2C56", "NYY"),
     "BOS": ("BOS", "Piratas de Boston", "Boston", "#BD3039", "BOS"),
     "TB": ("TB", "Tormentas de Tampa", "Tampa Bay", "#092C5E", "TB"),
     "BAL": ("BAL", "Águilas de Baltimore", "Baltimore", "#DF4601", "BAL"),
     "TOR": ("TOR", "Azulejos de Toronto", "Toronto", "#134687", "TOR"),
-    "LAY": ("LAY", "Ángeles de Los Ángeles", "Los Angeles", "#BA0021", "LAA"),
+    "LAA": ("LAA", "Ángeles de Los Ángeles", "Los Angeles", "#BA0021", "LAA"),
     "SEA": ("SEA", "Marineros de Seattle", "Seattle", "#0C2C56", "SEA"),
-    "OAK": ("OAK", "Forajidos de Oakland", "Oakland", "#003831", "OAK"),
+    "ATH": ("ATH", "Forajidos de Oakland", "Oakland", "#003831", "ATH"),
     "TEX": ("TEX", "Rangers de Texas", "Texas", "#003278", "TEX"),
     "HOU": ("HOU", "Astros de Houston", "Houston", "#EB6E1F", "HOU"),
     "KC": ("KC", "Realeza de Kansas City", "Kansas City", "#12284B", "KC"),
     "MIN": ("MIN", "Gemelos de Minnesota", "Minnesota", "#002B5C", "MIN"),
     "DET": ("DET", "Tigres de Detroit", "Detroit", "#0C2C56", "DET"),
     "CWS": ("CWS", "Calcetines Blancos de Chicago", "Chicago", "#27251F", "CWS"),
+    "CLE": ("CLE", "Guardianes de Cleveland", "Cleveland", "#00385D", "CLE"),
     "NYM": ("NYM", "Meteoros de Nueva York", "New York", "#002D72", "NYM"),
     "ATL": ("ATL", "Bravos de Atlanta", "Atlanta", "#002B5C", "ATL"),
     "WSH": ("WSH", "Nacionalistas de Washington", "Washington", "#AB0003", "WSH"),
     "PHI": ("PHI", "Filis de Filadelfia", "Philadelphia", "#CE1141", "PHI"),
     "MIA": ("MIA", "Marlinos de Miami", "Miami", "#00A3E0", "MIA"),
-    "NYN": ("NYN", "Mets de Nueva York", "New York", "#002D72", "NYN"),
     "CHC": ("CHC", "Cachorros de Chicago", "Chicago", "#0E3386", "CHC"),
     "MIL": ("MIL", "Cerveceros de Milwaukee", "Milwaukee", "#12284B", "MIL"),
     "STL": ("STL", "Cardenales de St. Louis", "St. Louis", "#C41E3A", "STL"),
@@ -72,7 +74,7 @@ TEAM_FICTIONS = {
     "SD": ("SD", "Padres de San Diego", "San Diego", "#2F241D", "SD"),
     "SF": ("SF", "Gigantes de San Francisco", "San Francisco", "#FD5000", "SF"),
     "COL": ("COL", "Montañeses de Colorado", "Colorado", "#33006F", "COL"),
-    "ARI": ("ARI", "Diamantesde Arizona", "Arizona", "#A71930", "ARI"),
+    "ARI": ("ARI", "Diamantes de Arizona", "Arizona", "#A71930", "ARI"),
 }
 
 
@@ -396,11 +398,13 @@ def seed_mlb_2026_data(db: Session):
 
         # Obtener nombre ficticio
         fict_id, fict_name, city, color, badge = TEAM_FICTIONS.get(real_id, (real_id, real_name, "City", "#000000", real_id))
+        # La franquicia pública se identifica por UUID determinístico (V2).
+        team_id = game_team_id_for(badge)
 
         print(f"[{idx}/30] 🏟️  {real_name} → {fict_name}")
 
         # Verificar si equipo ya existe
-        existing_team = db.query(Team).filter(Team.id == fict_id).first()
+        existing_team = db.query(Team).filter(Team.id == team_id).first()
         if existing_team:
             print(f"    ✓ Equipo ya existe en BD")
             team = existing_team
@@ -411,7 +415,8 @@ def seed_mlb_2026_data(db: Session):
         else:
             # Crear equipo
             team = Team(
-                id=fict_id,
+                id=team_id,
+                abbreviation=badge,
                 name=fict_name,
                 city=city,
                 primary_color=color,
@@ -437,7 +442,7 @@ def seed_mlb_2026_data(db: Session):
             # el juego la normaliza después a SP/RP/SU/CP/CL/TWP.
             is_pitcher = position.upper() in ("P",) or position.upper() in PITCHER_POSITIONS
 
-            card = MLBSeedHelper.create_player_card(player_info, fict_id, is_pitcher, db)
+            card = MLBSeedHelper.create_player_card(player_info, team_id, is_pitcher, db)
             if card:
                 if is_pitcher:
                     pitchers_added += 1

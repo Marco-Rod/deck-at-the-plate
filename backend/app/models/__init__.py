@@ -30,8 +30,13 @@ from app.models.player_analytics import (
     BatterPitcherMatchup,
 )
 from app.models.card_generation import CardGenerationProfile
-from app.models.roster import TeamRosterMember, TeamRosterSnapshot
+from app.models.roster import SourceTeamRosterMember, SourceTeamRosterSnapshot
 from app.models.pitch_log import PitchEventLog
+
+# --- V2: capas de identidad pública y catálogo (plan Public Identity V2) ---
+from app.models.source_team import SourceTeam, SourceTeamGameTeamMapping
+from app.models.game_identity import GamePlayerIdentity
+from app.models.card_catalog import CardCatalog
 
 # Permite hacer: "from app.models import PlayerCardModel, GameSession"
 __all__ = [
@@ -63,7 +68,12 @@ __all__ = [
     "PitcherHandednessSplit",
     "BatterPitcherMatchup",
     "CardGenerationProfile",
-    "TeamRosterSnapshot",
-    "TeamRosterMember",
+    "SourceTeamRosterSnapshot",
+    "SourceTeamRosterMember",
     "PitchEventLog",
+    # V2
+    "SourceTeam",
+    "SourceTeamGameTeamMapping",
+    "GamePlayerIdentity",
+    "CardCatalog",
 ]

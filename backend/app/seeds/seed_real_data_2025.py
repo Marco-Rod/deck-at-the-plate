@@ -18,6 +18,17 @@ Uso (dentro del contenedor Docker):
 from app.database import SessionLocal, engine
 from app.models import PlayerCardModel, TacticCard, CardRarity
 from app.models.team import Team
+from app.core.identities import game_team_id_for
+
+
+# Franquicias públicas del seed (id = UUID determinístico V2).
+TEAM_DEFS = [
+    ("NYY", "New York Yankees", "New York", "#003087", "#C4CED4"),
+    ("LAD", "Los Angeles Dodgers", "Los Angeles", "#005A9C", "#FFFFFF"),
+    ("HOU", "Houston Astros", "Houston", "#002D62", "#EB6E1F"),
+    ("ATL", "Atlanta Braves", "Atlanta", "#CE1141", "#13274F"),
+]
+TEAM_IDS = {abbr: game_team_id_for(abbr) for abbr, *_ in TEAM_DEFS}
 
 
 def seed_real_data():
@@ -38,10 +49,8 @@ def seed_real_data():
         # ------------------------------------------------------------------
         print("Insertando equipos...")
         teams = [
-            Team(id="NYY", name="New York Yankees",   city="New York",     primary_color="#003087", secondary_color="#C4CED4"),
-            Team(id="LAD", name="Los Angeles Dodgers", city="Los Angeles",  primary_color="#005A9C", secondary_color="#FFFFFF"),
-            Team(id="HOU", name="Houston Astros",      city="Houston",      primary_color="#002D62", secondary_color="#EB6E1F"),
-            Team(id="ATL", name="Atlanta Braves",      city="Atlanta",      primary_color="#CE1141", secondary_color="#13274F"),
+            Team(id=TEAM_IDS[abbr], abbreviation=abbr, name=name, city=city, primary_color=pc, secondary_color=sc)
+            for abbr, name, city, pc, sc in TEAM_DEFS
         ]
         db.add_all(teams)
         db.flush()
@@ -59,7 +68,7 @@ def seed_real_data():
             # --- Lanzadores (SP) ---
             PlayerCardModel(
                 id="card_nyy_cole_2025",
-                team_id="NYY",
+                team_id=TEAM_IDS["NYY"],
                 name="Gerrit Cole",
                 number="45",
                 position="SP",
@@ -76,7 +85,7 @@ def seed_real_data():
             ),
             PlayerCardModel(
                 id="card_lad_yamamoto_2025",
-                team_id="LAD",
+                team_id=TEAM_IDS["LAD"],
                 name="Yoshinobu Yamamoto",
                 number="18",
                 position="SP",
@@ -91,7 +100,7 @@ def seed_real_data():
             ),
             PlayerCardModel(
                 id="card_hou_verlander_2025",
-                team_id="HOU",
+                team_id=TEAM_IDS["HOU"],
                 name="Justin Verlander",
                 number="35",
                 position="SP",
@@ -107,7 +116,7 @@ def seed_real_data():
             # --- Relevistas (RP) ---
             PlayerCardModel(
                 id="card_nyy_holmes_2025",
-                team_id="NYY",
+                team_id=TEAM_IDS["NYY"],
                 name="Clay Holmes",
                 number="34",
                 position="RP",
@@ -123,7 +132,7 @@ def seed_real_data():
             # --- Bateadores ---
             PlayerCardModel(
                 id="card_nyy_judge_2025",
-                team_id="NYY",
+                team_id=TEAM_IDS["NYY"],
                 name="Aaron Judge",
                 number="99",
                 position="CF",
@@ -138,7 +147,7 @@ def seed_real_data():
             ),
             PlayerCardModel(
                 id="card_nyy_soto_2025",
-                team_id="NYY",
+                team_id=TEAM_IDS["NYY"],
                 name="Juan Soto",
                 number="22",
                 position="DH",
@@ -153,7 +162,7 @@ def seed_real_data():
             ),
             PlayerCardModel(
                 id="card_lad_freeman_2025",
-                team_id="LAD",
+                team_id=TEAM_IDS["LAD"],
                 name="Freddie Freeman",
                 number="5",
                 position="1B",
@@ -168,7 +177,7 @@ def seed_real_data():
             ),
             PlayerCardModel(
                 id="card_lad_betts_2025",
-                team_id="LAD",
+                team_id=TEAM_IDS["LAD"],
                 name="Mookie Betts",
                 number="50",
                 position="RF",
@@ -183,7 +192,7 @@ def seed_real_data():
             ),
             PlayerCardModel(
                 id="card_atl_acuna_2025",
-                team_id="ATL",
+                team_id=TEAM_IDS["ATL"],
                 name="Ronald Acuña Jr.",
                 number="13",
                 position="RF",
@@ -199,7 +208,7 @@ def seed_real_data():
             # --- Jugador de dos vías (TWP) ---
             PlayerCardModel(
                 id="card_lad_ohtani_2025",
-                team_id="LAD",
+                team_id=TEAM_IDS["LAD"],
                 name="Shohei Ohtani",
                 number="17",
                 position="TWP",

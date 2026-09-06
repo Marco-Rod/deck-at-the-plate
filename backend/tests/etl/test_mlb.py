@@ -8,9 +8,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.database import Base
-from app.models import Player, PlayerSeason, PlayerTeamStint, Team
+from app.models import Player, PlayerSeason, PlayerTeamStint, SourceTeam, Team
 from etl.dto import PlayerSourceRecord, TeamSourceRecord
-from etl.loaders.core import upsert_player, upsert_player_season, upsert_player_team_stint, upsert_team
+from etl.loaders.core import upsert_player, upsert_player_season, upsert_player_team_stint, upsert_source_team, upsert_team
 from etl.sources.mlb import MLBStatsApiClient, PlayerMetadataCache
 
 
@@ -119,8 +119,9 @@ class TestLoadersCore:
     def test_upsert_team_por_abbreviation(self, db):
         team = upsert_team(db, TeamSourceRecord(mlb_team_id=119, name="Los Angeles Dodgers", abbreviation="LAD", location_name="Los Angeles", active=True))
         db.commit()
-        assert team.id == "LAD"
-        assert db.get(Team, "LAD").city == "Los Angeles"
+        assert len(team.id) == 36  # UUID determinístico
+        assert team.abbreviation == "LAD"
+        assert db.get(Team, team.id).city == "Los Angeles"
 
     def test_upsert_player_por_mlb_id(self, db):
         player = upsert_player(db, PlayerSourceRecord(mlb_id=660271, full_name="Shohei Ohtani", bats="L", throws="L", primary_position="SP"))
@@ -146,8 +147,8 @@ class TestLoadersCore:
 
     def test_upsert_player_team_stint_por_clave_unica(self, db):
         player = upsert_player(db, PlayerSourceRecord(mlb_id=660271, full_name="Shohei Ohtani"))
-        upsert_team(db, TeamSourceRecord(mlb_team_id=119, name="Dodgers", abbreviation="LAD", location_name="LA", active=True))
+        source_team = upsert_source_team(db, TeamSourceRecord(mlb_team_id=119, name="Dodgers", abbreviation="LAD", location_name="LA", active=True))
         for _ in range(2):
-            upsert_player_team_stint(db, player=player, season=2026, team_id="LAD", start_date=dt.date(2026, 3, 20))
+            upsert_player_team_stint(db, player=player, season=2026, source_team_id=source_team.id, start_date=dt.date(2026, 3, 20))
         db.commit()
         assert db.query(PlayerTeamStint).count() == 1

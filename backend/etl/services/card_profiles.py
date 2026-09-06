@@ -1,17 +1,20 @@
-"""Generación de CardGenerationProfile (spec §33).
+"""Generación de CardGenerationProfile (spec §33, plan V2).
 
 Se ejecuta SOLO después de que analytics termina correctamente. Genera perfiles
 de carta (NUNCA publica en player_cards). Inmutable: upsert por
 (player_season_id, rating_model_version) — si el modelo cambia, nueva fila.
+`generate-card-profiles` admite --data-end-date (corte) y --rating-model.
 """
 
 import logging
 from dataclasses import dataclass, field
+from datetime import date
 
 from sqlalchemy.orm import Session
 
 from app.models import CardGenerationProfile, PlayerCardModel, PlayerSeason, BatterSeasonStats, PitcherPitchProfile, PitcherSeasonStats
 from etl.config import RATING_MODEL_VERSION
+from etl.services.card_catalog import ValidationResult
 
 logger = logging.getLogger("etl.services.card_profiles")
 
@@ -37,7 +40,7 @@ def _linear(percentile: float | None, *, lo: int = 40, hi: int = 99) -> int:
     return _clamp(lo + (hi - lo) * percentile, lo, hi)
 
 
-def _build_batter_profile(batter: BatterSeasonStats) -> dict:
+def _build_batter_profile(batter: BatterSeasonStats, model_version: str) -> dict:
     contact = _linear(batter.contact_rate, lo=40)
     power = _linear(batter.slg, lo=40)
     vision = _linear(batter.whiff_rate, lo=60, hi=99)  # menor whiff → mayor visión
@@ -56,11 +59,11 @@ def _build_batter_profile(batter: BatterSeasonStats) -> dict:
         "primary_batter_trait": _batter_trait(batter),
         "primary_pitcher_trait": None,
         "repertoire_payload": None,
-        "calculation_metadata": {"batter": True, "model": RATING_MODEL_VERSION},
+        "calculation_metadata": {"batter": True, "model": model_version},
     }
 
 
-def _build_pitcher_profile(pitcher: PitcherSeasonStats, arsenal: list[PitcherPitchProfile]) -> dict:
+def _build_pitcher_profile(pitcher: PitcherSeasonStats, arsenal: list[PitcherPitchProfile], model_version: str) -> dict:
     velocity = _linear(pitcher.avg_velocity / 100.0 if pitcher.avg_velocity else None, lo=60)
     control = _linear(1 - (pitcher.walks / pitcher.batters_faced if pitcher.batters_faced else None), lo=40)
     movement = _linear(1 - (pitcher.whiff_rate or 0), lo=40)
@@ -81,7 +84,7 @@ def _build_pitcher_profile(pitcher: PitcherSeasonStats, arsenal: list[PitcherPit
         "primary_batter_trait": None,
         "primary_pitcher_trait": _pitcher_trait(pitcher),
         "repertoire_payload": repertoire or None,
-        "calculation_metadata": {"batter": False, "model": RATING_MODEL_VERSION, "pitches_in_arsenal": len(arsenal)},
+        "calculation_metadata": {"batter": False, "model": model_version, "pitches_in_arsenal": len(arsenal)},
     }
 
 
@@ -101,17 +104,24 @@ def _pitcher_trait(pitcher: PitcherSeasonStats) -> str:
     return {"power": "Velocity", "control": "Control", "stuff": "Strikeout Stuff"}[best[0]]
 
 
-def generate_profiles(db: Session, *, season: int) -> ProfileRunResult:
-    result = ProfileRunResult()
+def generate_profiles(
+    db: Session,
+    *,
+    season: int,
+    rating_model_version: str = RATING_MODEL_VERSION,
+    data_end_date: date | None = None,
+) -> ProfileRunResult:
+    result = ProfileRunResult(version=rating_model_version)
     if not hasattr(PlayerCardModel, "get_rarity_by_overall"):
         raise RuntimeError("PlayerCardModel sin get_rarity_by_overall")
 
-    seasons = (
+    seasons_query = (
         db.query(PlayerSeason)
         .filter(PlayerSeason.season == season)
-        .order_by(PlayerSeason.data_end_date.desc())
-        .all()
     )
+    if data_end_date is not None:
+        seasons_query = seasons_query.filter(PlayerSeason.data_end_date == data_end_date)
+    seasons = seasons_query.order_by(PlayerSeason.data_end_date.desc()).all()
     seen = set()
     for ps in seasons:
         if ps.id in seen:
@@ -121,7 +131,7 @@ def generate_profiles(db: Session, *, season: int) -> ProfileRunResult:
             db.query(CardGenerationProfile)
             .filter(
                 CardGenerationProfile.player_season_id == ps.id,
-                CardGenerationProfile.rating_model_version == RATING_MODEL_VERSION,
+                CardGenerationProfile.rating_model_version == rating_model_version,
             )
             .one_or_none()
         )
@@ -141,7 +151,7 @@ def generate_profiles(db: Session, *, season: int) -> ProfileRunResult:
 
         profile_payload = None
         if batter is not None:
-            profile_payload = _build_batter_profile(batter)
+            profile_payload = _build_batter_profile(batter, rating_model_version)
         elif pitcher is not None:
             arsenal = (
                 db.query(PitcherPitchProfile)
@@ -149,9 +159,9 @@ def generate_profiles(db: Session, *, season: int) -> ProfileRunResult:
                 .order_by(PitcherPitchProfile.pitch_count.desc())
                 .all()
             )
-            profile_payload = _build_pitcher_profile(pitcher, arsenal)
+            profile_payload = _build_pitcher_profile(pitcher, arsenal, rating_model_version)
         else:
-            profile_payload = _build_batter_profile(batter) if batter else None
+            profile_payload = _build_batter_profile(batter, rating_model_version) if batter else None
 
         if profile_payload is None:
             result.skipped += 1
@@ -161,7 +171,7 @@ def generate_profiles(db: Session, *, season: int) -> ProfileRunResult:
         db.add(
             CardGenerationProfile(
                 player_season_id=ps.id,
-                rating_model_version=RATING_MODEL_VERSION,
+                rating_model_version=rating_model_version,
                 calculated_rarity=rarity,
                 **profile_payload,
             )
@@ -169,3 +179,33 @@ def generate_profiles(db: Session, *, season: int) -> ProfileRunResult:
         result.created += 1
     db.commit()
     return result
+
+
+def validate_profiles(
+    db: Session,
+    *,
+    season: int,
+    data_end_date: date | None = None,
+    rating_model_version: str = RATING_MODEL_VERSION,
+) -> ValidationResult:
+    """Gate §52: perfiles dentro de contrato y con identidad/equipo resueltos."""
+    issues: list[str] = []
+    query = (
+        db.query(CardGenerationProfile)
+        .join(PlayerSeason, CardGenerationProfile.player_season_id == PlayerSeason.id)
+        .filter(PlayerSeason.season == season)
+    )
+    if data_end_date is not None:
+        query = query.filter(PlayerSeason.data_end_date == data_end_date)
+    profiles = query.all()
+    if not profiles:
+        issues.append("sin perfiles para la temporada")
+    for profile in profiles:
+        player = profile.player_season.player if profile.player_season else None
+        if player is None:
+            issues.append(f"perfil {profile.id} sin player_season/player")
+        elif player.game_identity is None:
+            issues.append(f"perfil de mlb_id={player.mlb_id} sin identidad pública")
+        if profile.repertoire_payload and len(profile.repertoire_payload) > 4:
+            issues.append(f"perfil {profile.id}: repertorio > 4 pitches")
+    return ValidationResult(ok=not issues, detail=issues)

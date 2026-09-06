@@ -56,7 +56,8 @@ class PlayerCardModel(Base):
     )
 
     id = Column(String, primary_key=True, index=True)
-    team_id = Column(String(3), ForeignKey("teams.id"), nullable=True, index=True)
+    # Franquicia GAME (Team público, UUID). Legacy apunta al equipo de origen.
+    team_id = Column(String(36), ForeignKey("teams.id"), nullable=True, index=True)
     name = Column(String, nullable=False)
     number = Column(String, default="00")
     position = Column(String, nullable=False)  # "SP", "RP", "TWP", "DH", "CF", etc.
@@ -105,11 +106,27 @@ class PlayerCardModel(Base):
     published_at = Column(DateTime(timezone=True), nullable=True, index=True)
     # Snapshot legible del algoritmo de ratings (duplicación deliberada para auditoría).
     rating_model_version = Column(String(30), nullable=True, index=True)
+    # V2: identidad pública del pelotero (cara del jugador en el juego) y
+    # catálogo publicado que originó la carta (NULL en legacy/semilla).
+    game_identity_id = Column(
+        String(36),
+        ForeignKey("game_player_identities.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    catalog_id = Column(
+        String(36),
+        ForeignKey("card_catalogs.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
 
     # Relaciones
     team = relationship("Team", back_populates="cards")
     inventories = relationship("UserCardInventory", back_populates="card")
     player = relationship("Player")
+    game_identity = relationship("GamePlayerIdentity", back_populates="cards")
+    catalog = relationship("CardCatalog", back_populates="cards")
 
     @property
     def is_pitcher(self) -> bool:

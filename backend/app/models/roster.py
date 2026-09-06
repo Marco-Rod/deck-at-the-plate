@@ -1,10 +1,13 @@
 """
-Modelos de snapshots de roster (CPU roster: plan Card Catalog §13-§17)
-=====================================================================
-TeamRosterSnapshot (quién estaba en el roster activo de un equipo en una
-fecha) vs PlayerTeamStint (para qué equipo jugó este jugador). Responsabilidades
-distintas: el CPU roster se deriva de snapshots + catálogo publicado, nunca de
-Team.cards.
+Modelos de snapshots de roster (CPU roster: plan V2 §12-§17)
+============================================================
+SourceTeamRosterSnapshot (quién estaba en el roster activo de una franquicia
+REAL en una fecha) vs PlayerTeamStint (para qué equipo jugó este jugador).
+Responsabilidades distintas: el CPU roster se deriva de snapshots + catálogo
+publicado, nunca de Team.cards.
+
+La capa SOURCE referencia SourceTeam (franquicia real). La capa GAME (Team)
+es la que se expone públicamente.
 
 Los snapshots son inmutables por fecha: nunca se sobrescribe uno anterior
 (plan §43); reejecutar la misma fecha es idempotente vía UNIQUE.
@@ -32,21 +35,23 @@ def _new_id() -> str:
     return str(uuid.uuid4())
 
 
-class TeamRosterSnapshot(Base):
-    __tablename__ = "team_roster_snapshots"
+class SourceTeamRosterSnapshot(Base):
+    __tablename__ = "source_team_roster_snapshots"
     __table_args__ = (
         UniqueConstraint(
-            "team_id",
+            "source_team_id",
             "season",
             "as_of_date",
             "roster_type",
-            name="uq_team_roster_snapshots_team_date_type",
+            name="uq_source_roster_snapshots_team_date_type",
         ),
-        CheckConstraint("season >= 1900 AND season <= 2100", name="ck_team_roster_snapshots_season_range"),
+        CheckConstraint("season >= 1900 AND season <= 2100", name="ck_source_roster_snapshots_season_range"),
     )
 
     id = Column(String(36), primary_key=True, default=_new_id)
-    team_id = Column(String(3), ForeignKey("teams.id"), nullable=False, index=True)
+    source_team_id = Column(
+        String(36), ForeignKey("source_teams.id"), nullable=False, index=True
+    )
     season = Column(SmallInteger, nullable=False, index=True)
     as_of_date = Column(Date, nullable=False, index=True)
     # "ACTIVE" (26 man) / "40_MAN". V1 solo ACTIVE.
@@ -55,22 +60,22 @@ class TeamRosterSnapshot(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
 
     members = relationship(
-        "TeamRosterMember", back_populates="snapshot", cascade="all, delete-orphan"
+        "SourceTeamRosterMember", back_populates="snapshot", cascade="all, delete-orphan"
     )
 
 
-class TeamRosterMember(Base):
-    __tablename__ = "team_roster_members"
+class SourceTeamRosterMember(Base):
+    __tablename__ = "source_team_roster_members"
     __table_args__ = (
         UniqueConstraint(
-            "roster_snapshot_id", "player_id", name="uq_team_roster_members_snapshot_player"
+            "roster_snapshot_id", "player_id", name="uq_source_roster_members_snapshot_player"
         ),
     )
 
     id = Column(String(36), primary_key=True, default=_new_id)
     roster_snapshot_id = Column(
         String(36),
-        ForeignKey("team_roster_snapshots.id", ondelete="CASCADE"),
+        ForeignKey("source_team_roster_snapshots.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -81,5 +86,5 @@ class TeamRosterMember(Base):
     jersey_number = Column(String(5), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
 
-    snapshot = relationship("TeamRosterSnapshot", back_populates="members")
+    snapshot = relationship("SourceTeamRosterSnapshot", back_populates="members")
     player = relationship("Player")

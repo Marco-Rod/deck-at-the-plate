@@ -8,6 +8,7 @@ from typing import Iterable, Sequence
 from app.core.enums import PITCHER_POSITIONS
 from app.models import PlayerCardModel, TacticCard
 from app.models.user_data import UserCardInventory
+from app.repositories.team_repository import resolve_team_to_uuid
 
 
 def get_card_by_id(db, card_id) -> "PlayerCardModel | None":
@@ -35,14 +36,16 @@ def get_tactic_card_by_id(db, card_id) -> "TacticCard | None":
 
 def find_pitchers_for_team(
     db,
-    team_id: str | None,
+    team_ref: str | None,
     exclude_ids: Iterable[str] | None = None,
     excluded_id: str | None = None,
 ) -> Sequence["PlayerCardModel"]:
     """
     Retorna todos los pitchers de un equipo (posiciones SP/RP/CP/TWP),
     excluyendo opcionalmente ciertos ids (p.ej. ya usados y el activo).
+    El equipo puede venir como abreviatura pública o UUID interno.
     """
+    team_id = resolve_team_to_uuid(db, team_ref)
     if team_id is None:
         return []
     query = db.query(PlayerCardModel).filter(
@@ -143,8 +146,11 @@ def add_inventory_item(
     return item
 
 
-def find_cards_excluding_team(db, team_id: str) -> Sequence["PlayerCardModel"]:
+def find_cards_excluding_team(db, team_ref: str) -> Sequence["PlayerCardModel"]:
     """Retorna las cartas de todos los equipos excepto el indicado."""
+    team_id = resolve_team_to_uuid(db, team_ref)
+    if team_id is None:
+        return find_all_cards(db)
     return db.query(PlayerCardModel).filter(PlayerCardModel.team_id != team_id).all()
 
 

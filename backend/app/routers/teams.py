@@ -32,7 +32,7 @@ def get_cpu_teams(db: Session = Depends(get_db)):
             "city": team.city,
             "color": team.primary_color,
             "secondary_color": team.secondary_color,
-            "badge": team.id,
+            "badge": team.abbreviation,
             "desc": f"Franquicia • {len(cards)} Jugadores",
             "ovr": ratings["overall"],
             "batOvr": ratings["batOvr"],

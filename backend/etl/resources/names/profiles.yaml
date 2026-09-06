@@ -1,0 +1,26 @@
+generator_version: names-1.0
+fallback_profile: UNKNOWN
+pools:
+  japanese: {}
+  korean: {}
+  chinese: {}
+  spanish: {}
+  english: {}
+  french: {}
+  dutch: {}
+  germanic: {}
+  slavic: {}
+  generic_latin: { neutral: true }
+profiles:
+  - { name: JAPANESE, pool: japanese }
+  - { name: KOREAN, pool: korean }
+  - { name: CHINESE, pool: chinese }
+  - { name: SPANISH, pool: spanish }
+  - { name: ENGLISH, pool: english }
+  - { name: FRENCH, pool: french }
+  - { name: DUTCH, pool: dutch }
+  - { name: GERMANIC, pool: germanic }
+  - { name: SLAVIC, pool: slavic }
+  - { name: MULTI_ORIGIN, pool: generic_latin }
+  - { name: GENERIC_LATIN, pool: generic_latin }
+  - { name: UNKNOWN, pool: generic_latin, neutral: true }

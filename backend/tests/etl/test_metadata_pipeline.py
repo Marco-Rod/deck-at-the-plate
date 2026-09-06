@@ -12,12 +12,15 @@ from app.models import (
     Player,
     PlayerSeason,
     PlayerTeamStint,
+    SourceTeam,
+    SourceTeamGameTeamMapping,
+    SourceTeamRosterMember,
+    SourceTeamRosterSnapshot,
     Team,
-    TeamRosterMember,
-    TeamRosterSnapshot,
     CardGenerationProfile,
     BatterSeasonStats,
     PitcherSeasonStats,
+    GamePlayerIdentity,
 )
 from app.core.enums import ImportStatus, PitchFamily
 from etl.dto import PlayerSourceRecord, TeamSourceRecord
@@ -65,6 +68,7 @@ class TestMetadataPipeline:
         )
         assert result.teams == 1
         assert db.query(Team).count() == 1
+        assert db.query(SourceTeam).count() == 1
         assert db.query(Player).count() == 1
         assert db.query(PlayerSeason).count() == 1
         assert db.query(PlayerTeamStint).count() == 1
@@ -80,7 +84,7 @@ class TestMetadataPipeline:
         assert db.query(Player).count() == 1
         assert db.query(PlayerSeason).count() == 1
 
-    def test_sync_teams_upserta_idempotente(self, db):
+    def test_sync_teams_upserta_franquicia_game_idempotente(self, db):
         client = _client({"/teams": TEAMS})
         pipeline = MetadataPipeline(db, client)
         first = pipeline.run_teams(season=SEASON)
@@ -88,8 +92,53 @@ class TestMetadataPipeline:
         assert first.teams == 1
         assert second.teams == 1
         assert db.query(Team).count() == 1
+        team = db.query(Team).one()
+        assert team.abbreviation == "LAD"
+        assert len(team.id) == 36  # UUID determinístico, no la abreviatura
 
-    def test_sync_rosters_crea_snapshot_y_miembros(self, db):
+    def test_sync_source_teams_idempotente(self, db):
+        client = _client({"/teams": TEAMS})
+        pipeline = MetadataPipeline(db, client)
+        first = pipeline.run_source_teams(season=SEASON)
+        second = pipeline.run_source_teams(season=SEASON)
+        assert first.source_teams == 1
+        assert second.source_teams == 1
+        assert db.query(SourceTeam).count() == 1
+        source = db.query(SourceTeam).one()
+        assert source.external_id == 119
+        assert source.source == "MLB"
+        assert db.query(Team).count() == 0  # SOURCE no toca la capa GAME
+
+    def test_sync_game_team_mappings_crea_franquicia_y_mapping(self, db):
+        client = _client({"/teams": TEAMS})
+        result = MetadataPipeline(db, client).run_game_team_mappings(season=SEASON)
+        assert result.source_teams == 1
+        assert result.game_teams >= 1
+        lad = db.query(Team).filter(Team.abbreviation == "LAD").one()
+        mapping = db.query(SourceTeamGameTeamMapping).filter(
+            SourceTeamGameTeamMapping.team_id == lad.id,
+            SourceTeamGameTeamMapping.valid_to.is_(None),
+        ).one()
+        assert mapping.source_team.external_id == 119
+
+    def test_generate_game_identities_missing_only(self, db):
+        player = upsert_player(db, PlayerSourceRecord(mlb_id=660271, full_name="Shohei Ohtani", first_name="Shohei", last_name="Ohtani"))
+        db.commit()
+        pipeline = MetadataPipeline(db, _client({}))
+        first = pipeline.run_game_identities(missing_only=True)
+        assert first.created == 1
+        assert not first.dry_run
+        identity = db.query(GamePlayerIdentity).one()
+        assert identity.player_id == player.id
+        assert identity.display_name != "Shohei Ohtani"
+        assert identity.name_profile is not None
+        assert identity.generator_version == "names-1.0"
+        second = pipeline.run_game_identities(missing_only=True)
+        assert second.created == 0
+        assert second.unchanged == 1
+        assert db.query(GamePlayerIdentity).count() == 1
+
+    def test_sync_rosters_crea_snapshot_y_miembros_source(self, db):
         client = _client({"/teams": TEAMS, "/people/660271": PERSON, "/roster": ROSTER})
         pipeline = MetadataPipeline(db, client)
         result = pipeline.run_rosters(season=SEASON, data_start_date=W_FROM, data_end_date=W_TO)
@@ -97,32 +146,36 @@ class TestMetadataPipeline:
         assert result.stints == 1
         assert result.roster_snapshots == 1
         assert result.roster_members == 1
-        assert db.query(Team).count() == 0  # sync-rosters NO upserta equipos
-        assert db.query(TeamRosterSnapshot).count() == 1
-        assert db.query(TeamRosterMember).count() == 1
-        snapshot = db.query(TeamRosterSnapshot).one()
-        assert snapshot.team_id == "LAD"
+        assert result.source_teams == 1
+        assert db.query(Team).count() == 0  # sync-rosters NO upserta franquicias GAME
+        assert db.query(SourceTeam).count() == 1
+        assert db.query(SourceTeamRosterSnapshot).count() == 1
+        assert db.query(SourceTeamRosterMember).count() == 1
+        snapshot = db.query(SourceTeamRosterSnapshot).one()
+        assert snapshot.source_team_id == db.query(SourceTeam).one().id
         assert snapshot.season == SEASON
         assert snapshot.as_of_date == W_TO
         assert snapshot.roster_type == "ACTIVE"
-        member = db.query(TeamRosterMember).one()
+        member = db.query(SourceTeamRosterMember).one()
         assert member.status == "ACTIVE"
         assert member.position == "P"
+        stint = db.query(PlayerTeamStint).one()
+        assert stint.source_team_id == db.query(SourceTeam).one().id
 
     def test_sync_rosters_misma_fecha_es_idempotente(self, db):
         client = _client({"/teams": TEAMS, "/people/660271": PERSON, "/roster": ROSTER})
         pipeline = MetadataPipeline(db, client)
         pipeline.run_rosters(season=SEASON, data_start_date=W_FROM, data_end_date=W_TO)
         pipeline.run_rosters(season=SEASON, data_start_date=W_FROM, data_end_date=W_TO)
-        assert db.query(TeamRosterSnapshot).count() == 1
-        assert db.query(TeamRosterMember).count() == 1
+        assert db.query(SourceTeamRosterSnapshot).count() == 1
+        assert db.query(SourceTeamRosterMember).count() == 1
 
     def test_sync_rosters_fecha_distinta_genera_historial(self, db):
         client = _client({"/teams": TEAMS, "/people/660271": PERSON, "/roster": ROSTER})
         pipeline = MetadataPipeline(db, client)
         pipeline.run_rosters(season=SEASON, data_start_date=W_FROM, data_end_date=W_TO)
         pipeline.run_rosters(season=SEASON, data_start_date=W_FROM, data_end_date=dt.date(2026, 9, 15))
-        assert db.query(TeamRosterSnapshot).count() == 2
+        assert db.query(SourceTeamRosterSnapshot).count() == 2
 
 
 class TestGenerateProfiles:

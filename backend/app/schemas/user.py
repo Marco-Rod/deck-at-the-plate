@@ -69,7 +69,7 @@ class UserTeamResponseSchema(BaseModel):
     primary_color: str
     secondary_color: str
     logo_id: str
-    base_franchise: str
+    base_team_id: Optional[str]
 
     class Config:
         from_attributes = True

@@ -8,7 +8,7 @@ from app.repositories.card_repository import get_card_by_id as repo_get_card_by_
 from app.repositories.team_repository import (
     find_cards_by_team,
     get_all_teams as repo_get_all_teams,
-    get_team_by_id,
+    get_team_by_ref,
 )
 
 router = APIRouter(prefix="/api/v1/cards", tags=["Cards & Rosters"])
@@ -23,7 +23,7 @@ def get_all_teams(db: Session = Depends(get_db)):
 def get_team_roster(team_id: str, db: Session = Depends(get_db)):
     """Devuelve la información de un equipo junto con su plantilla activa de jugadores."""
     formatted_team_id = team_id.upper()
-    team = get_team_by_id(db, formatted_team_id)
+    team = get_team_by_ref(db, formatted_team_id)
 
     if not team:
         raise HTTPException(status_code=404, detail="Equipo no encontrado")

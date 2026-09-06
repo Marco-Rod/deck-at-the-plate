@@ -9,9 +9,9 @@ from app.repositories import (
     get_active_lineup,
     get_or_create_wallet,
     get_user_by_id,
-    get_team_by_id,
     get_user_team as repo_get_user_team,
 )
+from app.repositories.team_repository import get_team_by_ref
 from app.services.team_ratings import compute_lineup_ratings
 from app.auth import get_current_user
 
@@ -129,6 +129,14 @@ def create_user_team(
     if existing_team:
         raise HTTPException(status_code=400, detail="El usuario ya tiene un club registrado")
 
+    # Validar que la franquicia elegida exista en la liga (equipo is_cpu=True).
+    franchise = get_team_by_ref(db, payload.base_franchise)
+    if not franchise or not franchise.is_cpu:
+        raise HTTPException(
+            status_code=400,
+            detail=f"La franquicia '{payload.base_franchise}' no está disponible para elegir.",
+        )
+
     new_team = UserTeam(
         user_id=current_user_id,
         name=payload.name,
@@ -138,7 +146,7 @@ def create_user_team(
         primary_color=payload.primary_color,
         secondary_color=payload.secondary_color,
         logo_id=payload.logo_id,
-        base_franchise=payload.base_franchise
+        base_team_id=franchise.id,
     )
     db.add(new_team)
     db.commit()
@@ -178,14 +186,14 @@ def update_user_team_franchise(
     franchise_id = payload.base_franchise.upper()
 
     # Validar que la franquicia elegida exista en la liga (equipo is_cpu=True).
-    franchise = get_team_by_id(db, franchise_id)
+    franchise = get_team_by_ref(db, franchise_id)
     if not franchise or not franchise.is_cpu:
         raise HTTPException(
             status_code=400,
             detail=f"La franquicia '{franchise_id}' no está disponible para elegir.",
         )
 
-    team.base_franchise = franchise_id
+    team.base_team_id = franchise.id
     db.commit()
     db.refresh(team)
     return team

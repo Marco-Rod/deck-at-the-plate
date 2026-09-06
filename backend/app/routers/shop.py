@@ -6,6 +6,7 @@ from app.schemas import StarterPackResponseSchema, OpenPackResponseSchema
 from app.database import get_db
 from app.services.pack_service import PackService
 from app.repositories import get_user_by_id, get_user_team
+from app.repositories.team_repository import get_team_by_id
 from app.auth import get_current_user
 
 router = APIRouter(prefix="/api/v1/shop", tags=["Shop & Packs"])
@@ -46,13 +47,16 @@ def claim_starter_pack(
         raise HTTPException(status_code=400, detail="Debes fundar tu club antes de reclamar el sobre inicial")
 
     # El sobre debe corresponder a la franquicia base del club del usuario.
-    if user_team.base_franchise and team_id.upper() != user_team.base_franchise.upper():
+    base_team = get_team_by_id(db, user_team.base_team_id) if user_team.base_team_id else None
+    if not base_team:
+        raise HTTPException(status_code=400, detail="Debes configurar una franquicia base antes de reclamar el sobre inicial")
+    if team_id.upper() != base_team.abbreviation.upper():
         raise HTTPException(
             status_code=400,
-            detail=f"El sobre debe corresponder a tu franquicia base ({user_team.base_franchise}).",
+            detail=f"El sobre debe corresponder a tu franquicia base ({base_team.abbreviation}).",
         )
 
-    logger.info(f"[VALIDATION] Usuario {user_id} tiene club creado con franquicia {user_team.base_franchise}")
+    logger.info(f"[VALIDATION] Usuario {user_id} tiene club creado con franquicia {base_team.abbreviation}")
 
     # Usar la nueva lógica de asignación inteligente
     cards = PackService.assign_starter_pack(db, user_id=user_id, team_id=team_id)

@@ -21,6 +21,7 @@ from app.repositories import (
     get_user_by_id,
     get_wallet_by_user_id,
 )
+from app.repositories.team_repository import resolve_team_to_uuid
 
 logger = logging.getLogger(__name__)
 
@@ -114,9 +115,14 @@ class PackService:
         if not user:
             raise HTTPException(status_code=404, detail="Usuario no encontrado")
 
+        # Resolver abreviatura pública → UUID de la franquicia GAME.
+        resolved_team_id = resolve_team_to_uuid(db, team_id)
+        if resolved_team_id is None:
+            raise HTTPException(status_code=404, detail=f"Equipo no encontrado: {team_id}")
+
         # Asignar favorite_team_id si no existe
         if not user.favorite_team_id:
-            user.favorite_team_id = team_id
+            user.favorite_team_id = resolved_team_id
 
         # ── PASO 2: Obtener cartas del equipo favorito ────────────────────
         team_cards = find_cards_by_team(db, team_id)
