@@ -66,6 +66,7 @@ def test_legacy_sin_player_ratings_sigue_valido(db):
     session.commit()
     assert profile.player_ratings_id is None
     assert profile.player_ratings is None
+    assert profile.stuff_rating is None
 
 
 def test_vinculo_valido_expone_relacion_orm(db):
@@ -74,12 +75,22 @@ def test_vinculo_valido_expone_relacion_orm(db):
     session.add(ratings)
     session.flush()
     profile = _profile(
-        season, rating_model_version="ratings-2.0", player_ratings_id=ratings.id
+        season, rating_model_version="ratings-2.0", player_ratings_id=ratings.id,
+        stuff_rating=79,
     )
     session.add(profile)
     session.commit()
     assert profile.player_ratings is ratings
     assert ratings.card_generation_profiles == [profile]
+    assert profile.stuff_rating == 79
+
+
+@pytest.mark.parametrize("stuff_rating", [-1, 100])
+def test_stuff_rating_fuera_de_rango_es_rechazado(db, stuff_rating):
+    session, _player, season = db
+    session.add(_profile(season, stuff_rating=stuff_rating))
+    with pytest.raises(IntegrityError):
+        session.flush()
 
 
 def test_fk_rechaza_rating_model_version_inconsistente(db):

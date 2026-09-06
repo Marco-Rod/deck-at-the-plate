@@ -58,6 +58,7 @@ class CardGenerationProfile(Base):
         CheckConstraint("velocity_rating >= 0 AND velocity_rating <= 99", name="ck_card_generation_velocity"),
         CheckConstraint("control_rating >= 0 AND control_rating <= 99", name="ck_card_generation_control"),
         CheckConstraint("movement_rating >= 0 AND movement_rating <= 99", name="ck_card_generation_movement"),
+        CheckConstraint("stuff_rating IS NULL OR (stuff_rating >= 0 AND stuff_rating <= 99)", name="ck_card_generation_stuff"),
         CheckConstraint("overall_rating >= 0 AND overall_rating <= 99", name="ck_card_generation_overall"),
     )
 
@@ -78,6 +79,8 @@ class CardGenerationProfile(Base):
     velocity_rating = Column(SmallInteger, nullable=False, default=0)
     control_rating = Column(SmallInteger, nullable=False, default=0)
     movement_rating = Column(SmallInteger, nullable=False, default=0)
+    # Nullable durante la transición: ratings-1.0 no calculaba Stuff.
+    stuff_rating = Column(SmallInteger, nullable=True)
     overall_rating = Column(SmallInteger, nullable=False)
     calculated_rarity = Column(
         # Reutilizamos el enum ya existente en el proyecto (no duplicar).
