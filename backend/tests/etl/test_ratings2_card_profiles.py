@@ -67,6 +67,7 @@ def test_copia_ratings_sin_recalcular_y_es_idempotente(db):
     ) == (71, 71, 77, 79, 75)
     assert profile.calculation_metadata["rarity_policy"] == TRANSITIONAL_RARITY_POLICY
     assert profile.primary_pitcher_trait is None
+    assert profile.calculation_metadata["traits_status"] == "NO_TRAIT"
 
     second = generate_pitcher_card_profile_from_ratings2(
         db, player_ratings_id=ratings.id, player_season_id=season.id
@@ -84,6 +85,25 @@ def test_actualiza_si_cambia_snapshot_oficial_de_ratings(db):
     result = generate_pitcher_card_profile_from_ratings2(db, player_ratings_id=ratings.id)
     assert result.status == "UPDATED"
     assert db.query(CardGenerationProfile).one().stuff_rating == 80
+    assert db.query(CardGenerationProfile).one().primary_pitcher_trait is None
+
+
+def test_asigna_trait_calculado_sin_recalcular_ratings(db):
+    _player, _season, ratings = _seed(db)
+    ratings.velocity_rating = 95
+    ratings.control_rating = 70
+    ratings.movement_rating = 70
+    ratings.stuff_rating = 70
+    ratings.overall_rating = 76
+    ratings.input_hash = "c" * 64
+    db.commit()
+
+    generate_pitcher_card_profile_from_ratings2(db, player_ratings_id=ratings.id)
+
+    profile = db.query(CardGenerationProfile).one()
+    assert profile.primary_pitcher_trait == "HIGH_HEAT"
+    assert profile.calculation_metadata["traits_status"] == "ASSIGNED"
+    assert profile.velocity_rating == ratings.velocity_rating
 
 
 def test_rechaza_otro_jugador_snapshot_o_version(db):

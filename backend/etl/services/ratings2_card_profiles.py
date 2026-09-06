@@ -9,6 +9,10 @@ from sqlalchemy.orm import Session
 from app.models import CardGenerationProfile, PlayerRatings, PlayerSeason
 from app.models.card import CardRarity
 from etl.config.ratings_2 import RATING_MODEL_VERSION
+from etl.services.pitcher_traits2 import (
+    PITCHER_TRAIT_MODEL_VERSION,
+    calculate_pitcher_trait,
+)
 
 
 ADAPTER_VERSION = "pitcher-ratings2-card-profile-1.0"
@@ -22,7 +26,7 @@ class Ratings2CardProfileResult:
     player_ratings_id: str
 
 
-def _adapter_input_hash(ratings: PlayerRatings) -> str:
+def _adapter_input_hash(ratings: PlayerRatings, pitcher_trait: str | None) -> str:
     payload = {
         "adapter_version": ADAPTER_VERSION,
         "player_ratings_id": ratings.id,
@@ -36,6 +40,8 @@ def _adapter_input_hash(ratings: PlayerRatings) -> str:
             "stuff": ratings.stuff_rating,
             "overall": ratings.overall_rating,
         },
+        "pitcher_trait_model_version": PITCHER_TRAIT_MODEL_VERSION,
+        "pitcher_trait": pitcher_trait,
         "rarity_policy": TRANSITIONAL_RARITY_POLICY,
     }
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -69,7 +75,13 @@ def generate_pitcher_card_profile_from_ratings2(
     if player_season is None:
         raise ValueError("PlayerRatings no coincide con el jugador/snapshot solicitado")
 
-    input_hash = _adapter_input_hash(ratings)
+    pitcher_trait = calculate_pitcher_trait(
+        ratings.velocity_rating,
+        ratings.control_rating,
+        ratings.movement_rating,
+        ratings.stuff_rating,
+    )
+    input_hash = _adapter_input_hash(ratings, pitcher_trait)
     values = {
         "player_ratings_id": ratings.id,
         "input_hash": input_hash,
@@ -85,13 +97,14 @@ def generate_pitcher_card_profile_from_ratings2(
         "overall_rating": ratings.overall_rating,
         "calculated_rarity": CardRarity.COMMON,
         "primary_batter_trait": None,
-        "primary_pitcher_trait": None,
+        "primary_pitcher_trait": pitcher_trait,
         "repertoire_payload": None,
         "calculation_metadata": {
             "adapter_version": ADAPTER_VERSION,
             "distribution_version": ratings.distribution_version,
             "rarity_policy": TRANSITIONAL_RARITY_POLICY,
-            "traits_status": "PENDING_TRAITS_2.0",
+            "pitcher_trait_model_version": PITCHER_TRAIT_MODEL_VERSION,
+            "traits_status": "ASSIGNED" if pitcher_trait is not None else "NO_TRAIT",
         },
     }
     profile = db.query(CardGenerationProfile).filter_by(
