@@ -38,6 +38,7 @@ from etl.services.pitcher_control import calculate_control_candidate
 from etl.services.pitcher_velocity import calculate_velocity_candidate
 from etl.services.pitcher_stuff import calculate_stuff_candidate
 from etl.services.pitcher_ratings2 import calculate_pitcher_ratings2
+from etl.services.player_ratings import persist_pitcher_ratings2
 from etl.sources.mlb import MLBStatsApiClient
 from etl.sources.statcast import StatcastSourceAdapter
 
@@ -148,6 +149,13 @@ def _build_parser() -> argparse.ArgumentParser:
     ratings2.add_argument("--from", dest="data_start_date", type=_parse_date, required=True)
     ratings2.add_argument("--to", dest="data_end_date", type=_parse_date, required=True)
     ratings2.add_argument("--distribution-version", dest="distribution_version", default=None)
+
+    generate_ratings2 = sub.add_parser("generate-pitcher-ratings2", help="Calcula y persiste pitcher ratings-2.0")
+    generate_ratings2.add_argument("--player-id", dest="player_id", type=int, required=True)
+    generate_ratings2.add_argument("--season", type=int, required=True)
+    generate_ratings2.add_argument("--from", dest="data_start_date", type=_parse_date, required=True)
+    generate_ratings2.add_argument("--to", dest="data_end_date", type=_parse_date, required=True)
+    generate_ratings2.add_argument("--distribution-version", dest="distribution_version", default=None)
 
     run = sub.add_parser("run", help="Pipeline completo")
     run.add_argument("--season", type=int, required=True)
@@ -424,6 +432,23 @@ def main(argv=None) -> int:
             print(f"MODEL={result.rating_model_version}")
             if result.unavailable_attributes:
                 print(f"unavailable={','.join(result.unavailable_attributes)}")
+
+        elif args.command == "generate-pitcher-ratings2":
+            ratings = calculate_pitcher_ratings2(
+                db, mlb_id=args.player_id, season=args.season,
+                data_start_date=args.data_start_date, data_end_date=args.data_end_date,
+                distribution_version=args.distribution_version,
+            )
+            persisted = persist_pitcher_ratings2(
+                db, ratings, season=args.season,
+                data_start_date=args.data_start_date, data_end_date=args.data_end_date,
+            )
+            print(persisted.status)
+            print(
+                f"VELOCITY={ratings.velocity.rating} CONTROL={ratings.control.rating} "
+                f"MOVEMENT={ratings.movement.rating} STUFF={ratings.stuff.rating} "
+                f"OVERALL={ratings.overall} MODEL={ratings.rating_model_version}"
+            )
 
         elif args.command == "run":
             # Corrección A2: si RAW falla, run() propaga la excepción y aquí se
