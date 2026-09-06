@@ -30,6 +30,7 @@ from etl.pipelines.statcast import StatcastRawPipeline
 from etl.services.card_catalog import publish_card_catalog, validate_cpu_rosters, validate_pack_pool
 from etl.services.card_profiles import generate_profiles, validate_profiles
 from etl.services.identity_generation import validate_game_identities
+from etl.services.league_distributions import build_league_distributions
 from etl.services.quality import collect_quality, emit_quality_report
 from etl.sources.mlb import MLBStatsApiClient
 from etl.sources.statcast import StatcastSourceAdapter
@@ -91,6 +92,13 @@ def _build_parser() -> argparse.ArgumentParser:
     an.add_argument("--season", type=int, required=True)
     an.add_argument("--data-start-date", dest="data_start_date", type=_parse_date, required=True)
     an.add_argument("--data-end-date", dest="data_end_date", type=_parse_date, required=True)
+
+    dist = sub.add_parser("build-league-distributions", help="Construye distribuciones versionadas desde Analytics")
+    dist.add_argument("--season", type=int, required=True)
+    dist.add_argument("--role", choices=("pitcher",), default="pitcher")
+    dist.add_argument("--from", dest="data_start_date", type=_parse_date, required=True)
+    dist.add_argument("--to", dest="data_end_date", type=_parse_date, required=True)
+    dist.add_argument("--distribution-version", dest="distribution_version", default=None)
 
     run = sub.add_parser("run", help="Pipeline completo")
     run.add_argument("--season", type=int, required=True)
@@ -242,6 +250,20 @@ def main(argv=None) -> int:
                 season=args.season, data_start_date=args.data_start_date, data_end_date=args.data_end_date
             )
             logger.info("analytics players=%s profiles=%s rejected=%s", result.players_processed, result.profiles_created, result.analytics_rejected)
+
+        elif args.command == "build-league-distributions":
+            result = build_league_distributions(
+                db,
+                season=args.season,
+                role=args.role,
+                data_start_date=args.data_start_date,
+                data_end_date=args.data_end_date,
+                distribution_version=args.distribution_version,
+            )
+            logger.info(
+                "league distributions created=%s updated=%s unchanged=%s skipped=%s version=%s",
+                result.created, result.updated, result.unchanged, result.skipped, result.version,
+            )
 
         elif args.command == "run":
             # Corrección A2: si RAW falla, run() propaga la excepción y aquí se

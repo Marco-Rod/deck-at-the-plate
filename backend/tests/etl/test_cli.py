@@ -14,6 +14,7 @@ def test_parser_generates_subcomandos():
         "import-statcast": ["import-statcast", "--from", "2026-04-01", "--to", "2026-04-05"],
         "import-statcast-player": ["import-statcast-player", "--player-id", "660271", "--from", "2026-04-01", "--to", "2026-04-05"],
         "build-analytics": ["build-analytics", "--season", "2026", "--data-start-date", "2026-03-20", "--data-end-date", "2026-08-31"],
+        "build-league-distributions": ["build-league-distributions", "--season", "2026", "--role", "pitcher", "--from", "2026-03-20", "--to", "2026-08-31"],
         "run": ["run", "--season", "2026", "--from", "2026-04-01", "--to", "2026-04-05"],
         "generate-card-profiles": ["generate-card-profiles", "--season", "2026"],
         "validate-card-profiles": ["validate-card-profiles", "--season", "2026"],
@@ -47,6 +48,18 @@ def test_build_analytics_fechas():
     args = parser.parse_args(["build-analytics", "--season", "2026", "--data-start-date", "2026-03-20", "--data-end-date", "2026-08-31"])
     assert args.season == 2026
     assert args.data_start_date.isoformat() == "2026-03-20"
+
+
+def test_build_league_distributions_flags():
+    parser = _build_parser()
+    args = parser.parse_args([
+        "build-league-distributions", "--season", "2026", "--role", "pitcher",
+        "--from", "2026-08-25", "--to", "2026-09-02",
+        "--distribution-version", "mlb-2026-test",
+    ])
+    assert args.data_start_date.isoformat() == "2026-08-25"
+    assert args.data_end_date.isoformat() == "2026-09-02"
+    assert args.distribution_version == "mlb-2026-test"
 
 
 def test_generate_card_profiles_flags():
