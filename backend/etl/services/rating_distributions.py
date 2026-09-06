@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
 from statistics import fmean
+from collections import Counter
 
 from sqlalchemy.orm import Session
 
@@ -32,6 +33,9 @@ def _decimal(value: float) -> Decimal:
 def _summary(values: list[int]) -> dict:
     return {
         "population_size": len(values),
+        "population_histogram": {
+            str(value): count for value, count in sorted(Counter(values).items())
+        },
         "minimum": _decimal(min(values)),
         "p05": _decimal(percentile(values, 0.05)),
         "p10": _decimal(percentile(values, 0.10)),

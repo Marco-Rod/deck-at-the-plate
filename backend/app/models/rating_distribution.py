@@ -2,7 +2,7 @@
 
 import uuid
 
-from sqlalchemy import CheckConstraint, Column, Date, DateTime, Index, Integer, Numeric, SmallInteger, String
+from sqlalchemy import CheckConstraint, Column, Date, DateTime, Index, Integer, JSON, Numeric, SmallInteger, String
 
 from app.core.time import utcnow
 from app.database import Base
@@ -49,6 +49,8 @@ class RatingDistribution(Base):
     rarity_model_version = Column(String(40), nullable=False, index=True)
     metric = Column(String(64), nullable=False, index=True)
     population_size = Column(Integer, nullable=False)
+    # Conteos discretos necesarios para resolver empates con mid-rank real.
+    population_histogram = Column(JSON, nullable=False)
     minimum = Column(Numeric(12, 8), nullable=False)
     p05 = Column(Numeric(12, 8), nullable=False)
     p10 = Column(Numeric(12, 8), nullable=False)

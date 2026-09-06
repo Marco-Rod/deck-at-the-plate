@@ -80,6 +80,7 @@ def test_construye_percentiles_de_poblacion_comparable_e_idempotente(db):
     assert first.status == "CREATED"
     row = db.query(RatingDistribution).one()
     assert row.population_size == 4
+    assert row.population_histogram == {"60": 1, "70": 1, "80": 1, "90": 1}
     assert float(row.population_mean) == 75
     assert float(row.minimum) == 60
     assert float(row.p05) == 61.5
