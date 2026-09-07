@@ -812,6 +812,8 @@ def main(argv=None) -> int:
                 f"profiles_created={result.profiles_created} "
                 f"profiles_updated={result.profiles_updated} "
                 f"profiles_unchanged={result.profiles_unchanged} "
+                f"profiles_skipped_no_ratings="
+                f"{result.profiles_skipped_no_ratings} "
                 f"failed={result.failed}"
             )
             for failure in result.failures:

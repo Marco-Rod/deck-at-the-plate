@@ -6,11 +6,12 @@ from datetime import date
 
 from sqlalchemy.orm import Session
 
-from app.models import MomentEvaluation, PlayerRatings
+from app.models import MomentEvaluation
 from etl.config.league_distributions import DISTRIBUTION_MODEL_VERSION
 from etl.config.ratings_2 import RATING_MODEL_VERSION
 from etl.services.moment_card_profiles import generate_moment_card_rating_profile
 from etl.services.moment_evaluations import evaluate_moment
+from etl.services.player_ratings_resolver import resolve_player_ratings_as_of
 from etl.services.walk_off_hr_detector import detect_walk_off_home_runs
 from etl.sources.mlb import MLBStatsApiClient
 
@@ -40,38 +41,19 @@ class WalkOffHrPipelineResult:
     profiles_created: int
     profiles_updated: int
     profiles_unchanged: int
+    profiles_skipped_no_ratings: int
     failed: int
     failures: tuple[WalkOffHrPipelineFailure, ...]
 
 
-def _source_player_ratings(
-    db: Session,
-    *,
-    player_id: str,
-    season: int,
-    data_start_date: date,
-    data_end_date: date,
-    rating_model_version: str,
-    distribution_version: str,
-) -> PlayerRatings:
-    ratings = (
-        db.query(PlayerRatings)
-        .filter_by(
-            player_id=player_id,
-            season=season,
-            role="BATTER",
-            rating_model_version=rating_model_version,
-            distribution_version=distribution_version,
-            data_start_date=data_start_date,
-            data_end_date=data_end_date,
-        )
-        .one_or_none()
-    )
-    if ratings is None:
-        raise ValueError(
-            "PlayerRatings BATTER inexistente para el jugador, versiones y ventana"
-        )
-    return ratings
+def _moment_game_date(facts: dict) -> date:
+    raw_value = facts.get("schedule_candidate", {}).get("game_date")
+    if not isinstance(raw_value, str):
+        raise ValueError("MomentContext no contiene game_date factual")
+    try:
+        return date.fromisoformat(raw_value)
+    except ValueError as exc:
+        raise ValueError("MomentContext contiene game_date factual inválido") from exc
 
 
 def run_walk_off_hr_pipeline(
@@ -95,6 +77,7 @@ def run_walk_off_hr_pipeline(
         "profiles_created": 0,
         "profiles_updated": 0,
         "profiles_unchanged": 0,
+        "profiles_skipped_no_ratings": 0,
     }
     failures = [
         WalkOffHrPipelineFailure("DETECTION", None, failure.reason)
@@ -120,15 +103,26 @@ def run_walk_off_hr_pipeline(
             if evaluation is None or evaluation.moment_context is None:
                 raise ValueError("MomentEvaluation persistida no tiene contexto")
             context = evaluation.moment_context
-            ratings = _source_player_ratings(
+            moment_game_date = _moment_game_date(context.facts)
+            ratings = resolve_player_ratings_as_of(
                 db,
                 player_id=context.player_id,
+                role=context.role,
                 season=context.season,
-                data_start_date=date_from,
-                data_end_date=date_to,
+                as_of_date=moment_game_date,
                 rating_model_version=rating_model_version,
                 distribution_version=distribution_version,
             )
+            if ratings is None:
+                counts["profiles_skipped_no_ratings"] += 1
+                logger.info(
+                    "moment profile skipped: no PlayerRatings as-of "
+                    "moment_context_id=%s player_id=%s game_date=%s",
+                    context.id,
+                    context.player_id,
+                    moment_game_date,
+                )
+                continue
             profile_result = generate_moment_card_rating_profile(
                 db,
                 moment_evaluation_id=evaluation.id,
@@ -158,6 +152,7 @@ def run_walk_off_hr_pipeline(
         profiles_created=counts["profiles_created"],
         profiles_updated=counts["profiles_updated"],
         profiles_unchanged=counts["profiles_unchanged"],
+        profiles_skipped_no_ratings=counts["profiles_skipped_no_ratings"],
         failed=len(failures),
         failures=tuple(failures),
     )

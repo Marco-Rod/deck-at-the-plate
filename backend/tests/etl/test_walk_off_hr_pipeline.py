@@ -27,6 +27,7 @@ from etl.services.walk_off_hr_pipeline import run_walk_off_hr_pipeline
 
 START = dt.date(2026, 8, 25)
 END = dt.date(2026, 9, 2)
+RATINGS_END = dt.date(2026, 9, 1)
 
 
 @pytest.fixture
@@ -62,6 +63,7 @@ def _seed_context(db, *, mlb_id=660271, with_ratings=True):
         source_reference="mlb-stats-api:game/824230/feed/live",
         context_version="moment-context-1.0",
         facts={
+            "schedule_candidate": {"game_date": END.isoformat()},
             "game": {"game_pk": 824230},
             "batting": {
                 "hits": 4,
@@ -82,7 +84,7 @@ def _seed_context(db, *, mlb_id=660271, with_ratings=True):
                 rating_model_version="ratings-2.0",
                 distribution_version="dist-1.0",
                 data_start_date=START,
-                data_end_date=END,
+                data_end_date=RATINGS_END,
                 contact_rating=70,
                 power_rating=72,
                 vision_rating=68,
@@ -145,7 +147,7 @@ def test_segunda_corrida_es_completamente_idempotente(db, monkeypatch):
     assert db.query(CardRatingProfile).count() == 1
 
 
-def test_falta_snapshot_exacto_falla_solo_ese_contexto(db, monkeypatch):
+def test_falta_snapshot_historico_skippea_sin_fallar(db, monkeypatch):
     _, valid = _seed_context(db)
     _, missing = _seed_context(db, mlb_id=111111, with_ratings=False)
     monkeypatch.setattr(
@@ -157,10 +159,35 @@ def test_falta_snapshot_exacto_falla_solo_ese_contexto(db, monkeypatch):
 
     assert result.evaluated == 2
     assert result.profiles_created == 1
-    assert result.failed == 1
-    assert result.failures[0].moment_context_id == missing.id
+    assert result.profiles_skipped_no_ratings == 1
+    assert result.failed == 0
+    assert result.failures == ()
     assert db.query(MomentEvaluation).count() == 2
     assert db.query(CardRatingProfile).count() == 1
+
+
+def test_rerun_sin_ratings_mantiene_evaluacion_y_skip(db, monkeypatch):
+    _, context = _seed_context(db, with_ratings=False)
+    detections = iter(
+        (
+            _detection(context.id),
+            _detection(context.id, created=0, unchanged=1),
+        )
+    )
+    monkeypatch.setattr(
+        "etl.services.walk_off_hr_pipeline.detect_walk_off_home_runs",
+        lambda *_args, **_kwargs: next(detections),
+    )
+
+    first = run_walk_off_hr_pipeline(db, object(), date_from=START, date_to=END)
+    second = run_walk_off_hr_pipeline(db, object(), date_from=START, date_to=END)
+
+    assert first.evaluations_created == 1
+    assert second.evaluations_unchanged == 1
+    assert first.profiles_skipped_no_ratings == 1
+    assert second.profiles_skipped_no_ratings == 1
+    assert first.failed == second.failed == 0
+    assert db.query(CardRatingProfile).count() == 0
 
 
 def test_no_cuenta_candidato_no_confirmado_como_fallo(db, monkeypatch):
