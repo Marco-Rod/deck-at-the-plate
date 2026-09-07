@@ -40,6 +40,7 @@ class WalkOffHrDetectionFailure:
     at_bat_number: int
     batter_mlb_id: int
     reason: str
+    kind: str = "FAILED"
 
 
 @dataclass(frozen=True)
@@ -297,6 +298,7 @@ def detect_walk_off_home_runs(
                         candidate.at_bat_number,
                         candidate.batter_mlb_id,
                         "MLB_GAME_FEED_NO_CONFIRMA_WALK_OFF_HR",
+                        "UNCONFIRMED",
                     )
                 )
                 continue

@@ -53,6 +53,7 @@ from etl.services.batter_vision import calculate_batter_vision
 from etl.services.batter_ratings2 import calculate_batter_ratings2
 from etl.services.batter_ratings2_population import generate_batter_ratings2_population
 from etl.services.walk_off_hr_detector import detect_walk_off_home_runs
+from etl.services.walk_off_hr_pipeline import run_walk_off_hr_pipeline
 from etl.sources.mlb import MLBStatsApiClient
 from etl.sources.statcast import StatcastSourceAdapter
 
@@ -278,6 +279,17 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     walk_off.add_argument("--from", dest="date_from", type=_parse_date, required=True)
     walk_off.add_argument("--to", dest="date_to", type=_parse_date, required=True)
+
+    walk_off_pipeline = sub.add_parser(
+        "run-walk-off-hr-pipeline",
+        help="Detecta, evalúa y genera perfiles MOMENT para WALK_OFF_HR",
+    )
+    walk_off_pipeline.add_argument(
+        "--from", dest="date_from", type=_parse_date, required=True
+    )
+    walk_off_pipeline.add_argument(
+        "--to", dest="date_to", type=_parse_date, required=True
+    )
 
     run = sub.add_parser("run", help="Pipeline completo")
     run.add_argument("--season", type=int, required=True)
@@ -777,6 +789,36 @@ def main(argv=None) -> int:
                     failure.game_pk,
                     failure.at_bat_number,
                     failure.batter_mlb_id,
+                    failure.reason,
+                )
+
+        elif args.command == "run-walk-off-hr-pipeline":
+            result = run_walk_off_hr_pipeline(
+                db,
+                MLBStatsApiClient(),
+                date_from=args.date_from,
+                date_to=args.date_to,
+            )
+            print(
+                f"candidates={result.candidates} confirmed={result.confirmed} "
+                f"unconfirmed={result.unconfirmed} "
+                f"contexts_created={result.contexts_created} "
+                f"contexts_updated={result.contexts_updated} "
+                f"contexts_unchanged={result.contexts_unchanged} "
+                f"evaluated={result.evaluated} "
+                f"evaluations_created={result.evaluations_created} "
+                f"evaluations_updated={result.evaluations_updated} "
+                f"evaluations_unchanged={result.evaluations_unchanged} "
+                f"profiles_created={result.profiles_created} "
+                f"profiles_updated={result.profiles_updated} "
+                f"profiles_unchanged={result.profiles_unchanged} "
+                f"failed={result.failed}"
+            )
+            for failure in result.failures:
+                logger.warning(
+                    "walk-off pipeline stage=%s context=%s reason=%s",
+                    failure.stage,
+                    failure.moment_context_id,
                     failure.reason,
                 )
 
