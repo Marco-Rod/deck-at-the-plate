@@ -9,10 +9,10 @@ from enum import Enum
 from sqlalchemy.orm import Session
 
 from app.models import CardEdition, CardRatingProfile, PlayerRatings
-
-
-CARD_RATING_POLICY_VERSION = "card-ratings-1.0"
-CARD_RATING_TRANSFORMATION = "IDENTITY_COPY"
+from etl.services.card_rating_policies import (
+    CardRatingPolicyResult,
+    apply_card_rating_policy,
+)
 
 
 @dataclass(frozen=True)
@@ -55,11 +55,15 @@ def _ratings_values(ratings: PlayerRatings) -> dict[str, int | None]:
 def _provenance(
     ratings: PlayerRatings,
     edition: CardEdition,
-    rating_policy_version: str,
+    policy: CardRatingPolicyResult,
 ) -> dict:
     return {
-        "rating_policy_version": rating_policy_version,
-        "transformation": CARD_RATING_TRANSFORMATION,
+        "rating_policy_version": policy.policy_version,
+        "transformation": policy.transformation,
+        "reason": policy.reason,
+        "base_ratings": policy.base_ratings,
+        "transformed_ratings": policy.transformed_ratings,
+        "adjustments": policy.adjustments,
         "source_player_ratings": {
             "id": ratings.id,
             "input_hash": ratings.input_hash,
@@ -97,7 +101,8 @@ def generate_card_rating_profile(
     *,
     source_player_ratings_id: str,
     card_edition_id: str,
-    rating_policy_version: str = CARD_RATING_POLICY_VERSION,
+    policy_adjustments: dict[str, int] | None = None,
+    policy_reason: str | None = None,
 ) -> CardRatingProfileResult:
     """Crea o actualiza la proyección de ratings para una edición específica."""
     ratings = db.get(PlayerRatings, source_player_ratings_id)
@@ -108,17 +113,21 @@ def generate_card_rating_profile(
         raise ValueError(f"CardEdition inexistente: {card_edition_id}")
     if edition.season != ratings.season:
         raise ValueError("CardEdition y PlayerRatings pertenecen a temporadas distintas")
-    if not rating_policy_version or not rating_policy_version.strip():
-        raise ValueError("rating_policy_version es obligatorio")
-
-    values = _ratings_values(ratings)
-    provenance = _provenance(ratings, edition, rating_policy_version)
+    policy = apply_card_rating_policy(
+        edition_type=edition.edition_type,
+        role=ratings.role,
+        base_ratings=_ratings_values(ratings),
+        adjustments=policy_adjustments,
+        reason=policy_reason,
+    )
+    values = policy.transformed_ratings
+    provenance = _provenance(ratings, edition, policy)
     input_hash = _input_hash(provenance, values)
     identity = {
         "player_id": ratings.player_id,
         "card_edition_id": edition.id,
         "role": ratings.role,
-        "rating_policy_version": rating_policy_version,
+        "rating_policy_version": policy.policy_version,
     }
     profile = db.query(CardRatingProfile).filter_by(**identity).one_or_none()
     if profile is not None and profile.input_hash == input_hash:

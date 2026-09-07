@@ -151,12 +151,62 @@ def test_mismo_jugador_puede_tener_base_y_moment_con_los_mismos_ratings(db):
         db, source_player_ratings_id=ratings.id, card_edition_id=base.id
     )
     second = generate_card_rating_profile(
-        db, source_player_ratings_id=ratings.id, card_edition_id=moment.id
+        db,
+        source_player_ratings_id=ratings.id,
+        card_edition_id=moment.id,
+        policy_reason="Contrato MOMENT sin boosts automáticos",
     )
 
     assert first.card_rating_profile_id != second.card_rating_profile_id
     assert db.query(CardRatingProfile).count() == 2
     assert {row.overall_rating for row in db.query(CardRatingProfile)} == {64}
+
+
+def test_moment_persiste_transformacion_y_actualiza_si_cambian_ajustes(db):
+    player = _player(db)
+    ratings = _batter_ratings(db, player)
+    moment = _edition(
+        db, code="2026_WALK_OFF", edition_type=CardEditionType.MOMENT
+    )
+    db.commit()
+
+    created = generate_card_rating_profile(
+        db,
+        source_player_ratings_id=ratings.id,
+        card_edition_id=moment.id,
+        policy_adjustments={
+            "power_rating": 12,
+            "clutch_rating": 18,
+            "overall_rating": 10,
+        },
+        policy_reason="Walk-off con dos home runs",
+    )
+    profile = db.get(CardRatingProfile, created.card_rating_profile_id)
+    assert created.status == "CREATED"
+    assert (profile.power_rating, profile.clutch_rating, profile.overall_rating) == (
+        80,
+        88,
+        74,
+    )
+    assert profile.metadata_payload["base_ratings"]["power_rating"] == 68
+    assert profile.metadata_payload["adjustments"]["power_rating"] == 12
+    assert profile.metadata_payload["reason"] == "Walk-off con dos home runs"
+
+    updated = generate_card_rating_profile(
+        db,
+        source_player_ratings_id=ratings.id,
+        card_edition_id=moment.id,
+        policy_adjustments={
+            "power_rating": 15,
+            "clutch_rating": 18,
+            "overall_rating": 11,
+        },
+        policy_reason="Walk-off con dos home runs",
+    )
+    db.refresh(profile)
+    assert updated.status == "UPDATED"
+    assert updated.card_rating_profile_id == created.card_rating_profile_id
+    assert (profile.power_rating, profile.overall_rating) == (83, 75)
 
 
 def test_actualiza_si_cambia_el_snapshot_fuente(db):
