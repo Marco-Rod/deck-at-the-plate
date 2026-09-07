@@ -9,6 +9,8 @@ import logging
 from datetime import date
 from typing import Optional
 
+import httpx
+
 from etl.config import MLB_STATS_API_BASE_URL
 from etl.dto import PlayerSourceRecord, RosterSourceRecord, TeamSourceRecord
 from etl.http.client import ExternalHttpClient, get_json
@@ -30,11 +32,15 @@ class MLBStatsApiClient:
         return f"{self._base_url}/{path.lstrip('/')}"
 
     def get_game_feed(self, game_pk: int) -> dict:
-        """Obtiene el feed oficial usado para confirmar estado y secuencia del juego."""
-        return get_json(
-            self._http,
-            self._url(f"game/{int(game_pk)}/feed/live"),
-        )
+        """Obtiene el feed; usa v1.1 solo si el endpoint v1 responde 404."""
+        path = f"game/{int(game_pk)}/feed/live"
+        try:
+            return get_json(self._http, self._url(path))
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code != 404:
+                raise
+        version_root = self._base_url.rsplit("/", 1)[0]
+        return get_json(self._http, f"{version_root}/v1.1/{path}")
 
     def get_teams(self, season: int, *, sport_id: int = 1, active_status: str = "Y") -> list[TeamSourceRecord]:
         data = get_json(

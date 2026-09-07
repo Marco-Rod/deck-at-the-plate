@@ -68,14 +68,79 @@ def _mlb_client(routes: dict):
 
     from etl.http.client import ExternalHttpClient
 
-    return MLBStatsApiClient(http=ExternalHttpClient(transport=httpx.MockTransport(handler)), base_url="https://mlb.test/api/v1")
+    return MLBStatsApiClient(
+        http=ExternalHttpClient(
+            transport=httpx.MockTransport(handler), max_retries=0
+        ),
+        base_url="https://mlb.test/api/v1",
+    )
+
+
+def _game_feed_client(statuses):
+    calls = []
+
+    def handler(request):
+        calls.append(request.url.path)
+        status, payload = statuses[request.url.path]
+        return httpx.Response(status, json=payload, request=request)
+
+    from etl.http.client import ExternalHttpClient
+
+    client = MLBStatsApiClient(
+        http=ExternalHttpClient(
+            transport=httpx.MockTransport(handler), max_retries=0
+        ),
+        base_url="https://mlb.test/api/v1",
+    )
+    return client, calls
 
 
 class TestMLBStatsApiClient:
-    def test_get_game_feed(self):
-        payload = {"gamePk": 824230, "liveData": {"plays": {"allPlays": []}}}
-        client = _mlb_client({"/game/824230/feed/live": payload})
+    def test_get_game_feed_usa_v1_si_responde_200(self):
+        payload = {"source": "v1"}
+        client, calls = _game_feed_client(
+            {"/api/v1/game/824230/feed/live": (200, payload)}
+        )
         assert client.get_game_feed(824230) == payload
+        assert calls == ["/api/v1/game/824230/feed/live"]
+
+    def test_get_game_feed_usa_v11_solo_si_v1_responde_404(self):
+        payload = {"source": "v1.1"}
+        client, calls = _game_feed_client(
+            {
+                "/api/v1/game/824230/feed/live": (404, {}),
+                "/api/v1.1/game/824230/feed/live": (200, payload),
+            }
+        )
+        assert client.get_game_feed(824230) == payload
+        assert calls == [
+            "/api/v1/game/824230/feed/live",
+            "/api/v1.1/game/824230/feed/live",
+        ]
+
+    def test_get_game_feed_propaga_500_sin_fallback(self):
+        client, calls = _game_feed_client(
+            {"/api/v1/game/824230/feed/live": (500, {})}
+        )
+        with pytest.raises(httpx.HTTPStatusError) as error:
+            client.get_game_feed(824230)
+        assert error.value.response.status_code == 500
+        assert calls == ["/api/v1/game/824230/feed/live"]
+
+    def test_get_game_feed_propaga_404_de_v11(self):
+        client, calls = _game_feed_client(
+            {
+                "/api/v1/game/824230/feed/live": (404, {}),
+                "/api/v1.1/game/824230/feed/live": (404, {}),
+            }
+        )
+        with pytest.raises(httpx.HTTPStatusError) as error:
+            client.get_game_feed(824230)
+        assert error.value.response.status_code == 404
+        assert calls == [
+            "/api/v1/game/824230/feed/live",
+            "/api/v1.1/game/824230/feed/live",
+        ]
 
     def test_get_teams_mapping(self):
         client = _mlb_client({"/teams": TEAMS_PAYLOAD})
