@@ -17,9 +17,11 @@ from sqlalchemy.orm import Session
 try:
     from app.database import SessionLocal
     from app.models import PlayerCardModel, CardRarity, Team
+    from app.services.card_editions import ensure_system_base_edition
 except ModuleNotFoundError:
     from database import SessionLocal
     from models import PlayerCardModel, CardRarity, Team
+    from services.card_editions import ensure_system_base_edition
 
 INITIAL_TEAMS = [
     {"id": "LAD", "name": "Dodgers", "city": "Los Angeles", "primary_color": "#005A9C", "secondary_color": "#FFFFFF"},
@@ -148,6 +150,7 @@ def seed_database():
                 teams_added += 1
 
         db.flush()
+        base_edition = ensure_system_base_edition(db, season=2026)
 
         cards_added = 0
         for card_data in INITIAL_CARDS:
@@ -157,7 +160,11 @@ def seed_database():
                 if "rarity" not in card_data or card_data["rarity"] is None:
                     card_data["rarity"] = PlayerCardModel.get_rarity_by_overall(card_data["overall"])
                 
-                card = PlayerCardModel(**card_data)
+                card = PlayerCardModel(
+                    **card_data,
+                    card_edition_id=base_edition.id,
+                    season=2026,
+                )
                 db.add(card)
                 cards_added += 1
 

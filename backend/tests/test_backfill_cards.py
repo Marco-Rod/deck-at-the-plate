@@ -12,6 +12,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.database import Base
 from app.models import PlayerCardModel
+from app.services.card_editions import ensure_system_base_edition
 from app.seeds.backfill_cards import (
     backfill_vision_clutch_edition,
     LEGACY_MODEL_VERSION,
@@ -24,12 +25,15 @@ def db():
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
     Base.metadata.create_all(engine)
     session = sessionmaker(bind=engine)()
+    session.info["card_edition_id"] = ensure_system_base_edition(
+        session, season=2026
+    ).id
     yield session
     session.close()
     engine.dispose()
 
 
-def _legacy_card(**overrides):
+def _legacy_card(db, **overrides):
     base = {
         "id": "legacy-1",
         "name": "Legacy Player",
@@ -41,6 +45,7 @@ def _legacy_card(**overrides):
         "velocity": 88,
         "control": 84,
         "movement": 82,
+        "card_edition_id": db.info["card_edition_id"],
     }
     base.update(overrides)
     return PlayerCardModel(**base)
@@ -48,7 +53,7 @@ def _legacy_card(**overrides):
 
 class TestBackfill:
     def test_escribo_valores_y_firma(self, db):
-        card = _legacy_card(id="legacy-1")
+        card = _legacy_card(db, id="legacy-1")
         db.add(card)
         db.flush()
         # Pre-backfill: placeholders del ALTER (defaults del modelo).
@@ -66,7 +71,7 @@ class TestBackfill:
         assert card.rating_model_version == LEGACY_MODEL_VERSION
 
     def test_idempotente(self, db):
-        card = _legacy_card(id="legacy-2")
+        card = _legacy_card(db, id="legacy-2")
         db.add(card)
         db.flush()
         backfill_vision_clutch_edition(db)
@@ -74,7 +79,7 @@ class TestBackfill:
         assert summary["updated"] == 0
 
     def test_no_toca_cartas_ya_backfilleadas(self, db):
-        card = _legacy_card(id="legacy-3", rating_model_version="V2", vision=88)
+        card = _legacy_card(db, id="legacy-3", rating_model_version="V2", vision=88)
         db.add(card)
         db.flush()
         summary = backfill_vision_clutch_edition(db)

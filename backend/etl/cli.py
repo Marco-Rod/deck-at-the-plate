@@ -27,7 +27,12 @@ from etl.config import NAMES_GENERATOR_VERSION, RATING_MODEL_VERSION
 from etl.pipelines.analytics import AnalyticsPipeline
 from etl.pipelines.metadata import MetadataPipeline
 from etl.pipelines.statcast import StatcastRawPipeline
-from etl.services.card_catalog import publish_card_catalog, validate_cpu_rosters, validate_pack_pool
+from app.services.card_editions import ensure_system_base_edition
+from etl.services.card_catalog import (
+    publish_card_catalog,
+    validate_cpu_rosters,
+    validate_pack_pool,
+)
 from etl.services.card_profiles import generate_profiles, validate_profiles
 from etl.services.identity_generation import validate_game_identities
 from etl.services.league_distributions import build_league_distributions
@@ -294,6 +299,7 @@ def _build_parser() -> argparse.ArgumentParser:
     pub = sub.add_parser("publish-card-catalog", help="Publica el catálogo (BUILDING→VALIDATING→ACTIVE)")
     pub.add_argument("--season", type=int, required=True)
     pub.add_argument("--edition", default="BASE")
+    pub.add_argument("--card-edition-id", dest="card_edition_id", default=None)
     pub.add_argument("--data-end-date", dest="data_end_date", type=_parse_date, default=None)
     pub.add_argument(
         "--rating-model",
@@ -792,9 +798,18 @@ def main(argv=None) -> int:
             logger.info("validate-card-profiles ok=%s detail=%s", result.ok, result.detail)
 
         elif args.command == "publish-card-catalog":
+            card_edition_id = args.card_edition_id
+            if card_edition_id is None:
+                if args.edition != "BASE":
+                    raise ValueError(
+                        "--card-edition-id es obligatorio para ediciones no BASE"
+                    )
+                card_edition_id = ensure_system_base_edition(
+                    db, season=args.season
+                ).id
             result = publish_card_catalog(
                 db, season=args.season,
-                edition_type=args.edition,
+                card_edition_id=card_edition_id,
                 rating_model_version=args.rating_model,
                 data_end_date=args.data_end_date,
             )

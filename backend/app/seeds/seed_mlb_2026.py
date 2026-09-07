@@ -34,11 +34,13 @@ from sqlalchemy.orm import Session
 try:
     from app.database import SessionLocal
     from app.models import PlayerCardModel, Team
+    from app.services.card_editions import ensure_system_base_edition
     from app.core.enums import PITCHER_POSITIONS, Position
     from app.core.identities import game_team_id_for
 except ModuleNotFoundError:
     from database import SessionLocal
     from models import PlayerCardModel, Team
+    from services.card_editions import ensure_system_base_edition
     from core.enums import PITCHER_POSITIONS, Position
     from core.identities import game_team_id_for
 
@@ -279,7 +281,8 @@ class MLBSeedHelper:
         player_info: Dict[str, Any],
         team_id: str,
         is_pitcher: bool,
-        db: Session
+        db: Session,
+        card_edition_id: str,
     ) -> Optional[PlayerCardModel]:
         """Crea una tarjeta de jugador en la BD"""
         try:
@@ -352,6 +355,8 @@ class MLBSeedHelper:
                 movement=movement,
                 is_two_way=is_two_way,
                 repertoire=repertoire,
+                card_edition_id=card_edition_id,
+                season=2026,
             )
 
             db.add(card)
@@ -381,6 +386,7 @@ def seed_mlb_2026_data(db: Session):
     db.commit()
     print(f"   ✓ {deleted_cards} cartas previas eliminadas")
     print()
+    base_edition = ensure_system_base_edition(db, season=2026)
 
     # 1. Obtener equipos
     print("📥 Obteniendo equipos de MLB...")
@@ -442,7 +448,13 @@ def seed_mlb_2026_data(db: Session):
             # el juego la normaliza después a SP/RP/SU/CP/CL/TWP.
             is_pitcher = position.upper() in ("P",) or position.upper() in PITCHER_POSITIONS
 
-            card = MLBSeedHelper.create_player_card(player_info, team_id, is_pitcher, db)
+            card = MLBSeedHelper.create_player_card(
+                player_info,
+                team_id,
+                is_pitcher,
+                db,
+                base_edition.id,
+            )
             if card:
                 if is_pitcher:
                     pitchers_added += 1
@@ -472,4 +484,3 @@ if __name__ == "__main__":
         traceback.print_exc()
     finally:
         db.close()
-

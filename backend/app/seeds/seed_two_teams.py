@@ -3,6 +3,7 @@ import os
 from sqlalchemy.orm import Session
 from app.database import SessionLocal
 from app.models import Team, PlayerCardModel, CardRarity
+from app.services.card_editions import ensure_system_base_edition
 
 def seed_teams_and_players():
     db: Session = SessionLocal()
@@ -20,6 +21,7 @@ def seed_teams_and_players():
                 print(f"Equipo agregado: {team_data['name']}")
 
         db.commit()
+        base_edition = ensure_system_base_edition(db, season=2026)
 
         # 2. Poblar Jugadores
         for player_data in data.get("players", []):
@@ -27,7 +29,11 @@ def seed_teams_and_players():
             if not existing_card:
                 # Convertir el string de rareza al Enum
                 player_data["rarity"] = CardRarity[player_data["rarity"]]
-                db.add(PlayerCardModel(**player_data))
+                db.add(PlayerCardModel(
+                    **player_data,
+                    card_edition_id=base_edition.id,
+                    season=2026,
+                ))
                 print(f"Carta agregada: {player_data['name']} ({player_data['position']})")
 
         db.commit()

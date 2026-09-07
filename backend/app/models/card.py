@@ -49,7 +49,7 @@ class PlayerCardModel(Base):
         # Catálogo versionado: una misma persona puede tener varias ediciones,
         # pero (player_id, season, edition_type, edition_version) es único.
         UniqueConstraint(
-            "player_id", "season", "edition_type", "edition_version", name="uq_player_cards_edition"
+            "player_id", "card_edition_id", name="uq_player_cards_player_edition"
         ),
         CheckConstraint("season IS NULL OR (season >= 1900 AND season <= 2100)", name="ck_player_cards_season_range"),
         CheckConstraint("edition_version >= 1", name="ck_player_cards_edition_version"),
@@ -120,6 +120,12 @@ class PlayerCardModel(Base):
         nullable=True,
         index=True,
     )
+    card_edition_id = Column(
+        String(36),
+        ForeignKey("card_editions.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
 
     # Relaciones
     team = relationship("Team", back_populates="cards")
@@ -127,6 +133,7 @@ class PlayerCardModel(Base):
     player = relationship("Player")
     game_identity = relationship("GamePlayerIdentity", back_populates="cards")
     catalog = relationship("CardCatalog", back_populates="cards")
+    card_edition = relationship("CardEdition", back_populates="cards")
 
     @property
     def is_pitcher(self) -> bool:

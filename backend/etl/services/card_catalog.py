@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 
 from app.models import (
     CardCatalog,
+    CardEdition,
     CardGenerationProfile,
     PlayerCardModel,
     PlayerSeason,
@@ -30,6 +31,7 @@ from app.models import (
     SourceTeamRosterMember,
     SourceTeamRosterSnapshot,
 )
+from app.services.card_editions import ensure_system_base_edition
 
 logger = logging.getLogger("etl.services.card_catalog")
 
@@ -78,10 +80,16 @@ def publish_card_catalog(
     db: Session,
     *,
     season: int,
-    edition_type: str = "BASE",
+    card_edition_id: str,
     rating_model_version: str | None = None,
     data_end_date: date | None = None,
 ) -> CatalogRunResult:
+    card_edition = db.get(CardEdition, card_edition_id)
+    if card_edition is None:
+        raise ValueError(f"CardEdition inexistente: {card_edition_id}")
+    if card_edition.season != season:
+        raise ValueError("CardEdition no pertenece a la temporada solicitada")
+    edition_type = card_edition.edition_type.value
     active = _active_catalog(db, season=season, edition_type=edition_type)
     if active is not None:
         # No-op §22: ya publicada esta edición; no se duplica nada.
@@ -149,7 +157,9 @@ def publish_card_catalog(
         if player.id in seen_players:
             continue
         seen_players.add(player.id)
-        payload = _card_from_profile(catalog, profile, player, game_team)
+        payload = _card_from_profile(
+            catalog, card_edition, profile, player, game_team
+        )
         if payload is None:
             skipped_unresolved += 1
             continue
@@ -213,11 +223,21 @@ def _game_team_for_player(db: Session, player_id: str) -> str | None:
     return row[0] if row else None
 
 
-def _card_from_profile(catalog, profile, player, game_team_id: str) -> PlayerCardModel | None:
+def _card_from_profile(
+    catalog,
+    card_edition: CardEdition,
+    profile,
+    player,
+    game_team_id: str,
+) -> PlayerCardModel | None:
     if not 0 <= profile.overall_rating <= 99:
         return None
     identity = player.game_identity
-    is_two_way = profile.velocity_rating > 0 and profile.power_rating > 0 and profile.contact_rating > 0
+    is_two_way = (
+        (profile.velocity_rating or 0) > 0
+        and (profile.power_rating or 0) > 0
+        and (profile.contact_rating or 0) > 0
+    )
     position = player.primary_position or "UT"
     if is_two_way:
         position = "TWP" if position in ("SP", "RP", "P") else position
@@ -230,13 +250,15 @@ def _card_from_profile(catalog, profile, player, game_team_id: str) -> PlayerCar
         overall=profile.overall_rating,
         rarity=profile.calculated_rarity,
         is_two_way=is_two_way,
-        power=profile.power_rating,
-        contact=profile.contact_rating,
-        velocity=profile.velocity_rating,
-        control=profile.control_rating,
-        movement=profile.movement_rating,
-        vision=profile.vision_rating,
-        clutch=profile.clutch_rating,
+        # PlayerCard conserva el contrato numérico del motor; los N/A del
+        # perfil estadístico se materializan aquí, no en CardGenerationProfile.
+        power=profile.power_rating or 0,
+        contact=profile.contact_rating or 0,
+        velocity=profile.velocity_rating or 0,
+        control=profile.control_rating or 0,
+        movement=profile.movement_rating or 0,
+        vision=profile.vision_rating or 0,
+        clutch=profile.clutch_rating or 0,
         repertoire=profile.repertoire_payload,
         player_id=player.id,
         player_season_id=profile.player_season_id,
@@ -250,6 +272,7 @@ def _card_from_profile(catalog, profile, player, game_team_id: str) -> PlayerCar
         rating_model_version=profile.rating_model_version,
         game_identity_id=identity.id,
         catalog_id=catalog.id,
+        card_edition_id=card_edition.id,
     )
 
 

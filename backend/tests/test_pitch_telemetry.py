@@ -18,6 +18,7 @@ from app.repositories.pitch_telemetry_repository import (
     get_pitch_logs_by_game,
 )
 from app.models import PlayerCardModel, PitchEventLog
+from app.services.card_editions import ensure_system_base_edition
 
 
 @pytest.fixture
@@ -25,6 +26,9 @@ def db():
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
     Base.metadata.create_all(engine)
     session = sessionmaker(bind=engine)()
+    session.info["card_edition_id"] = ensure_system_base_edition(
+        session, season=2026
+    ).id
     yield session
     session.close()
     engine.dispose()
@@ -100,9 +104,11 @@ class TestRepository:
     def test_record_y_consulta_por_juego(self, db):
         # Necesario por la FK de PitchEventLog -> player_cards
         batter = PlayerCardModel(id="bat-1", name="Batter", team_id="LAD",
-                                 position="CF", overall=85, contact=70, power=75, velocity=90, control=85, movement=80)
+                                 position="CF", overall=85, contact=70, power=75, velocity=90, control=85, movement=80,
+                                 card_edition_id=db.info["card_edition_id"])
         pitcher = PlayerCardModel(id="pit-1", name="Pitcher", team_id="SFG",
-                                  position="SP", overall=90, contact=40, power=30, velocity=97, control=90, movement=88)
+                                  position="SP", overall=90, contact=40, power=30, velocity=97, control=90, movement=88,
+                                  card_edition_id=db.info["card_edition_id"])
         db.add_all([batter, pitcher])
         db.flush()
 

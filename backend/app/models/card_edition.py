@@ -15,6 +15,7 @@ from sqlalchemy import (
     String,
     UniqueConstraint,
 )
+from sqlalchemy.orm import relationship
 
 from app.core.time import utcnow
 from app.database import Base
@@ -111,3 +112,5 @@ class CardEdition(Base):
         default=utcnow,
         onupdate=utcnow,
     )
+
+    cards = relationship("PlayerCardModel", back_populates="card_edition")

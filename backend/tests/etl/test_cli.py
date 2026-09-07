@@ -172,3 +172,14 @@ def test_publish_card_catalog_edition():
     args = parser.parse_args(["publish-card-catalog", "--season", "2026", "--edition", "BASE"])
     assert args.command == "publish-card-catalog"
     assert args.edition == "BASE"
+
+
+def test_publish_card_catalog_acepta_card_edition_explicita():
+    parser = _build_parser()
+    args = parser.parse_args([
+        "publish-card-catalog",
+        "--season", "2026",
+        "--edition", "ALL_STAR",
+        "--card-edition-id", "edition-id",
+    ])
+    assert args.card_edition_id == "edition-id"

@@ -19,6 +19,7 @@ from app.database import SessionLocal, engine
 from app.models import PlayerCardModel, TacticCard, CardRarity
 from app.models.team import Team
 from app.core.identities import game_team_id_for
+from app.services.card_editions import ensure_system_base_edition
 
 
 # Franquicias públicas del seed (id = UUID determinístico V2).
@@ -54,6 +55,7 @@ def seed_real_data():
         ]
         db.add_all(teams)
         db.flush()
+        base_edition = ensure_system_base_edition(db, season=2025)
 
         # ------------------------------------------------------------------
         # 2. Cartas de jugadores (PlayerCardModel con columnas individuales)
@@ -223,6 +225,9 @@ def seed_real_data():
                 movement=92,
             ),
         ]
+        for card in cards:
+            card.card_edition_id = base_edition.id
+            card.season = 2025
         db.add_all(cards)
         db.flush()
 
