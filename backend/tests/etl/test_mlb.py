@@ -124,6 +124,26 @@ class TestMLBStatsApiClient:
             },
         }
 
+    def test_get_schedule_filtra_game_type_cuando_se_solicita(self):
+        captured = {}
+
+        def handler(request):
+            captured["params"] = dict(request.url.params)
+            return httpx.Response(200, json={"dates": []}, request=request)
+
+        from etl.http.client import ExternalHttpClient
+
+        client = MLBStatsApiClient(
+            http=ExternalHttpClient(
+                transport=httpx.MockTransport(handler), max_retries=0
+            ),
+            base_url="https://mlb.test/api/v1",
+        )
+        client.get_schedule(
+            dt.date(2026, 1, 1), dt.date(2026, 8, 24), game_type="R"
+        )
+        assert captured["params"]["gameTypes"] == "R"
+
     def test_get_game_feed_usa_v1_si_responde_200(self):
         payload = {"source": "v1"}
         client, calls = _game_feed_client(

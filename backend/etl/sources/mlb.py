@@ -42,16 +42,21 @@ class MLBStatsApiClient:
         version_root = self._base_url.rsplit("/", 1)[0]
         return get_json(self._http, f"{version_root}/v1.1/{path}")
 
-    def get_schedule(self, date_from: date, date_to: date) -> dict:
+    def get_schedule(
+        self, date_from: date, date_to: date, *, game_type: str | None = None
+    ) -> dict:
         """Obtiene el calendario MLB necesario para descubrir juegos por fecha."""
+        params = {
+            "sportId": 1,
+            "startDate": date_from.isoformat(),
+            "endDate": date_to.isoformat(),
+        }
+        if game_type is not None:
+            params["gameTypes"] = game_type
         return get_json(
             self._http,
             self._url("schedule"),
-            params={
-                "sportId": 1,
-                "startDate": date_from.isoformat(),
-                "endDate": date_to.isoformat(),
-            },
+            params=params,
         )
 
     def get_teams(self, season: int, *, sport_id: int = 1, active_status: str = "Y") -> list[TeamSourceRecord]:

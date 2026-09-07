@@ -39,12 +39,12 @@ class PopulationImportResult:
 
 
 def select_population_players(
-    db: Session, *, season: int, role: str, limit: int
+    db: Session, *, season: int, role: str, limit: int | None
 ) -> list[Player]:
     """Selecciona una población SOURCE conocida, estable y sin duplicados."""
     if role not in {"batter", "pitcher"}:
         raise ValueError("role debe ser batter o pitcher")
-    if limit < 1:
+    if limit is not None and limit < 1:
         raise ValueError("limit debe ser mayor que cero")
 
     season_players = select(PlayerSeason.player_id).where(PlayerSeason.season == season)
@@ -58,12 +58,10 @@ def select_population_players(
     else:
         # TWP es elegible en ambos roles; pitchers puros no están en esta lista.
         query = query.filter(Player.primary_position.in_(BATTER_POSITIONS))
-    return (
-        query
-        .order_by(Player.mlb_id.asc())
-        .limit(limit)
-        .all()
-    )
+    query = query.order_by(Player.mlb_id.asc())
+    if limit is not None:
+        query = query.limit(limit)
+    return query.all()
 
 
 def import_statcast_population(
@@ -74,7 +72,7 @@ def import_statcast_population(
     role: str,
     date_from: date,
     date_to: date,
-    limit: int,
+    limit: int | None,
     refresh: bool = False,
     pipeline_factory: Callable = StatcastRawPipeline,
 ) -> PopulationImportResult:

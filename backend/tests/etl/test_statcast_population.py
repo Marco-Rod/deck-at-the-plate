@@ -64,6 +64,18 @@ def test_seleccion_batter_excluye_pitchers_puros_e_incluye_twp(db):
     assert [player.mlb_id for player in selected] == [5, 20, 30]
 
 
+def test_seleccion_sin_limit_devuelve_toda_la_poblacion(db):
+    for mlb_id in (30, 10, 20):
+        _player(db, mlb_id, "DH")
+    db.commit()
+
+    selected = select_population_players(
+        db, season=2026, role="batter", limit=None
+    )
+
+    assert [player.mlb_id for player in selected] == [10, 20, 30]
+
+
 def test_importacion_batter_propaga_role_y_conserva_contadores(db):
     _player(db, 10, "TWP")
     _player(db, 20, "DH")

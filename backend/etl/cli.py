@@ -38,6 +38,7 @@ from etl.services.identity_generation import validate_game_identities
 from etl.services.league_distributions import build_league_distributions
 from etl.services.quality import collect_quality, emit_quality_report
 from etl.services.statcast_population import import_statcast_population
+from etl.services.statcast_backfill import backfill_statcast
 from etl.services.pitcher_movement import calculate_movement_candidate
 from etl.services.pitcher_control import calculate_control_candidate
 from etl.services.pitcher_velocity import calculate_velocity_candidate
@@ -118,6 +119,18 @@ def _build_parser() -> argparse.ArgumentParser:
     pop.add_argument("--to", dest="date_to", type=_parse_date, required=True)
     pop.add_argument("--limit", type=int, default=40)
     pop.add_argument("--refresh", action="store_true")
+
+    backfill = sub.add_parser(
+        "backfill-statcast",
+        help="Ingiere Statcast histórico para una población desde Opening Day",
+    )
+    backfill.add_argument("--season", type=int, required=True)
+    backfill.add_argument(
+        "--role", choices=("batter", "pitcher"), required=True
+    )
+    backfill.add_argument("--to", dest="date_to", type=_parse_date, required=True)
+    backfill.add_argument("--limit", type=int, default=None)
+    backfill.add_argument("--refresh", action="store_true")
 
     an = sub.add_parser("build-analytics", help="Regenera perfiles analytics del snapshot")
     an.add_argument("--season", type=int, required=True)
@@ -479,6 +492,31 @@ def main(argv=None) -> int:
             )
             for failure in result.failures:
                 logger.warning("statcast-population failed mlb_id=%s error=%s", failure.mlb_id, failure.error)
+
+        elif args.command == "backfill-statcast":
+            result = backfill_statcast(
+                db,
+                StatcastSourceAdapter(),
+                MLBStatsApiClient(),
+                season=args.season,
+                role=args.role,
+                date_to=args.date_to,
+                limit=args.limit,
+                refresh=args.refresh,
+            )
+            print(
+                f"role={result.role} season={result.season} "
+                f"from={result.date_from} to={result.date_to} "
+                f"players_selected={result.players_selected} "
+                f"players_with_data={result.players_with_data} "
+                f"players_without_data={result.players_without_data} "
+                f"games={result.games} pitches={result.pitches} "
+                f"first_date={result.first_date} last_date={result.last_date} "
+                f"created={result.rows_inserted} updated={result.rows_updated} "
+                f"unchanged={result.rows_unchanged} "
+                f"rejected={result.rows_rejected} "
+                f"failed={result.players_failed}"
+            )
 
         elif args.command == "build-analytics":
             pipeline = AnalyticsPipeline(db)
