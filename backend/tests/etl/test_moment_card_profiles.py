@@ -135,7 +135,7 @@ def test_genera_perfil_moment_end_to_end_sin_mutar_player_ratings(db):
         profile.vision_rating,
         profile.clutch_rating,
     ) == (75, 82, 70, 85)
-    assert profile.overall_rating == 70
+    assert profile.overall_rating == 77
     assert base_values == (
         ratings.contact_rating,
         ratings.power_rating,
@@ -164,9 +164,6 @@ def test_metadata_reconstruye_toda_la_cadena(db):
         "MomentPolicy",
         "CardRatingProfile",
     ]
-    assert calculation["overall_policy"] == (
-        "UNCHANGED_PENDING_MOMENT_OVERALL_POLICY"
-    )
     assert calculation["moment_context"]["id"] == context.id
     assert calculation["moment_context"]["facts"] == context.facts
     assert calculation["moment_evaluation"]["id"] == evaluation.id
@@ -176,6 +173,10 @@ def test_metadata_reconstruye_toda_la_cadena(db):
     assert adjustment["applied_adjustments"]["clutch_rating"] == 15
     assert adjustment["policy_version"] == "moment-rating-adjustment-1.0"
     assert metadata["transformation"] == "MOMENT_POLICY"
+    assert metadata["overall_policy"]["policy_version"] == "card-overall-1.0"
+    assert metadata["overall_policy"]["source"] == "FINAL_CARD_RATINGS"
+    assert metadata["overall_policy"]["raw_score"] == "77.35"
+    assert metadata["overall_policy"]["rating"] == 77
     assert metadata["source_player_ratings"]["id"] == ratings.id
 
 

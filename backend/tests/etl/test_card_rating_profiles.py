@@ -177,7 +177,6 @@ def test_moment_persiste_transformacion_y_actualiza_si_cambian_ajustes(db):
         policy_adjustments={
             "power_rating": 12,
             "clutch_rating": 18,
-            "overall_rating": 10,
         },
         policy_reason="Walk-off con dos home runs",
     )
@@ -186,7 +185,7 @@ def test_moment_persiste_transformacion_y_actualiza_si_cambian_ajustes(db):
     assert (profile.power_rating, profile.clutch_rating, profile.overall_rating) == (
         80,
         88,
-        74,
+        71,
     )
     assert profile.metadata_payload["base_ratings"]["power_rating"] == 68
     assert profile.metadata_payload["adjustments"]["power_rating"] == 12
@@ -199,14 +198,13 @@ def test_moment_persiste_transformacion_y_actualiza_si_cambian_ajustes(db):
         policy_adjustments={
             "power_rating": 15,
             "clutch_rating": 18,
-            "overall_rating": 11,
         },
         policy_reason="Walk-off con dos home runs",
     )
     db.refresh(profile)
     assert updated.status == "UPDATED"
     assert updated.card_rating_profile_id == created.card_rating_profile_id
-    assert (profile.power_rating, profile.overall_rating) == (83, 75)
+    assert (profile.power_rating, profile.overall_rating) == (83, 71)
 
 
 def test_actualiza_si_cambia_el_snapshot_fuente(db):

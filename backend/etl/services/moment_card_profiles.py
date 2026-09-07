@@ -41,7 +41,6 @@ def _calculation_metadata(
             "MomentPolicy",
             "CardRatingProfile",
         ],
-        "overall_policy": "UNCHANGED_PENDING_MOMENT_OVERALL_POLICY",
         "moment_context": {
             "id": context.id,
             "input_hash": context.input_hash,

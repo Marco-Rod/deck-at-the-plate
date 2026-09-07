@@ -4,26 +4,30 @@ from dataclasses import dataclass
 from typing import Mapping
 
 from app.models import CardEditionType
+from etl.services.card_overall import (
+    CardOverallPolicyResult,
+    calculate_card_overall,
+)
 
 
 BASE_RATING_POLICY_VERSION = "base-card-ratings-1.0"
 MOMENT_RATING_POLICY_VERSION = "moment-card-ratings-1.0"
 
-BATTER_RATING_FIELDS = (
+BATTER_COMPONENT_FIELDS = (
     "contact_rating",
     "power_rating",
     "vision_rating",
     "clutch_rating",
-    "overall_rating",
 )
-PITCHER_RATING_FIELDS = (
+PITCHER_COMPONENT_FIELDS = (
     "velocity_rating",
     "control_rating",
     "movement_rating",
     "stuff_rating",
-    "overall_rating",
 )
-ALL_RATING_FIELDS = frozenset(BATTER_RATING_FIELDS + PITCHER_RATING_FIELDS)
+ALL_RATING_FIELDS = frozenset(
+    BATTER_COMPONENT_FIELDS + PITCHER_COMPONENT_FIELDS + ("overall_rating",)
+)
 
 
 @dataclass(frozen=True)
@@ -34,13 +38,14 @@ class CardRatingPolicyResult:
     policy_version: str
     reason: str
     transformation: str
+    overall_policy: CardOverallPolicyResult
 
 
 def _applicable_fields(role: str) -> tuple[str, ...]:
     if role == "BATTER":
-        return BATTER_RATING_FIELDS
+        return BATTER_COMPONENT_FIELDS
     if role == "PITCHER":
-        return PITCHER_RATING_FIELDS
+        return PITCHER_COMPONENT_FIELDS
     raise ValueError(f"rol no soportado: {role}")
 
 
@@ -50,7 +55,7 @@ def _validate_base_ratings(
     unknown = set(base_ratings) - ALL_RATING_FIELDS
     if unknown:
         raise ValueError(f"ratings desconocidos: {sorted(unknown)}")
-    applicable = set(_applicable_fields(role))
+    applicable = set(_applicable_fields(role)) | {"overall_rating"}
     normalized = {field: base_ratings.get(field) for field in ALL_RATING_FIELDS}
     for field, value in normalized.items():
         if field in applicable:
@@ -92,13 +97,17 @@ def apply_card_rating_policy(
     if edition_type == CardEditionType.BASE:
         if any(requested_adjustments.values()):
             raise ValueError("BASE solo admite IDENTITY_COPY sin ajustes")
+        transformed = dict(base)
+        overall = calculate_card_overall(role=role, final_ratings=transformed)
+        transformed["overall_rating"] = overall.rating
         return CardRatingPolicyResult(
             base_ratings=base,
-            transformed_ratings=dict(base),
+            transformed_ratings=transformed,
             adjustments={},
             policy_version=BASE_RATING_POLICY_VERSION,
             reason=reason or "BASE_IDENTITY_COPY",
             transformation="IDENTITY_COPY",
+            overall_policy=overall,
         )
 
     if edition_type == CardEditionType.MOMENT:
@@ -110,6 +119,8 @@ def apply_card_rating_policy(
             if not 40 <= final <= 99:
                 raise ValueError(f"el resultado de {field} queda fuera de 40..99")
             transformed[field] = final
+        overall = calculate_card_overall(role=role, final_ratings=transformed)
+        transformed["overall_rating"] = overall.rating
         return CardRatingPolicyResult(
             base_ratings=base,
             transformed_ratings=transformed,
@@ -117,6 +128,7 @@ def apply_card_rating_policy(
             policy_version=MOMENT_RATING_POLICY_VERSION,
             reason=reason.strip(),
             transformation="MOMENT_POLICY",
+            overall_policy=overall,
         )
 
     raise ValueError(f"sin política de ratings para edición {edition_type.value}")

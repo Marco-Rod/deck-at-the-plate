@@ -46,7 +46,6 @@ def test_moment_aplica_solo_ajustes_explicitos_y_auditables():
         adjustments={
             "power_rating": 12,
             "clutch_rating": 18,
-            "overall_rating": 10,
         },
         reason="Walk-off con dos home runs",
     )
@@ -56,7 +55,8 @@ def test_moment_aplica_solo_ajustes_explicitos_y_auditables():
     assert result.base_ratings["power_rating"] == 68
     assert result.transformed_ratings["power_rating"] == 80
     assert result.transformed_ratings["clutch_rating"] == 88
-    assert result.transformed_ratings["overall_rating"] == 74
+    assert result.transformed_ratings["overall_rating"] == 71
+    assert result.overall_policy.raw_score == 70.5
     assert result.transformed_ratings["contact_rating"] == 56
     assert result.adjustments["power_rating"] == 12
     assert result.reason == "Walk-off con dos home runs"
@@ -98,6 +98,7 @@ def test_moment_exige_razon():
     "adjustments, message",
     [
         ({"velocity_rating": 1}, "no aplicables"),
+        ({"overall_rating": 1}, "no aplicables"),
         ({"power_rating": 32}, "fuera de 40..99"),
         ({"power_rating": 1.5}, "debe ser entero"),
     ],

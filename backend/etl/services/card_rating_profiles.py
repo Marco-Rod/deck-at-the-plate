@@ -69,6 +69,14 @@ def _provenance(
         "base_ratings": policy.base_ratings,
         "transformed_ratings": policy.transformed_ratings,
         "adjustments": policy.adjustments,
+        "overall_policy": {
+            "policy_version": policy.overall_policy.policy_version,
+            "source": policy.overall_policy.source,
+            "component_ratings": policy.overall_policy.component_ratings,
+            "weights": policy.overall_policy.weights,
+            "raw_score": policy.overall_policy.raw_score,
+            "rating": policy.overall_policy.rating,
+        },
         "calculation_metadata": _canonical(calculation_metadata or {}),
         "source_player_ratings": {
             "id": ratings.id,
