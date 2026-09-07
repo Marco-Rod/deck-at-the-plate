@@ -42,8 +42,8 @@ class CardGenerationProfile(Base):
     __tablename__ = "card_generation_profiles"
     __table_args__ = (
         UniqueConstraint(
-            "player_season_id", "rating_model_version",
-            name="uq_card_generation_profiles_season_version",
+            "player_season_id", "rating_model_version", "role",
+            name="uq_card_generation_profiles_season_version_role",
         ),
         ForeignKeyConstraint(
             ["player_ratings_id", "rating_model_version"],
@@ -60,6 +60,10 @@ class CardGenerationProfile(Base):
         CheckConstraint("movement_rating >= 0 AND movement_rating <= 99", name="ck_card_generation_movement"),
         CheckConstraint("stuff_rating IS NULL OR (stuff_rating >= 0 AND stuff_rating <= 99)", name="ck_card_generation_stuff"),
         CheckConstraint("overall_rating >= 0 AND overall_rating <= 99", name="ck_card_generation_overall"),
+        CheckConstraint(
+            "role IS NULL OR role IN ('BATTER', 'PITCHER')",
+            name="ck_card_generation_profiles_role",
+        ),
     )
 
     id = Column(String(36), primary_key=True, default=_new_id)
@@ -67,18 +71,21 @@ class CardGenerationProfile(Base):
         String(36), ForeignKey("player_seasons.id"), nullable=False, index=True
     )
     rating_model_version = Column(String(30), nullable=False, index=True)
+    # NULL conserva perfiles legacy; ratings-2.0 siempre fija el rol.
+    role = Column(String(10), nullable=True, index=True)
     # Nullable durante la transición: ratings-1.0 continúa sin PlayerRatings.
     # La FK compuesta garantiza igualdad de rating_model_version al vincularse.
     player_ratings_id = Column(String(36), nullable=True, index=True)
     # Nullable para que perfiles legacy sin fingerprint se reconstruyan una vez.
     input_hash = Column(String(64), nullable=True, index=True)
-    contact_rating = Column(SmallInteger, nullable=False)
-    power_rating = Column(SmallInteger, nullable=False)
-    vision_rating = Column(SmallInteger, nullable=False)
-    clutch_rating = Column(SmallInteger, nullable=False)
-    velocity_rating = Column(SmallInteger, nullable=False, default=0)
-    control_rating = Column(SmallInteger, nullable=False, default=0)
-    movement_rating = Column(SmallInteger, nullable=False, default=0)
+    # Los atributos que no aplican al rol permanecen NULL; cero no significa N/A.
+    contact_rating = Column(SmallInteger, nullable=True)
+    power_rating = Column(SmallInteger, nullable=True)
+    vision_rating = Column(SmallInteger, nullable=True)
+    clutch_rating = Column(SmallInteger, nullable=True)
+    velocity_rating = Column(SmallInteger, nullable=True)
+    control_rating = Column(SmallInteger, nullable=True)
+    movement_rating = Column(SmallInteger, nullable=True)
     # Nullable durante la transición: ratings-1.0 no calculaba Stuff.
     stuff_rating = Column(SmallInteger, nullable=True)
     overall_rating = Column(SmallInteger, nullable=False)

@@ -93,11 +93,16 @@ def test_copia_ratings_sin_recalcular_y_es_idempotente(db):
     assert first.status == "CREATED"
     profile = db.query(CardGenerationProfile).one()
     assert profile.player_ratings_id == ratings.id
+    assert profile.role == "PITCHER"
     assert profile.rating_model_version == "ratings-2.0"
     assert (
         profile.velocity_rating, profile.control_rating, profile.movement_rating,
         profile.stuff_rating, profile.overall_rating,
     ) == (71, 71, 77, 79, 75)
+    assert (
+        profile.contact_rating, profile.power_rating,
+        profile.vision_rating, profile.clutch_rating,
+    ) == (None, None, None, None)
     assert profile.calculated_rarity == CardRarity.GOLD
     assert profile.calculation_metadata["rarity_model_version"] == "rarity-2.0"
     assert profile.calculation_metadata["rarity_percentile"] == pytest.approx(37 / 39)

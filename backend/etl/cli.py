@@ -39,7 +39,7 @@ from etl.services.pitcher_velocity import calculate_velocity_candidate
 from etl.services.pitcher_stuff import calculate_stuff_candidate
 from etl.services.pitcher_ratings2 import calculate_pitcher_ratings2
 from etl.services.player_ratings import persist_batter_ratings2, persist_pitcher_ratings2
-from etl.services.ratings2_card_profiles import generate_pitcher_card_profile_from_ratings2
+from etl.services.ratings2_card_profiles import generate_card_profile_from_ratings2
 from etl.services.rating_distributions import build_overall_rating_distribution
 from etl.services.pitcher_ratings2_population import generate_pitcher_ratings2_population
 from etl.services.batter_contact import calculate_batter_contact
@@ -728,7 +728,7 @@ def main(argv=None) -> int:
                 )
 
         elif args.command == "generate-card-profile-ratings2":
-            result = generate_pitcher_card_profile_from_ratings2(
+            result = generate_card_profile_from_ratings2(
                 db,
                 player_ratings_id=args.player_ratings_id,
                 player_season_id=args.player_season_id,
