@@ -115,3 +115,4 @@ class CardEdition(Base):
 
     cards = relationship("PlayerCardModel", back_populates="card_edition")
     rating_profiles = relationship("CardRatingProfile", back_populates="card_edition")
+    moment_contexts = relationship("MomentContext", back_populates="card_edition")

@@ -42,6 +42,7 @@ from app.models.player_ratings import PlayerRatings
 from app.models.rating_distribution import RatingDistribution
 from app.models.card_edition import CardEdition, CardEditionSourceType, CardEditionType
 from app.models.card_rating_profile import CardRatingProfile
+from app.models.moment_context import MomentContext, MomentContextSourceType
 
 # Permite hacer: "from app.models import PlayerCardModel, GameSession"
 __all__ = [
@@ -88,4 +89,6 @@ __all__ = [
     "CardEditionSourceType",
     "CardEditionType",
     "CardRatingProfile",
+    "MomentContext",
+    "MomentContextSourceType",
 ]
