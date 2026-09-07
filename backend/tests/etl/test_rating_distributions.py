@@ -95,7 +95,7 @@ def _build(db, **overrides):
         "data_end_date": END,
         "rating_model_version": "ratings-2.0",
         "source_distribution_version": "dist-1.0",
-        "rarity_model_version": "rarity-2.0",
+        "performance_tier_model_version": "rarity-2.0",
     }
     arguments.update(overrides)
     return build_overall_rating_distribution(db, **arguments)
@@ -134,7 +134,7 @@ def test_actualiza_poblacion_y_conserva_versiones_historicas(db):
     assert updated.rating_distribution_id == first.rating_distribution_id
     assert updated.population_size == 2
 
-    versioned = _build(db, rarity_model_version="rarity-2.1")
+    versioned = _build(db, performance_tier_model_version="performance-tier-2.1")
     assert versioned.status == "CREATED"
     assert db.query(RatingDistribution).count() == 2
 

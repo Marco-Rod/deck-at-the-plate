@@ -17,7 +17,7 @@ def test_parser_generates_subcomandos():
         "build-analytics": ["build-analytics", "--season", "2026", "--data-start-date", "2026-03-20", "--data-end-date", "2026-08-31"],
         "build-league-distributions": ["build-league-distributions", "--season", "2026", "--role", "pitcher", "--from", "2026-03-20", "--to", "2026-08-31"],
         "build-rating-distributions": ["build-rating-distributions", "--season", "2026", "--role", "pitcher", "--from", "2026-03-20", "--to", "2026-08-31"],
-        "build-rating-distribution": ["build-rating-distribution", "--season", "2026", "--role", "batter", "--from", "2026-03-20", "--to", "2026-08-31"],
+        "build-rating-distribution": ["build-rating-distribution", "--season", "2026", "--role", "batter", "--from", "2026-03-20", "--to", "2026-08-31", "--performance-tier-model-version", "rarity-2.0"],
         "calculate-pitcher-movement": ["calculate-pitcher-movement", "--player-id", "650911", "--season", "2026", "--from", "2026-03-20", "--to", "2026-08-31"],
         "calculate-pitcher-control": ["calculate-pitcher-control", "--player-id", "650911", "--season", "2026", "--from", "2026-03-20", "--to", "2026-08-31"],
         "calculate-pitcher-velocity": ["calculate-pitcher-velocity", "--player-id", "650911", "--season", "2026", "--from", "2026-03-20", "--to", "2026-08-31"],

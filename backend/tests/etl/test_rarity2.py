@@ -1,11 +1,15 @@
-"""Pruebas de la política pura de rarity-2.0."""
+"""Pruebas del tier de performance y de sus aliases legacy."""
 
 from types import SimpleNamespace
 
 import pytest
 
 from app.models.card import CardRarity
-from etl.services.rarity2 import calculate_rarity, rarity_from_percentile
+from etl.services.performance_tier2 import (
+    calculate_performance_tier,
+    performance_tier_from_percentile,
+)
+from etl.services.rarity2 import calculate_rarity
 
 
 @pytest.mark.parametrize(
@@ -23,8 +27,8 @@ from etl.services.rarity2 import calculate_rarity, rarity_from_percentile
         (1.0, CardRarity.DIAMOND),
     ],
 )
-def test_boundaries_de_rarity(percentile, expected):
-    assert rarity_from_percentile(percentile) == expected
+def test_boundaries_de_performance_tier(percentile, expected):
+    assert performance_tier_from_percentile(percentile) == expected
 
 
 def test_empates_en_maximo_usan_midrank_de_la_poblacion_real():
@@ -34,11 +38,11 @@ def test_empates_en_maximo_usan_midrank_de_la_poblacion_real():
     }
     distribution = SimpleNamespace(population_size=39, population_histogram=histogram)
 
-    result = calculate_rarity(75, distribution)
+    result = calculate_performance_tier(75, distribution)
 
-    assert result.percentile == pytest.approx(37 / 39)
-    assert result.rarity == CardRarity.GOLD
-    assert result.rarity_model_version == "rarity-2.0"
+    assert result.performance_percentile == pytest.approx(37 / 39)
+    assert result.performance_tier == CardRarity.GOLD
+    assert result.performance_tier_model_version == "rarity-2.0"
 
 
 def test_extremos_unicos_quedan_common_y_diamond():
@@ -46,14 +50,24 @@ def test_extremos_unicos_quedan_common_y_diamond():
         population_size=20,
         population_histogram={"60": 1, "70": 18, "90": 1},
     )
-    assert calculate_rarity(60, distribution).rarity == CardRarity.COMMON
-    assert calculate_rarity(90, distribution).rarity == CardRarity.DIAMOND
+    assert calculate_performance_tier(60, distribution).performance_tier == CardRarity.COMMON
+    assert calculate_performance_tier(90, distribution).performance_tier == CardRarity.DIAMOND
 
 
 def test_rechaza_histograma_inconsistente_o_rating_ajeno():
     invalid = SimpleNamespace(population_size=3, population_histogram={"70": 2})
     with pytest.raises(ValueError, match="population_size"):
-        calculate_rarity(70, invalid)
+        calculate_performance_tier(70, invalid)
     valid = SimpleNamespace(population_size=2, population_histogram={"70": 2})
     with pytest.raises(ValueError, match="no pertenece"):
-        calculate_rarity(71, valid)
+        calculate_performance_tier(71, valid)
+
+
+def test_alias_legacy_conserva_contrato_sin_ser_api_canonica():
+    distribution = SimpleNamespace(
+        population_size=1,
+        population_histogram={"70": 1},
+    )
+    legacy = calculate_rarity(70, distribution)
+    assert legacy.rarity == legacy.performance_tier
+    assert legacy.percentile == legacy.performance_percentile

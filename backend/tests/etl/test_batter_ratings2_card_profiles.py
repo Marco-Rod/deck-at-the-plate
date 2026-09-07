@@ -136,8 +136,11 @@ def test_ohtani_copia_batter_ratings_rarity_common_y_es_idempotente(db):
         profile.movement_rating,
         profile.stuff_rating,
     ) == (None, None, None, None)
+    assert profile.performance_tier == CardRarity.COMMON
     assert profile.calculated_rarity == CardRarity.COMMON
-    assert profile.calculation_metadata["rarity_percentile"] == pytest.approx(3 / 225)
+    assert profile.calculation_metadata["card_rarity_status"] == "PENDING_CARD_EDITION"
+    assert profile.calculation_metadata["performance_percentile"] == pytest.approx(3 / 225)
+    assert "rarity_percentile" not in profile.calculation_metadata
     assert profile.calculation_metadata["rating_distribution_histogram"] == BATTER_HISTOGRAM
     assert profile.calculation_metadata["traits_status"] == "PENDING_TRAITS_2.0"
 
@@ -148,7 +151,7 @@ def test_ohtani_copia_batter_ratings_rarity_common_y_es_idempotente(db):
     assert second.card_generation_profile_id == first.card_generation_profile_id
 
 
-def test_cambio_de_distribucion_actualiza_fingerprint_y_rarity(db):
+def test_cambio_de_distribucion_actualiza_fingerprint_y_performance_tier(db):
     _season, ratings = _seed(db)
     generate_batter_card_profile_from_ratings2(db, player_ratings_id=ratings.id)
     profile = db.query(CardGenerationProfile).one()
@@ -163,8 +166,9 @@ def test_cambio_de_distribucion_actualiza_fingerprint_y_rarity(db):
     db.refresh(profile)
     assert result.status == "UPDATED"
     assert profile.input_hash != original_hash
-    assert profile.calculated_rarity == CardRarity.DIAMOND
-    assert profile.calculation_metadata["rarity_percentile"] == pytest.approx(223 / 225)
+    assert profile.performance_tier == CardRarity.DIAMOND
+    assert profile.calculated_rarity == CardRarity.COMMON
+    assert profile.calculation_metadata["performance_percentile"] == pytest.approx(223 / 225)
 
 
 def test_sin_distribucion_batter_exacta_no_genera_perfil(db):

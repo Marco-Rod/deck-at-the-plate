@@ -13,7 +13,7 @@ def _new_id() -> str:
 
 
 class RatingDistribution(Base):
-    """Resumen versionado de ratings comparables para calibrar rarity."""
+    """Resumen de ratings comparables para calcular tiers de performance."""
 
     __tablename__ = "rating_distributions"
     __table_args__ = (
@@ -46,6 +46,7 @@ class RatingDistribution(Base):
     role = Column(String(10), nullable=False, index=True)
     rating_model_version = Column(String(40), nullable=False, index=True)
     source_distribution_version = Column(String(40), nullable=False, index=True)
+    # Nombre físico legacy; versiona el modelo de performance tier.
     rarity_model_version = Column(String(40), nullable=False, index=True)
     metric = Column(String(64), nullable=False, index=True)
     population_size = Column(Integer, nullable=False)

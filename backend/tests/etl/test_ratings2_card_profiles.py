@@ -103,9 +103,12 @@ def test_copia_ratings_sin_recalcular_y_es_idempotente(db):
         profile.contact_rating, profile.power_rating,
         profile.vision_rating, profile.clutch_rating,
     ) == (None, None, None, None)
-    assert profile.calculated_rarity == CardRarity.GOLD
-    assert profile.calculation_metadata["rarity_model_version"] == "rarity-2.0"
-    assert profile.calculation_metadata["rarity_percentile"] == pytest.approx(37 / 39)
+    assert profile.performance_tier == CardRarity.GOLD
+    assert profile.calculated_rarity == CardRarity.COMMON
+    assert profile.calculation_metadata["card_rarity_status"] == "PENDING_CARD_EDITION"
+    assert profile.calculation_metadata["performance_tier_model_version"] == "rarity-2.0"
+    assert profile.calculation_metadata["performance_percentile"] == pytest.approx(37 / 39)
+    assert "rarity_percentile" not in profile.calculation_metadata
     assert profile.primary_pitcher_trait is None
     assert profile.calculation_metadata["traits_status"] == "NO_TRAIT"
 
@@ -146,7 +149,7 @@ def test_asigna_trait_calculado_sin_recalcular_ratings(db):
     assert profile.velocity_rating == ratings.velocity_rating
 
 
-def test_cambio_de_distribucion_actualiza_rarity_y_perfil(db):
+def test_cambio_de_distribucion_actualiza_performance_tier_y_perfil(db):
     _player, _season, ratings = _seed(db)
     first = generate_pitcher_card_profile_from_ratings2(
         db, player_ratings_id=ratings.id
@@ -165,7 +168,8 @@ def test_cambio_de_distribucion_actualiza_rarity_y_perfil(db):
     db.refresh(profile)
     assert first.status == "CREATED"
     assert changed.status == "UPDATED"
-    assert profile.calculated_rarity == CardRarity.DIAMOND
+    assert profile.performance_tier == CardRarity.DIAMOND
+    assert profile.calculated_rarity == CardRarity.COMMON
     assert profile.input_hash != first_hash
 
 

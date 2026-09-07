@@ -126,7 +126,7 @@ def _build_parser() -> argparse.ArgumentParser:
     rating_dist = sub.add_parser(
         "build-rating-distributions",
         aliases=["build-rating-distribution"],
-        help="Construye distribuciones de ratings oficiales para calibrar rarity",
+        help="Construye distribuciones para tiers relativos de performance",
     )
     rating_dist.add_argument("--season", type=int, required=True)
     rating_dist.add_argument("--role", choices=("batter", "pitcher"), default="pitcher")
@@ -134,7 +134,13 @@ def _build_parser() -> argparse.ArgumentParser:
     rating_dist.add_argument("--to", dest="data_end_date", type=_parse_date, required=True)
     rating_dist.add_argument("--rating-model-version", dest="rating_model_version", default="ratings-2.0")
     rating_dist.add_argument("--source-distribution-version", dest="source_distribution_version", default=None)
-    rating_dist.add_argument("--rarity-model-version", dest="rarity_model_version", default="rarity-2.0")
+    rating_dist.add_argument(
+        "--performance-tier-model-version",
+        "--rarity-model-version",
+        dest="performance_tier_model_version",
+        default="rarity-2.0",
+        help="Versión del tier de performance (el segundo nombre es legacy)",
+    )
 
     movement = sub.add_parser("calculate-pitcher-movement", help="Inspecciona candidato Movement sin persistir carta")
     movement.add_argument("--player-id", dest="player_id", type=int, required=True)
@@ -461,12 +467,12 @@ def main(argv=None) -> int:
                 data_end_date=args.data_end_date,
                 rating_model_version=args.rating_model_version,
                 source_distribution_version=args.source_distribution_version,
-                rarity_model_version=args.rarity_model_version,
+                performance_tier_model_version=args.performance_tier_model_version,
             )
             print(
                 f"{result.status} population_size={result.population_size} "
                 f"rating_distribution_id={result.rating_distribution_id} "
-                f"RARITY_MODEL={result.rarity_model_version}"
+                f"PERFORMANCE_TIER_MODEL={result.performance_tier_model_version}"
             )
 
         elif args.command == "calculate-pitcher-movement":

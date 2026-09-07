@@ -90,7 +90,8 @@ class CardGenerationProfile(Base):
     stuff_rating = Column(SmallInteger, nullable=True)
     overall_rating = Column(SmallInteger, nullable=False)
     calculated_rarity = Column(
-        # Reutilizamos el enum ya existente en el proyecto (no duplicar).
+        # Columna legacy. En ratings-2.0 permanece neutral hasta que una futura
+        # CardEdition determine la rareza coleccionable.
         Enum(CardRarity, name="cardrarity", create_type=False),
         nullable=False,
         default=CardRarity.COMMON,
@@ -112,3 +113,9 @@ class CardGenerationProfile(Base):
 
     player_season = relationship("PlayerSeason")
     player_ratings = relationship("PlayerRatings", back_populates="card_generation_profiles")
+
+    @property
+    def performance_tier(self):
+        """Tier estadístico almacenado en metadata, separado de card rarity."""
+        value = (self.calculation_metadata or {}).get("performance_tier")
+        return CardRarity(value) if value is not None else None
