@@ -72,6 +72,11 @@ def _mlb_client(routes: dict):
 
 
 class TestMLBStatsApiClient:
+    def test_get_game_feed(self):
+        payload = {"gamePk": 824230, "liveData": {"plays": {"allPlays": []}}}
+        client = _mlb_client({"/game/824230/feed/live": payload})
+        assert client.get_game_feed(824230) == payload
+
     def test_get_teams_mapping(self):
         client = _mlb_client({"/teams": TEAMS_PAYLOAD})
         teams = client.get_teams(2026)

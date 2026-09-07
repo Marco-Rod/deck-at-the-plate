@@ -29,6 +29,13 @@ class MLBStatsApiClient:
     def _url(self, path: str) -> str:
         return f"{self._base_url}/{path.lstrip('/')}"
 
+    def get_game_feed(self, game_pk: int) -> dict:
+        """Obtiene el feed oficial usado para confirmar estado y secuencia del juego."""
+        return get_json(
+            self._http,
+            self._url(f"game/{int(game_pk)}/feed/live"),
+        )
+
     def get_teams(self, season: int, *, sport_id: int = 1, active_status: str = "Y") -> list[TeamSourceRecord]:
         data = get_json(
             self._http,

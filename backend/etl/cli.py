@@ -52,6 +52,7 @@ from etl.services.batter_power import calculate_batter_power
 from etl.services.batter_vision import calculate_batter_vision
 from etl.services.batter_ratings2 import calculate_batter_ratings2
 from etl.services.batter_ratings2_population import generate_batter_ratings2_population
+from etl.services.walk_off_hr_detector import detect_walk_off_home_runs
 from etl.sources.mlb import MLBStatsApiClient
 from etl.sources.statcast import StatcastSourceAdapter
 
@@ -270,6 +271,13 @@ def _build_parser() -> argparse.ArgumentParser:
     profile_ratings2 = sub.add_parser("generate-card-profile-ratings2", help="Adapta PlayerRatings a perfil de carta")
     profile_ratings2.add_argument("--player-ratings-id", dest="player_ratings_id", required=True)
     profile_ratings2.add_argument("--player-season-id", dest="player_season_id", default=None)
+
+    walk_off = sub.add_parser(
+        "detect-walk-off-hr",
+        help="Detecta WALK_OFF_HR confirmado por Statcast + MLB game feed",
+    )
+    walk_off.add_argument("--from", dest="date_from", type=_parse_date, required=True)
+    walk_off.add_argument("--to", dest="date_to", type=_parse_date, required=True)
 
     run = sub.add_parser("run", help="Pipeline completo")
     run.add_argument("--season", type=int, required=True)
@@ -749,6 +757,28 @@ def main(argv=None) -> int:
                 f"{result.status} card_generation_profile_id={result.card_generation_profile_id} "
                 f"player_ratings_id={result.player_ratings_id}"
             )
+
+        elif args.command == "detect-walk-off-hr":
+            result = detect_walk_off_home_runs(
+                db,
+                MLBStatsApiClient(),
+                date_from=args.date_from,
+                date_to=args.date_to,
+            )
+            print(
+                f"selected={result.selected} confirmed={result.confirmed} "
+                f"created={result.created} updated={result.updated} "
+                f"unchanged={result.unchanged} unconfirmed={result.unconfirmed} "
+                f"failed={result.failed}"
+            )
+            for failure in result.failures:
+                logger.warning(
+                    "walk-off detector game_pk=%s at_bat=%s batter=%s reason=%s",
+                    failure.game_pk,
+                    failure.at_bat_number,
+                    failure.batter_mlb_id,
+                    failure.reason,
+                )
 
         elif args.command == "run":
             # Corrección A2: si RAW falla, run() propaga la excepción y aquí se
