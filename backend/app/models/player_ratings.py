@@ -33,6 +33,9 @@ class PlayerRatings(Base):
         # Clave candidata para que CardGenerationProfile pueda garantizar por
         # FK compuesta que el vínculo usa la misma rating_model_version.
         UniqueConstraint("id", "rating_model_version", name="uq_player_ratings_id_model_version"),
+        UniqueConstraint(
+            "id", "player_id", "role", name="uq_player_ratings_id_player_role"
+        ),
         CheckConstraint("season >= 1900 AND season <= 2100", name="ck_player_ratings_season"),
         CheckConstraint("data_end_date >= data_start_date", name="ck_player_ratings_window"),
         CheckConstraint("role IN ('BATTER', 'PITCHER')", name="ck_player_ratings_role"),
