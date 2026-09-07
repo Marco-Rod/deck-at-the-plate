@@ -92,6 +92,7 @@ def persist_moment_context(
     source_reference: str,
     facts: Mapping,
     context_version: str = MOMENT_CONTEXT_VERSION,
+    commit: bool = True,
 ) -> MomentContextPersistenceResult:
     """Guarda hechos observados; nunca calcula importance, boosts o ratings."""
     player = db.get(Player, player_id)
@@ -153,5 +154,8 @@ def persist_moment_context(
         for field_name, value in values.items():
             setattr(context, field_name, value)
         status = "UPDATED"
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     return MomentContextPersistenceResult(status, context.id, input_hash)

@@ -241,27 +241,32 @@ def detect_walk_off_home_runs(db: Session, client: MLBStatsApiClient, *, date_fr
     for game in games:
         confirmation = None
         try:
-            confirmation = _confirm_game(game, client.get_game_feed(game.game_pk))
-            if confirmation is None:
-                counts["unconfirmed"] += 1
-                continue
-            player = _ensure_player(db, client, confirmation.batter_mlb_id)
-            edition = _ensure_moment_edition(db, confirmation)
-            persisted = persist_moment_context(
-                db,
-                player_id=player.id,
-                card_edition_id=edition.id,
-                role="BATTER",
-                occurred_at=confirmation.occurred_at,
-                source_type=MomentContextSourceType.MLB_STATS_API,
-                source_reference=f"mlb-stats-api:game/{game.game_pk}/feed/live",
-                facts=confirmation.facts,
-            )
+            with db.begin_nested():
+                confirmation = _confirm_game(
+                    game, client.get_game_feed(game.game_pk)
+                )
+                if confirmation is None:
+                    counts["unconfirmed"] += 1
+                    continue
+                player = _ensure_player(db, client, confirmation.batter_mlb_id)
+                edition = _ensure_moment_edition(db, confirmation)
+                persisted = persist_moment_context(
+                    db,
+                    player_id=player.id,
+                    card_edition_id=edition.id,
+                    role="BATTER",
+                    occurred_at=confirmation.occurred_at,
+                    source_type=MomentContextSourceType.MLB_STATS_API,
+                    source_reference=(
+                        f"mlb-stats-api:game/{game.game_pk}/feed/live"
+                    ),
+                    facts=confirmation.facts,
+                    commit=False,
+                )
             counts["confirmed"] += 1
             counts[persisted.status.lower()] += 1
             context_ids.append(persisted.moment_context_id)
         except Exception as exc:
-            db.rollback()
             counts["failed"] += 1
             failures.append(
                 WalkOffHrDetectionFailure(
@@ -272,6 +277,7 @@ def detect_walk_off_home_runs(db: Session, client: MLBStatsApiClient, *, date_fr
                 )
             )
             logger.exception("walk-off detector failed game_pk=%s", game.game_pk)
+    db.commit()
     return WalkOffHrDetectionResult(
         selected=len(games), confirmed=counts["confirmed"], created=counts["created"],
         updated=counts["updated"], unchanged=counts["unchanged"],

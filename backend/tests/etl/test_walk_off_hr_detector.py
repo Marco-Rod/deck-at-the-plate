@@ -46,13 +46,13 @@ def _feed():
                         "isComplete": True,
                         "endTime": "2026-09-03T02:15:00Z",
                     },
-                    "matchup": {"batter": {"id": 805811}},
+                    "matchup": {"batter": {"id": 814439}},
                     "result": {"eventType": "home_run", "homeScore": 5, "awayScore": 4},
                 },
             ]},
             "linescore": {"teams": {"home": {"runs": 5}, "away": {"runs": 4}}},
             "boxscore": {"teams": {"home": {"players": {
-                "ID805811": {"stats": {"batting": {
+                "ID814439": {"stats": {"batting": {
                     "plateAppearances": 5, "atBats": 4, "hits": 2, "homeRuns": 1, "rbi": 2,
                 }}}
             }}}},
@@ -78,7 +78,7 @@ class FakeMLBClient:
 
     def get_person(self, mlb_id):
         self.person_calls.append(mlb_id)
-        return PlayerSourceRecord(mlb_id=mlb_id, full_name="Eli Waldschmidt")
+        return PlayerSourceRecord(mlb_id=mlb_id, full_name="Ryan Waldschmidt")
 
 
 @pytest.fixture
@@ -98,11 +98,11 @@ def test_descubre_walk_off_sin_raw_y_crea_contexto(db):
 
     assert db.query(RawPitchEvent).count() == 0
     assert (result.selected, result.confirmed, result.created, result.failed) == (1, 1, 1, 0)
-    assert context.player.mlb_id == 805811
+    assert context.player.mlb_id == 814439
     assert context.facts["detector"]["discovery_source"] == "MLB_STATS_API_SCHEDULE"
     assert context.facts["game"]["terminal_at_bat_index"] == 70
     assert context.facts["batting"]["walk_off"] is True
-    assert client.person_calls == [805811]
+    assert client.person_calls == [814439]
     assert db.query(CardEdition).count() == 1
     assert db.query(MomentEvaluation).count() == 0
     assert db.query(CardRatingProfile).count() == 0
@@ -115,7 +115,7 @@ def test_rerun_es_idempotente_y_reutiliza_player(db):
     assert first.created == 1
     assert second.unchanged == 1
     assert first.moment_context_ids == second.moment_context_ids
-    assert client.person_calls == [805811]
+    assert client.person_calls == [814439]
     assert db.query(Player).count() == 1
     assert db.query(MomentContext).count() == 1
 
@@ -159,3 +159,31 @@ def test_error_de_un_feed_no_aborta_otro_juego(db):
     client.get_game_feed = get_game_feed
     result = detect_walk_off_home_runs(db, client, date_from=GAME_DATE, date_to=GAME_DATE)
     assert (result.selected, result.confirmed, result.created, result.failed) == (2, 1, 1, 1)
+
+
+def test_dos_exitos_sobreviven_al_fallo_del_ultimo_juego(db):
+    schedule = _schedule()
+    schedule["dates"][0]["games"] = [
+        {
+            "gamePk": game_pk,
+            "season": "2026",
+            "status": {"abstractGameState": "Final"},
+        }
+        for game_pk in (825040, 825041, 825042)
+    ]
+    client = FakeMLBClient(schedule=schedule)
+    original = client.get_game_feed
+
+    def get_game_feed(game_pk):
+        if game_pk == 825042:
+            raise RuntimeError("last feed unavailable")
+        return original(game_pk)
+
+    client.get_game_feed = get_game_feed
+    result = detect_walk_off_home_runs(
+        db, client, date_from=GAME_DATE, date_to=GAME_DATE
+    )
+
+    assert (result.confirmed, result.created, result.failed) == (2, 2, 1)
+    assert db.query(MomentContext).count() == 2
+    assert db.query(CardEdition).count() == 2
