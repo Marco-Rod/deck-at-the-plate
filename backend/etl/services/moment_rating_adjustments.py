@@ -1,0 +1,210 @@
+"""Convierte MomentEvaluation en boosts auditables sin persistir ni mutar ratings."""
+
+import hashlib
+import json
+from dataclasses import asdict, dataclass
+from decimal import Decimal
+
+from app.models import MomentEvaluation, MomentType, PlayerRatings
+from etl.services.rating_math import round_rating
+
+
+MOMENT_RATING_ADJUSTMENT_VERSION = "moment-rating-adjustment-1.0"
+BATTER_FIELDS = (
+    "contact_rating",
+    "power_rating",
+    "vision_rating",
+    "clutch_rating",
+)
+
+
+@dataclass(frozen=True)
+class WalkOffHrAdjustmentRules:
+    policy_version: str = MOMENT_RATING_ADJUSTMENT_VERSION
+    contact_base: Decimal = Decimal("2")
+    contact_performance_weight: Decimal = Decimal("3")
+    contact_significance_weight: Decimal = Decimal("2")
+    power_base: Decimal = Decimal("4")
+    power_performance_weight: Decimal = Decimal("5")
+    power_uncommonness_weight: Decimal = Decimal("4")
+    power_significance_weight: Decimal = Decimal("1")
+    vision_significance_weight: Decimal = Decimal("3")
+    clutch_base: Decimal = Decimal("5")
+    clutch_leverage_weight: Decimal = Decimal("7")
+    clutch_significance_weight: Decimal = Decimal("4")
+
+
+WALK_OFF_HR_ADJUSTMENT_RULES = WalkOffHrAdjustmentRules()
+
+
+@dataclass(frozen=True)
+class MomentRatingAdjustments:
+    contact: int
+    power: int
+    vision: int
+    clutch: int
+    requested_adjustments: dict[str, int]
+    applied_adjustments: dict[str, int]
+    transformed_ratings: dict[str, int]
+    capped_attributes: tuple[str, ...]
+    policy_version: str
+    reason: str
+    source_moment_evaluation_id: str
+    source_moment_evaluation_hash: str
+    source_player_ratings_id: str
+    source_player_ratings_hash: str
+    input_hash: str
+
+    def as_card_policy_adjustments(self) -> dict[str, int]:
+        """Formato que consume MomentPolicy en la siguiente capa."""
+        return dict(self.applied_adjustments)
+
+
+def _decimal(value) -> Decimal:
+    return value if isinstance(value, Decimal) else Decimal(str(value))
+
+
+def _validate_score(name: str, value) -> Decimal:
+    score = _decimal(value)
+    if score < 0 or score > 1:
+        raise ValueError(f"{name} fuera de rango 0..1")
+    return score
+
+
+def _requested_adjustments(
+    evaluation: MomentEvaluation, rules: WalkOffHrAdjustmentRules
+) -> dict[str, int]:
+    significance = _validate_score(
+        "significance_score", evaluation.significance_score
+    )
+    performance = _validate_score("performance_score", evaluation.performance_score)
+    leverage = _validate_score("leverage_score", evaluation.leverage_score)
+    uncommonness = _validate_score(
+        "statistical_uncommonness", evaluation.statistical_uncommonness
+    )
+    return {
+        "contact_rating": round_rating(
+            rules.contact_base
+            + performance * rules.contact_performance_weight
+            + significance * rules.contact_significance_weight
+        ),
+        "power_rating": round_rating(
+            rules.power_base
+            + performance * rules.power_performance_weight
+            + uncommonness * rules.power_uncommonness_weight
+            + significance * rules.power_significance_weight
+        ),
+        "vision_rating": round_rating(
+            significance * rules.vision_significance_weight
+        ),
+        "clutch_rating": round_rating(
+            rules.clutch_base
+            + leverage * rules.clutch_leverage_weight
+            + significance * rules.clutch_significance_weight
+        ),
+    }
+
+
+def _rules_payload(rules: WalkOffHrAdjustmentRules) -> dict[str, str]:
+    return {key: str(value) for key, value in asdict(rules).items()}
+
+
+def _validate_rules(rules: WalkOffHrAdjustmentRules) -> None:
+    if not rules.policy_version or not rules.policy_version.strip():
+        raise ValueError("policy_version es obligatorio")
+    coefficients = (
+        value
+        for key, value in asdict(rules).items()
+        if key != "policy_version"
+    )
+    if any(value < 0 for value in coefficients):
+        raise ValueError("los coeficientes de ajustes deben ser no negativos")
+
+
+def _input_hash(payload: dict) -> str:
+    encoded = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def calculate_moment_rating_adjustments(
+    evaluation: MomentEvaluation,
+    player_ratings: PlayerRatings,
+    *,
+    rules: WalkOffHrAdjustmentRules = WALK_OFF_HR_ADJUSTMENT_RULES,
+) -> MomentRatingAdjustments:
+    """Calcula deltas capped para BATTER; no escribe ni modifica los modelos."""
+    _validate_rules(rules)
+    if evaluation.moment_type != MomentType.WALK_OFF_HR:
+        raise ValueError(f"moment_type no soportado: {evaluation.moment_type}")
+    if player_ratings.role != "BATTER":
+        raise ValueError("WALK_OFF_HR solo soporta PlayerRatings BATTER")
+    context = evaluation.moment_context
+    if context is None:
+        raise ValueError("MomentEvaluation no tiene MomentContext")
+    if context.player_id != player_ratings.player_id or context.role != player_ratings.role:
+        raise ValueError("MomentEvaluation y PlayerRatings no pertenecen al mismo jugador/rol")
+    base_ratings = {field: getattr(player_ratings, field) for field in BATTER_FIELDS}
+    if any(
+        value is None or isinstance(value, bool) or not isinstance(value, int)
+        for value in base_ratings.values()
+    ):
+        raise ValueError("PlayerRatings BATTER está incompleto")
+    requested = _requested_adjustments(evaluation, rules)
+    transformed = {}
+    applied = {}
+    capped = []
+    for field in BATTER_FIELDS:
+        base = base_ratings[field]
+        final = min(99, base + requested[field])
+        transformed[field] = final
+        applied[field] = final - base
+        if applied[field] != requested[field]:
+            capped.append(field)
+
+    rules_payload = _rules_payload(rules)
+    payload = {
+        "policy_version": rules.policy_version,
+        "reason": MomentType.WALK_OFF_HR.value,
+        "source_moment_evaluation": {
+            "id": evaluation.id,
+            "input_hash": evaluation.input_hash,
+            "evaluation_version": evaluation.evaluation_version,
+            "scores": {
+                "significance": str(evaluation.significance_score),
+                "performance": str(evaluation.performance_score),
+                "leverage": str(evaluation.leverage_score),
+                "statistical_uncommonness": str(
+                    evaluation.statistical_uncommonness
+                ),
+            },
+        },
+        "source_player_ratings": {
+            "id": player_ratings.id,
+            "input_hash": player_ratings.input_hash,
+            "base_ratings": base_ratings,
+        },
+        "rules": rules_payload,
+        "requested_adjustments": requested,
+        "applied_adjustments": applied,
+        "transformed_ratings": transformed,
+        "capped_attributes": capped,
+    }
+    return MomentRatingAdjustments(
+        contact=applied["contact_rating"],
+        power=applied["power_rating"],
+        vision=applied["vision_rating"],
+        clutch=applied["clutch_rating"],
+        requested_adjustments=requested,
+        applied_adjustments=applied,
+        transformed_ratings=transformed,
+        capped_attributes=tuple(capped),
+        policy_version=rules.policy_version,
+        reason=MomentType.WALK_OFF_HR.value,
+        source_moment_evaluation_id=evaluation.id,
+        source_moment_evaluation_hash=evaluation.input_hash,
+        source_player_ratings_id=player_ratings.id,
+        source_player_ratings_hash=player_ratings.input_hash,
+        input_hash=_input_hash(payload),
+    )
