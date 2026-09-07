@@ -94,3 +94,4 @@ class MomentContext(Base):
 
     player = relationship("Player")
     card_edition = relationship("CardEdition", back_populates="moment_contexts")
+    evaluations = relationship("MomentEvaluation", back_populates="moment_context")
