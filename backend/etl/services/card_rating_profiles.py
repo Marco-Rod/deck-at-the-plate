@@ -4,7 +4,9 @@ import hashlib
 import json
 from dataclasses import dataclass
 from datetime import date, datetime
+from decimal import Decimal
 from enum import Enum
+from typing import Mapping
 
 from sqlalchemy.orm import Session
 
@@ -28,7 +30,9 @@ def _canonical(value):
         return value.value
     if isinstance(value, (date, datetime)):
         return value.isoformat()
-    if isinstance(value, dict):
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, Mapping):
         return {
             str(key): _canonical(item)
             for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))
@@ -56,6 +60,7 @@ def _provenance(
     ratings: PlayerRatings,
     edition: CardEdition,
     policy: CardRatingPolicyResult,
+    calculation_metadata: Mapping | None,
 ) -> dict:
     return {
         "rating_policy_version": policy.policy_version,
@@ -64,6 +69,7 @@ def _provenance(
         "base_ratings": policy.base_ratings,
         "transformed_ratings": policy.transformed_ratings,
         "adjustments": policy.adjustments,
+        "calculation_metadata": _canonical(calculation_metadata or {}),
         "source_player_ratings": {
             "id": ratings.id,
             "input_hash": ratings.input_hash,
@@ -103,6 +109,7 @@ def generate_card_rating_profile(
     card_edition_id: str,
     policy_adjustments: dict[str, int] | None = None,
     policy_reason: str | None = None,
+    calculation_metadata: Mapping | None = None,
 ) -> CardRatingProfileResult:
     """Crea o actualiza la proyección de ratings para una edición específica."""
     ratings = db.get(PlayerRatings, source_player_ratings_id)
@@ -121,7 +128,7 @@ def generate_card_rating_profile(
         reason=policy_reason,
     )
     values = policy.transformed_ratings
-    provenance = _provenance(ratings, edition, policy)
+    provenance = _provenance(ratings, edition, policy, calculation_metadata)
     input_hash = _input_hash(provenance, values)
     identity = {
         "player_id": ratings.player_id,
