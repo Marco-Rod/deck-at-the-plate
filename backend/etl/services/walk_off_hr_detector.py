@@ -1,4 +1,4 @@
-"""Detecta WALK_OFF_HR solo cuando Statcast y el feed MLB lo demuestran."""
+"""Descubre WALK_OFF_HR desde MLB Schedule/Game Feed y crea MomentContext."""
 
 import logging
 from dataclasses import dataclass
@@ -6,32 +6,30 @@ from datetime import date, datetime, timezone
 
 from sqlalchemy.orm import Session
 
-from app.models import (
-    CardEdition,
-    CardEditionSourceType,
-    CardEditionType,
-    MomentContextSourceType,
-    Player,
-    RawPitchEvent,
-)
+from app.models import CardEdition, CardEditionSourceType, CardEditionType, MomentContextSourceType, Player
+from etl.loaders.core import upsert_player
 from etl.services.moment_contexts import persist_moment_context
 from etl.sources.mlb import MLBStatsApiClient
 
-
 logger = logging.getLogger("etl.services.walk_off_hr_detector")
-WALK_OFF_HR_DETECTOR_VERSION = "walk-off-hr-detector-1.0"
+WALK_OFF_HR_DETECTOR_VERSION = "walk-off-hr-detector-1.1"
 CARD_EDITION_VERSION = "edition-1.0"
 
 
 @dataclass(frozen=True)
-class WalkOffHrCandidate:
+class ScheduledGame:
     game_pk: int
     game_date: date
     season: int
+
+
+@dataclass(frozen=True)
+class ConfirmedWalkOffHr:
+    game: ScheduledGame
     at_bat_number: int
     batter_mlb_id: int
-    raw_pitch_event_id: str
-    raw_payload_hash: str | None
+    facts: dict
+    occurred_at: datetime
 
 
 @dataclass(frozen=True)
@@ -60,6 +58,12 @@ def _integer(value):
     return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
+def _integer_string(value):
+    if isinstance(value, str) and value.isdigit():
+        return int(value)
+    return _integer(value)
+
+
 def _parse_datetime(value: str | None) -> datetime | None:
     if not value:
         return None
@@ -74,18 +78,29 @@ def _score(result: dict, side: str) -> int | None:
     return _integer(result.get(f"{side}Score"))
 
 
+def _final_games(schedule: dict) -> list[ScheduledGame]:
+    games = []
+    for day in schedule.get("dates", []):
+        try:
+            game_date = date.fromisoformat(day.get("date"))
+        except (TypeError, ValueError):
+            continue
+        for item in day.get("games", []):
+            game_pk = _integer(item.get("gamePk"))
+            season = _integer_string(item.get("season"))
+            if (
+                item.get("status", {}).get("abstractGameState") == "Final"
+                and game_pk is not None
+                and season is not None
+            ):
+                games.append(ScheduledGame(game_pk, game_date, season))
+    return sorted(games, key=lambda game: (game.game_date, game.game_pk))
+
+
 def _batter_boxscore(feed: dict, batter_mlb_id: int) -> dict | None:
-    players = (
-        feed.get("liveData", {})
-        .get("boxscore", {})
-        .get("teams", {})
-        .get("home", {})
-        .get("players", {})
-    )
+    players = feed.get("liveData", {}).get("boxscore", {}).get("teams", {}).get("home", {}).get("players", {})
     record = players.get(f"ID{batter_mlb_id}")
-    if not isinstance(record, dict):
-        return None
-    batting = record.get("stats", {}).get("batting")
+    batting = record.get("stats", {}).get("batting") if isinstance(record, dict) else None
     if not isinstance(batting, dict):
         return None
     required = ("plateAppearances", "atBats", "hits", "homeRuns", "rbi")
@@ -95,78 +110,56 @@ def _batter_boxscore(feed: dict, batter_mlb_id: int) -> dict | None:
     return normalized
 
 
-def _confirm_candidate(
-    candidate: WalkOffHrCandidate, feed: dict
-) -> tuple[dict, datetime] | None:
+def _confirm_game(game: ScheduledGame, feed: dict) -> ConfirmedWalkOffHr | None:
     status = feed.get("gameData", {}).get("status", {})
-    if status.get("abstractGameState") != "Final":
-        return None
     plays = feed.get("liveData", {}).get("plays", {}).get("allPlays", [])
-    if not isinstance(plays, list) or not plays:
+    if status.get("abstractGameState") != "Final" or not isinstance(plays, list) or not plays:
         return None
-    matching_index = len(plays) - 1
-    play = plays[matching_index]
-    feed_at_bat_index = _integer(play.get("about", {}).get("atBatIndex"))
-    # Statcast usa `at_bat_number`; algunos feeds históricos exponen el índice
-    # equivalente en base cero. Solo se toleran esas dos representaciones.
-    if (
-        feed_at_bat_index is None
-        or candidate.at_bat_number not in {feed_at_bat_index, feed_at_bat_index + 1}
-        or _integer(play.get("matchup", {}).get("batter", {}).get("id"))
-        != candidate.batter_mlb_id
-    ):
-        return None
+    play = plays[-1]
     about = play.get("about", {})
     result = play.get("result", {})
+    batter_mlb_id = _integer(play.get("matchup", {}).get("batter", {}).get("id"))
+    at_bat_number = _integer(about.get("atBatIndex"))
+    inning = _integer(about.get("inning"))
+    occurred_at = _parse_datetime(about.get("endTime"))
     if (
-        about.get("isComplete") is not True
+        batter_mlb_id is None or at_bat_number is None or inning is None or occurred_at is None
+        or about.get("isComplete") is not True
         or str(about.get("halfInning", "")).lower() != "bottom"
         or result.get("eventType") != "home_run"
     ):
         return None
-    occurred_at = _parse_datetime(about.get("endTime"))
-    inning = _integer(about.get("inning"))
-    if occurred_at is None or inning is None:
-        return None
-
-    post_home = _score(result, "home")
-    post_away = _score(result, "away")
+    post_home, post_away = _score(result, "home"), _score(result, "away")
     if post_home is None or post_away is None or post_home <= post_away:
         return None
-    if matching_index == 0:
+    if len(plays) == 1:
         pre_home = pre_away = 0
     else:
-        previous_result = plays[matching_index - 1].get("result", {})
-        pre_home = _score(previous_result, "home")
-        pre_away = _score(previous_result, "away")
+        previous = plays[-2].get("result", {})
+        pre_home, pre_away = _score(previous, "home"), _score(previous, "away")
     if pre_home is None or pre_away is None or pre_home > pre_away:
         return None
-
     linescore = feed.get("liveData", {}).get("linescore", {}).get("teams", {})
     final_home = _integer(linescore.get("home", {}).get("runs"))
     final_away = _integer(linescore.get("away", {}).get("runs"))
     if (final_home, final_away) != (post_home, post_away):
         return None
-    batting = _batter_boxscore(feed, candidate.batter_mlb_id)
+    batting = _batter_boxscore(feed, batter_mlb_id)
     if batting is None or batting["homeRuns"] < 1:
         return None
-
     facts = {
         "detector": {
             "version": WALK_OFF_HR_DETECTOR_VERSION,
+            "discovery_source": "MLB_STATS_API_SCHEDULE",
             "confirmation_source": "MLB_STATS_API_GAME_FEED",
         },
-        "statcast_candidate": {
-            "raw_pitch_event_id": candidate.raw_pitch_event_id,
-            "game_pk": candidate.game_pk,
-            "game_date": candidate.game_date.isoformat(),
-            "at_bat_number": candidate.at_bat_number,
-            "batter_mlb_id": candidate.batter_mlb_id,
-            "event": "home_run",
-            "raw_payload_hash": candidate.raw_payload_hash,
+        "schedule_candidate": {
+            "game_pk": game.game_pk,
+            "game_date": game.game_date.isoformat(),
+            "season": game.season,
         },
         "game": {
-            "game_pk": candidate.game_pk,
+            "game_pk": game.game_pk,
             "final_state": status.get("detailedState") or "Final",
             "inning": inning,
             "half_inning": "Bottom",
@@ -176,7 +169,8 @@ def _confirm_candidate(
             "post_away_score": post_away,
             "final_home_score": final_home,
             "final_away_score": final_away,
-            "terminal_at_bat_index": candidate.at_bat_number,
+            "terminal_at_bat_index": at_bat_number,
+            "batter_mlb_id": batter_mlb_id,
         },
         "batting": {
             "plate_appearances": batting["plateAppearances"],
@@ -187,28 +181,28 @@ def _confirm_candidate(
             "walk_off": True,
         },
     }
-    return facts, occurred_at
+    return ConfirmedWalkOffHr(game, at_bat_number, batter_mlb_id, facts, occurred_at)
 
 
-def _ensure_moment_edition(
-    db: Session,
-    *,
-    season: int,
-    candidate: WalkOffHrCandidate,
-    occurred_at: datetime,
-) -> CardEdition:
+def _ensure_player(db: Session, client: MLBStatsApiClient, mlb_id: int) -> Player:
+    player = db.query(Player).filter_by(mlb_id=mlb_id).one_or_none()
+    if player is not None:
+        return player
+    record = client.get_person(mlb_id)
+    if record is None:
+        raise ValueError(f"MLB no devolvió metadata para batter={mlb_id}")
+    return upsert_player(db, record)
+
+
+def _ensure_moment_edition(db: Session, confirmation: ConfirmedWalkOffHr) -> CardEdition:
+    game = confirmation.game
     identity = {
-        "season": season,
-        "code": (
-            f"{season}_WALK_OFF_HR_{candidate.game_pk}_"
-            f"{candidate.batter_mlb_id}_{candidate.at_bat_number}"
-        ),
+        "season": game.season,
+        "code": f"{game.season}_WALK_OFF_HR_{game.game_pk}_{confirmation.batter_mlb_id}_{confirmation.at_bat_number}",
         "version": CARD_EDITION_VERSION,
     }
     edition = db.query(CardEdition).filter_by(**identity).one_or_none()
-    source_reference = (
-        f"mlb-game:{candidate.game_pk}:at-bat:{candidate.at_bat_number}"
-    )
+    source_reference = f"mlb-game:{game.game_pk}:at-bat:{confirmation.at_bat_number}"
     if edition is None:
         edition = CardEdition(
             **identity,
@@ -217,13 +211,13 @@ def _ensure_moment_edition(
             is_active=False,
             source_type=CardEditionSourceType.GAME,
             source_reference=source_reference,
-            starts_at=occurred_at,
-            ends_at=occurred_at,
+            starts_at=confirmation.occurred_at,
+            ends_at=confirmation.occurred_at,
             metadata_payload={
                 "detector_version": WALK_OFF_HR_DETECTOR_VERSION,
-                "game_pk": candidate.game_pk,
-                "at_bat_number": candidate.at_bat_number,
-                "batter_mlb_id": candidate.batter_mlb_id,
+                "game_pk": game.game_pk,
+                "at_bat_number": confirmation.at_bat_number,
+                "batter_mlb_id": confirmation.batter_mlb_id,
             },
         )
         db.add(edition)
@@ -237,98 +231,31 @@ def _ensure_moment_edition(
     return edition
 
 
-def detect_walk_off_home_runs(
-    db: Session,
-    client: MLBStatsApiClient,
-    *,
-    date_from: date,
-    date_to: date,
-) -> WalkOffHrDetectionResult:
-    """Confirma candidatos Statcast con MLB game feed y crea MomentContext."""
+def detect_walk_off_home_runs(db: Session, client: MLBStatsApiClient, *, date_from: date, date_to: date) -> WalkOffHrDetectionResult:
+    """Descubre juegos finalizados y persiste sus WALK_OFF_HR confirmados."""
     if date_to < date_from:
         raise ValueError("date_to debe ser mayor o igual a date_from")
-    rows = (
-        db.query(RawPitchEvent)
-        .filter(
-            RawPitchEvent.game_date >= date_from,
-            RawPitchEvent.game_date <= date_to,
-            RawPitchEvent.event == "home_run",
-        )
-        .order_by(
-            RawPitchEvent.game_pk,
-            RawPitchEvent.at_bat_number,
-            RawPitchEvent.pitch_number,
-        )
-        .all()
-    )
-    candidates_by_key = {}
-    for row in rows:
-        key = (int(row.game_pk), row.at_bat_number, row.batter_mlb_id)
-        candidates_by_key[key] = WalkOffHrCandidate(
-            game_pk=int(row.game_pk),
-            game_date=row.game_date,
-            season=row.season,
-            at_bat_number=row.at_bat_number,
-            batter_mlb_id=row.batter_mlb_id,
-            raw_pitch_event_id=row.id,
-            raw_payload_hash=row.raw_payload_hash,
-        )
-    candidates = list(candidates_by_key.values())
-    feeds = {}
-    counts = {
-        "confirmed": 0,
-        "created": 0,
-        "updated": 0,
-        "unchanged": 0,
-        "unconfirmed": 0,
-        "failed": 0,
-    }
-    context_ids = []
-    failures = []
-    for candidate in candidates:
+    games = _final_games(client.get_schedule(date_from, date_to))
+    counts = {key: 0 for key in ("confirmed", "created", "updated", "unchanged", "unconfirmed", "failed")}
+    context_ids, failures = [], []
+    for game in games:
+        confirmation = None
         try:
-            if candidate.game_pk not in feeds:
-                feeds[candidate.game_pk] = client.get_game_feed(candidate.game_pk)
-            confirmation = _confirm_candidate(candidate, feeds[candidate.game_pk])
+            confirmation = _confirm_game(game, client.get_game_feed(game.game_pk))
             if confirmation is None:
                 counts["unconfirmed"] += 1
-                failures.append(
-                    WalkOffHrDetectionFailure(
-                        candidate.game_pk,
-                        candidate.at_bat_number,
-                        candidate.batter_mlb_id,
-                        "MLB_GAME_FEED_NO_CONFIRMA_WALK_OFF_HR",
-                        "UNCONFIRMED",
-                    )
-                )
                 continue
-            player = (
-                db.query(Player)
-                .filter_by(mlb_id=candidate.batter_mlb_id)
-                .one_or_none()
-            )
-            if player is None:
-                raise ValueError(
-                    f"Player inexistente para mlb_id={candidate.batter_mlb_id}"
-                )
-            facts, occurred_at = confirmation
-            edition = _ensure_moment_edition(
-                db,
-                season=candidate.season,
-                candidate=candidate,
-                occurred_at=occurred_at,
-            )
+            player = _ensure_player(db, client, confirmation.batter_mlb_id)
+            edition = _ensure_moment_edition(db, confirmation)
             persisted = persist_moment_context(
                 db,
                 player_id=player.id,
                 card_edition_id=edition.id,
                 role="BATTER",
-                occurred_at=occurred_at,
+                occurred_at=confirmation.occurred_at,
                 source_type=MomentContextSourceType.MLB_STATS_API,
-                source_reference=(
-                    f"mlb-stats-api:game/{candidate.game_pk}/feed/live"
-                ),
-                facts=facts,
+                source_reference=f"mlb-stats-api:game/{game.game_pk}/feed/live",
+                facts=confirmation.facts,
             )
             counts["confirmed"] += 1
             counts[persisted.status.lower()] += 1
@@ -338,26 +265,16 @@ def detect_walk_off_home_runs(
             counts["failed"] += 1
             failures.append(
                 WalkOffHrDetectionFailure(
-                    candidate.game_pk,
-                    candidate.at_bat_number,
-                    candidate.batter_mlb_id,
+                    game.game_pk,
+                    confirmation.at_bat_number if confirmation else -1,
+                    confirmation.batter_mlb_id if confirmation else -1,
                     str(exc),
                 )
             )
-            logger.exception(
-                "walk-off detector failed game_pk=%s at_bat=%s batter=%s",
-                candidate.game_pk,
-                candidate.at_bat_number,
-                candidate.batter_mlb_id,
-            )
+            logger.exception("walk-off detector failed game_pk=%s", game.game_pk)
     return WalkOffHrDetectionResult(
-        selected=len(candidates),
-        confirmed=counts["confirmed"],
-        created=counts["created"],
-        updated=counts["updated"],
-        unchanged=counts["unchanged"],
-        unconfirmed=counts["unconfirmed"],
-        failed=counts["failed"],
-        moment_context_ids=tuple(context_ids),
-        failures=tuple(failures),
+        selected=len(games), confirmed=counts["confirmed"], created=counts["created"],
+        updated=counts["updated"], unchanged=counts["unchanged"],
+        unconfirmed=counts["unconfirmed"], failed=counts["failed"],
+        moment_context_ids=tuple(context_ids), failures=tuple(failures),
     )

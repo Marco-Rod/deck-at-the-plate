@@ -1,4 +1,4 @@
-"""Detector WALK_OFF_HR exige confirmación terminal del feed oficial MLB."""
+"""Discovery de WALK_OFF_HR desde MLB Schedule/Game Feed."""
 
 import copy
 import datetime as dt
@@ -7,103 +7,78 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.core.enums import ImportStatus
 from app.database import Base
-from app.models import (
-    CardEdition,
-    CardRatingProfile,
-    DataImportRun,
-    MomentContext,
-    MomentEvaluation,
-    Player,
-    RawPitchEvent,
-)
+from app.models import CardEdition, CardRatingProfile, MomentContext, MomentEvaluation, Player, RawPitchEvent
+from etl.dto import PlayerSourceRecord
 from etl.services.walk_off_hr_detector import detect_walk_off_home_runs
 
 
-GAME_DATE = dt.date(2026, 9, 5)
+GAME_DATE = dt.date(2026, 9, 2)
+
+
+def _schedule(*, final=True):
+    return {
+        "dates": [{
+            "date": GAME_DATE.isoformat(),
+            "games": [{
+                "gamePk": 825042,
+                "season": "2026",
+                "status": {"abstractGameState": "Final" if final else "Live"},
+            }],
+        }]
+    }
 
 
 def _feed():
     return {
-        "gameData": {
-            "status": {
-                "abstractGameState": "Final",
-                "detailedState": "Final",
-            }
-        },
+        "gameData": {"status": {"abstractGameState": "Final", "detailedState": "Final"}},
         "liveData": {
-            "plays": {
-                "allPlays": [
-                    {
-                        "about": {
-                            "atBatIndex": 40,
-                            "inning": 9,
-                            "halfInning": "bottom",
-                            "isComplete": True,
-                            "endTime": "2026-09-06T01:30:00Z",
-                        },
-                        "matchup": {"batter": {"id": 111111}},
-                        "result": {
-                            "eventType": "single",
-                            "homeScore": 3,
-                            "awayScore": 4,
-                        },
+            "plays": {"allPlays": [
+                {
+                    "about": {"atBatIndex": 69, "isComplete": True},
+                    "result": {"eventType": "single", "homeScore": 3, "awayScore": 4},
+                },
+                {
+                    "about": {
+                        "atBatIndex": 70,
+                        "inning": 9,
+                        "halfInning": "bottom",
+                        "isComplete": True,
+                        "endTime": "2026-09-03T02:15:00Z",
                     },
-                    {
-                        "about": {
-                            "atBatIndex": 41,
-                            "inning": 9,
-                            "halfInning": "bottom",
-                            "isComplete": True,
-                            "endTime": "2026-09-06T01:35:12Z",
-                        },
-                        "matchup": {"batter": {"id": 660271}},
-                        "result": {
-                            "event": "Home Run",
-                            "eventType": "home_run",
-                            "description": "Two-run walk-off home run",
-                            "homeScore": 5,
-                            "awayScore": 4,
-                        },
-                    },
-                ]
-            },
-            "linescore": {
-                "teams": {"home": {"runs": 5}, "away": {"runs": 4}}
-            },
-            "boxscore": {
-                "teams": {
-                    "home": {
-                        "players": {
-                            "ID660271": {
-                                "person": {"id": 660271},
-                                "stats": {
-                                    "batting": {
-                                        "plateAppearances": 5,
-                                        "atBats": 5,
-                                        "hits": 4,
-                                        "homeRuns": 2,
-                                        "rbi": 5,
-                                    }
-                                },
-                            }
-                        }
-                    }
-                }
-            },
+                    "matchup": {"batter": {"id": 805811}},
+                    "result": {"eventType": "home_run", "homeScore": 5, "awayScore": 4},
+                },
+            ]},
+            "linescore": {"teams": {"home": {"runs": 5}, "away": {"runs": 4}}},
+            "boxscore": {"teams": {"home": {"players": {
+                "ID805811": {"stats": {"batting": {
+                    "plateAppearances": 5, "atBats": 4, "hits": 2, "homeRuns": 1, "rbi": 2,
+                }}}
+            }}}},
         },
     }
 
 
 class FakeMLBClient:
-    def __init__(self, feeds):
-        self.feeds = feeds
-        self.calls = []
+    def __init__(self, schedule=None, feed=None):
+        self.schedule = schedule or _schedule()
+        self.feed = feed or _feed()
+        self.schedule_calls = []
+        self.feed_calls = []
+        self.person_calls = []
+
+    def get_schedule(self, date_from, date_to):
+        self.schedule_calls.append((date_from, date_to))
+        return copy.deepcopy(self.schedule)
 
     def get_game_feed(self, game_pk):
-        self.calls.append(game_pk)
-        return copy.deepcopy(self.feeds[game_pk])
+        self.feed_calls.append(game_pk)
+        return copy.deepcopy(self.feed)
+
+    def get_person(self, mlb_id):
+        self.person_calls.append(mlb_id)
+        return PlayerSourceRecord(mlb_id=mlb_id, full_name="Eli Waldschmidt")
 
 
 @pytest.fixture
@@ -116,162 +91,71 @@ def db():
     engine.dispose()
 
 
-def _seed_candidate(db, *, at_bat=41, batter_mlb_id=660271):
-    run = db.query(DataImportRun).first()
-    if run is None:
-        run = DataImportRun(
-            source="STATCAST",
-            pipeline_version="1.0.0",
-            season=2026,
-            date_from=GAME_DATE,
-            date_to=GAME_DATE,
-            status=ImportStatus.SUCCESS,
-        )
-        db.add(run)
-        db.flush()
-    if db.query(Player).filter_by(mlb_id=batter_mlb_id).one_or_none() is None:
-        db.add(Player(mlb_id=batter_mlb_id, full_name=f"Player {batter_mlb_id}"))
-        db.flush()
-    row = RawPitchEvent(
-        import_run_id=run.id,
-        game_pk=824230,
-        game_date=GAME_DATE,
-        season=2026,
-        at_bat_number=at_bat,
-        pitch_number=4,
-        batter_mlb_id=batter_mlb_id,
-        pitcher_mlb_id=999999,
-        inning=9,
-        inning_topbot="Bottom",
-        event="home_run",
-        description="hit_into_play",
-        home_team="LAD",
-        away_team="PHI",
-        raw_payload_hash=(str(at_bat)[-1] * 64),
-    )
-    db.add(row)
-    db.commit()
-    return row
-
-
-def test_confirma_walk_off_y_crea_solo_edition_y_context(db):
-    raw = _seed_candidate(db)
-    client = FakeMLBClient({824230: _feed()})
-
-    result = detect_walk_off_home_runs(
-        db, client, date_from=GAME_DATE, date_to=GAME_DATE
-    )
+def test_descubre_walk_off_sin_raw_y_crea_contexto(db):
+    client = FakeMLBClient()
+    result = detect_walk_off_home_runs(db, client, date_from=GAME_DATE, date_to=GAME_DATE)
     context = db.get(MomentContext, result.moment_context_ids[0])
-    edition = db.get(CardEdition, context.card_edition_id)
 
-    assert (result.selected, result.confirmed, result.created) == (1, 1, 1)
-    assert (result.unconfirmed, result.failed) == (0, 0)
-    assert context.player.mlb_id == 660271
-    assert context.facts["batting"] == {
-        "plate_appearances": 5,
-        "at_bats": 5,
-        "hits": 4,
-        "home_runs": 2,
-        "runs_batted_in": 5,
-        "walk_off": True,
-    }
-    assert context.facts["game"]["pre_home_score"] == 3
-    assert context.facts["game"]["pre_away_score"] == 4
-    assert context.facts["game"]["final_home_score"] == 5
-    assert context.facts["statcast_candidate"]["raw_pitch_event_id"] == raw.id
-    assert edition.code == "2026_WALK_OFF_HR_824230_660271_41"
-    assert edition.is_active is False
+    assert db.query(RawPitchEvent).count() == 0
+    assert (result.selected, result.confirmed, result.created, result.failed) == (1, 1, 1, 0)
+    assert context.player.mlb_id == 805811
+    assert context.facts["detector"]["discovery_source"] == "MLB_STATS_API_SCHEDULE"
+    assert context.facts["game"]["terminal_at_bat_index"] == 70
+    assert context.facts["batting"]["walk_off"] is True
+    assert client.person_calls == [805811]
+    assert db.query(CardEdition).count() == 1
     assert db.query(MomentEvaluation).count() == 0
     assert db.query(CardRatingProfile).count() == 0
 
 
-def test_repeticion_es_idempotente(db):
-    _seed_candidate(db)
-    client = FakeMLBClient({824230: _feed()})
-    created = detect_walk_off_home_runs(
-        db, client, date_from=GAME_DATE, date_to=GAME_DATE
-    )
-    unchanged = detect_walk_off_home_runs(
-        db, client, date_from=GAME_DATE, date_to=GAME_DATE
-    )
-
-    assert created.created == 1
-    assert unchanged.unchanged == 1
-    assert unchanged.moment_context_ids == created.moment_context_ids
-    assert db.query(CardEdition).count() == 1
+def test_rerun_es_idempotente_y_reutiliza_player(db):
+    client = FakeMLBClient()
+    first = detect_walk_off_home_runs(db, client, date_from=GAME_DATE, date_to=GAME_DATE)
+    second = detect_walk_off_home_runs(db, client, date_from=GAME_DATE, date_to=GAME_DATE)
+    assert first.created == 1
+    assert second.unchanged == 1
+    assert first.moment_context_ids == second.moment_context_ids
+    assert client.person_calls == [805811]
+    assert db.query(Player).count() == 1
     assert db.query(MomentContext).count() == 1
 
 
-def test_acepta_indice_mlb_base_cero_frente_a_at_bat_statcast_base_uno(db):
-    _seed_candidate(db, at_bat=41)
-    feed = _feed()
-    feed["liveData"]["plays"]["allPlays"][0]["about"]["atBatIndex"] = 39
-    feed["liveData"]["plays"]["allPlays"][1]["about"]["atBatIndex"] = 40
-    result = detect_walk_off_home_runs(
-        db,
-        FakeMLBClient({824230: feed}),
-        date_from=GAME_DATE,
-        date_to=GAME_DATE,
-    )
-    assert result.confirmed == 1
+def test_schedule_no_final_no_consulta_feed(db):
+    client = FakeMLBClient(schedule=_schedule(final=False))
+    result = detect_walk_off_home_runs(db, client, date_from=GAME_DATE, date_to=GAME_DATE)
+    assert result.selected == 0
+    assert client.feed_calls == []
 
 
-def test_hr_en_novena_no_basta_si_juego_no_es_final(db):
-    _seed_candidate(db)
+def test_ultimo_play_no_walk_off_queda_unconfirmed(db):
     feed = _feed()
-    feed["gameData"]["status"]["abstractGameState"] = "Live"
-    result = detect_walk_off_home_runs(
-        db,
-        FakeMLBClient({824230: feed}),
-        date_from=GAME_DATE,
-        date_to=GAME_DATE,
-    )
-    assert (result.confirmed, result.unconfirmed, result.failed) == (0, 1, 0)
+    feed["liveData"]["plays"]["allPlays"][-1]["result"]["eventType"] = "field_out"
+    client = FakeMLBClient(feed=feed)
+    result = detect_walk_off_home_runs(db, client, date_from=GAME_DATE, date_to=GAME_DATE)
+    assert (result.selected, result.confirmed, result.unconfirmed, result.failed) == (1, 0, 1, 0)
     assert db.query(MomentContext).count() == 0
 
 
-def test_rechaza_hr_que_no_produce_la_ventaja_ganadora(db):
-    _seed_candidate(db)
+def test_hr_terminal_no_basta_si_home_ya_iba_ganando(db):
     feed = _feed()
-    previous = feed["liveData"]["plays"]["allPlays"][0]["result"]
-    previous.update(homeScore=5, awayScore=4)
-    result = detect_walk_off_home_runs(
-        db,
-        FakeMLBClient({824230: feed}),
-        date_from=GAME_DATE,
-        date_to=GAME_DATE,
-    )
-    assert result.unconfirmed == 1
-    assert db.query(MomentContext).count() == 0
-
-
-def test_rechaza_hr_que_no_es_el_pa_terminal(db):
-    _seed_candidate(db)
-    feed = _feed()
-    feed["liveData"]["plays"]["allPlays"].append(
-        {
-            "about": {"atBatIndex": 42, "isComplete": True},
-            "matchup": {"batter": {"id": 222222}},
-            "result": {"eventType": "field_out", "homeScore": 5, "awayScore": 4},
-        }
-    )
-    result = detect_walk_off_home_runs(
-        db,
-        FakeMLBClient({824230: feed}),
-        date_from=GAME_DATE,
-        date_to=GAME_DATE,
-    )
+    feed["liveData"]["plays"]["allPlays"][-2]["result"].update(homeScore=5, awayScore=4)
+    result = detect_walk_off_home_runs(db, FakeMLBClient(feed=feed), date_from=GAME_DATE, date_to=GAME_DATE)
     assert result.unconfirmed == 1
 
 
-def test_un_feed_se_consulta_una_vez_para_varios_candidatos_del_juego(db):
-    _seed_candidate(db)
-    _seed_candidate(db, at_bat=20, batter_mlb_id=111111)
-    client = FakeMLBClient({824230: _feed()})
-    result = detect_walk_off_home_runs(
-        db, client, date_from=GAME_DATE, date_to=GAME_DATE
-    )
-    assert result.selected == 2
-    assert result.confirmed == 1
-    assert result.unconfirmed == 1
-    assert client.calls == [824230]
+def test_error_de_un_feed_no_aborta_otro_juego(db):
+    schedule = _schedule()
+    schedule["dates"][0]["games"].insert(0, {
+        "gamePk": 825041, "season": 2026, "status": {"abstractGameState": "Final"}
+    })
+    client = FakeMLBClient(schedule=schedule)
+    original = client.get_game_feed
+
+    def get_game_feed(game_pk):
+        if game_pk == 825041:
+            raise RuntimeError("feed unavailable")
+        return original(game_pk)
+
+    client.get_game_feed = get_game_feed
+    result = detect_walk_off_home_runs(db, client, date_from=GAME_DATE, date_to=GAME_DATE)
+    assert (result.selected, result.confirmed, result.created, result.failed) == (2, 1, 1, 1)

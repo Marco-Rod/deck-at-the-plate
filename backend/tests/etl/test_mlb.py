@@ -96,6 +96,34 @@ def _game_feed_client(statuses):
 
 
 class TestMLBStatsApiClient:
+    def test_get_schedule_envia_ventana_y_sport(self):
+        captured = {}
+
+        def handler(request):
+            captured["path"] = request.url.path
+            captured["params"] = dict(request.url.params)
+            return httpx.Response(200, json={"dates": []}, request=request)
+
+        from etl.http.client import ExternalHttpClient
+
+        client = MLBStatsApiClient(
+            http=ExternalHttpClient(
+                transport=httpx.MockTransport(handler), max_retries=0
+            ),
+            base_url="https://mlb.test/api/v1",
+        )
+        assert client.get_schedule(dt.date(2026, 8, 25), dt.date(2026, 9, 2)) == {
+            "dates": []
+        }
+        assert captured == {
+            "path": "/api/v1/schedule",
+            "params": {
+                "sportId": "1",
+                "startDate": "2026-08-25",
+                "endDate": "2026-09-02",
+            },
+        }
+
     def test_get_game_feed_usa_v1_si_responde_200(self):
         payload = {"source": "v1"}
         client, calls = _game_feed_client(
