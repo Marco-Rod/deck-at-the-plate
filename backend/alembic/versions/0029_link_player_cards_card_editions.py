@@ -52,9 +52,9 @@ def upgrade() -> None:
             true,
             'SYSTEM'::cardeditionsourcetype,
             'migration:0029:' || edition_type,
-            NULL,
-            NULL,
-            json_build_object(
+            NULL::timestamptz,
+            NULL::timestamptz,
+            jsonb_build_object(
                 'backfilled', true,
                 'legacy_edition_type', edition_type,
                 'legacy_edition_version', edition_version
