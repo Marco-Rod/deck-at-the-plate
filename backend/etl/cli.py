@@ -52,6 +52,7 @@ from etl.services.batter_power import calculate_batter_power
 from etl.services.batter_vision import calculate_batter_vision
 from etl.services.batter_ratings2 import calculate_batter_ratings2
 from etl.services.batter_ratings2_population import generate_batter_ratings2_population
+from etl.services.player_ratings_as_of import generate_player_ratings_as_of
 from etl.services.walk_off_hr_detector import detect_walk_off_home_runs
 from etl.services.walk_off_hr_pipeline import run_walk_off_hr_pipeline
 from etl.sources.mlb import MLBStatsApiClient
@@ -268,6 +269,22 @@ def _build_parser() -> argparse.ArgumentParser:
         "--distribution-version", dest="distribution_version", default=None
     )
     batter_ratings_population.add_argument("--limit", type=int, default=None)
+
+    ratings_as_of = sub.add_parser(
+        "generate-player-ratings-as-of",
+        help="Genera Analytics, distribuciones y PlayerRatings season-to-date",
+    )
+    ratings_as_of.add_argument("--season", type=int, required=True)
+    ratings_as_of.add_argument(
+        "--role", choices=("batter", "pitcher"), required=True
+    )
+    ratings_as_of.add_argument(
+        "--as-of", dest="as_of_date", type=_parse_date, required=True
+    )
+    ratings_as_of.add_argument(
+        "--distribution-version", dest="distribution_version", default=None
+    )
+    ratings_as_of.add_argument("--limit", type=int, default=None)
 
     profile_ratings2 = sub.add_parser("generate-card-profile-ratings2", help="Adapta PlayerRatings a perfil de carta")
     profile_ratings2.add_argument("--player-ratings-id", dest="player_ratings_id", required=True)
@@ -768,6 +785,31 @@ def main(argv=None) -> int:
             print(
                 f"{result.status} card_generation_profile_id={result.card_generation_profile_id} "
                 f"player_ratings_id={result.player_ratings_id}"
+            )
+
+        elif args.command == "generate-player-ratings-as-of":
+            result = generate_player_ratings_as_of(
+                db,
+                season=args.season,
+                role=args.role,
+                as_of_date=args.as_of_date,
+                distribution_version=args.distribution_version,
+                limit=args.limit,
+            )
+            print(
+                f"role={result.role} season={result.season} "
+                f"from={result.data_start_date} as_of={result.data_end_date} "
+                f"analytics_players={result.analytics.players_processed} "
+                f"distributions_created={result.distributions.created} "
+                f"distributions_updated={result.distributions.updated} "
+                f"distributions_unchanged={result.distributions.unchanged} "
+                f"selected={result.ratings.selected} "
+                f"completed={result.ratings.completed} "
+                f"created={result.ratings.created} "
+                f"updated={result.ratings.updated} "
+                f"unchanged={result.ratings.unchanged} "
+                f"skipped_incomplete={result.ratings.skipped_incomplete} "
+                f"failed={result.ratings.failed}"
             )
 
         elif args.command == "detect-walk-off-hr":
