@@ -56,6 +56,37 @@ def _add_pitcher_rating(
     db.commit()
 
 
+def _add_batter_rating(
+    db,
+    mlb_id: int,
+    overall: int,
+    *,
+    rating_model_version: str = "ratings-2.0",
+    distribution_version: str = "dist-1.0",
+    start: dt.date = START,
+    end: dt.date = END,
+):
+    player = Player(mlb_id=mlb_id, full_name=f"Batter {mlb_id}", primary_position="DH")
+    db.add(player)
+    db.flush()
+    db.add(PlayerRatings(
+        player_id=player.id,
+        season=2026,
+        role="BATTER",
+        rating_model_version=rating_model_version,
+        distribution_version=distribution_version,
+        data_start_date=start,
+        data_end_date=end,
+        contact_rating=overall,
+        power_rating=overall,
+        vision_rating=overall,
+        clutch_rating=overall,
+        overall_rating=overall,
+        input_hash=f"{mlb_id:064d}"[-64:],
+    ))
+    db.commit()
+
+
 def _build(db, **overrides):
     arguments = {
         "season": 2026,
@@ -115,8 +146,54 @@ def test_poblacion_vacia_no_crea_distribucion(db):
     assert db.query(RatingDistribution).count() == 0
 
 
+def test_batter_construye_histograma_real_separado_e_idempotente(db):
+    expected_histogram = {
+        "63": 1,
+        "64": 4,
+        "65": 1,
+        "66": 3,
+        "67": 17,
+        "68": 17,
+        "69": 33,
+        "70": 50,
+        "71": 42,
+        "72": 23,
+        "73": 17,
+        "74": 9,
+        "75": 5,
+        "77": 1,
+        "78": 2,
+    }
+    mlb_id = 1000
+    for overall, frequency in expected_histogram.items():
+        for _ in range(frequency):
+            _add_batter_rating(db, mlb_id, int(overall))
+            mlb_id += 1
+
+    # No deben mezclarse otro rol, versión de distribución ni ventana.
+    _add_pitcher_rating(db, 9001, 99)
+    _add_batter_rating(db, 9002, 99, distribution_version="dist-2.0")
+    _add_batter_rating(db, 9003, 99, start=dt.date(2026, 8, 1))
+
+    first = _build(db, role="batter")
+    assert first.status == "CREATED"
+    row = db.query(RatingDistribution).filter_by(role="BATTER").one()
+    assert row.population_size == 225
+    assert row.population_histogram == expected_histogram
+    assert "76" not in row.population_histogram
+    assert sum(row.population_histogram.values()) == row.population_size
+    assert float(row.minimum) == 63
+    assert float(row.p50) == 70
+    assert float(row.p95) == 74
+    assert float(row.maximum) == 78
+
+    second = _build(db, role="batter")
+    assert second.status == "UNCHANGED"
+    assert second.rating_distribution_id == first.rating_distribution_id
+
+
 def test_rechaza_rol_y_ventana_no_soportados(db):
-    with pytest.raises(ValueError, match="role=pitcher"):
-        _build(db, role="batter")
+    with pytest.raises(ValueError, match="batter o pitcher"):
+        _build(db, role="fielder")
     with pytest.raises(ValueError, match="posterior"):
         _build(db, data_start_date=END, data_end_date=START)

@@ -31,11 +31,14 @@ def _decimal(value: float) -> Decimal:
 
 
 def _summary(values: list[int]) -> dict:
+    histogram = {
+        str(value): count for value, count in sorted(Counter(values).items())
+    }
+    if sum(histogram.values()) != len(values):
+        raise AssertionError("el histograma no representa la población completa")
     return {
         "population_size": len(values),
-        "population_histogram": {
-            str(value): count for value, count in sorted(Counter(values).items())
-        },
+        "population_histogram": histogram,
         "minimum": _decimal(min(values)),
         "p05": _decimal(percentile(values, 0.05)),
         "p10": _decimal(percentile(values, 0.10)),
@@ -61,8 +64,8 @@ def build_overall_rating_distribution(
     rarity_model_version: str = RARITY_MODEL_VERSION,
 ) -> RatingDistributionBuildResult:
     normalized_role = role.upper()
-    if normalized_role != "PITCHER":
-        raise ValueError("la primera versión solo soporta role=pitcher")
+    if normalized_role not in {"BATTER", "PITCHER"}:
+        raise ValueError("role debe ser batter o pitcher")
     if data_end_date < data_start_date:
         raise ValueError("data_end_date debe ser igual o posterior a data_start_date")
     source_version = source_distribution_version or default_distribution_version()

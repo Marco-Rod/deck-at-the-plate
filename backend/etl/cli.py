@@ -125,10 +125,11 @@ def _build_parser() -> argparse.ArgumentParser:
 
     rating_dist = sub.add_parser(
         "build-rating-distributions",
+        aliases=["build-rating-distribution"],
         help="Construye distribuciones de ratings oficiales para calibrar rarity",
     )
     rating_dist.add_argument("--season", type=int, required=True)
-    rating_dist.add_argument("--role", choices=("pitcher",), default="pitcher")
+    rating_dist.add_argument("--role", choices=("batter", "pitcher"), default="pitcher")
     rating_dist.add_argument("--from", dest="data_start_date", type=_parse_date, required=True)
     rating_dist.add_argument("--to", dest="data_end_date", type=_parse_date, required=True)
     rating_dist.add_argument("--rating-model-version", dest="rating_model_version", default="ratings-2.0")
@@ -451,7 +452,7 @@ def main(argv=None) -> int:
                 result.created, result.updated, result.unchanged, result.skipped, result.version,
             )
 
-        elif args.command == "build-rating-distributions":
+        elif args.command in {"build-rating-distributions", "build-rating-distribution"}:
             result = build_overall_rating_distribution(
                 db,
                 season=args.season,
