@@ -225,6 +225,33 @@ def _input_hash(
     return hashlib.sha256(encoded).hexdigest()
 
 
+def detect_moment_type(context: MomentContext) -> MomentType | None:
+    """Clasifica un contexto por sus hechos, sin evaluarlo ni persistir nada."""
+    if context.role != "BATTER":
+        return None
+    batting = context.facts.get("batting")
+    if not isinstance(batting, dict):
+        return None
+    walk_off = batting.get("walk_off")
+    home_runs = batting.get("home_runs")
+    if (
+        walk_off is True
+        and not isinstance(home_runs, bool)
+        and isinstance(home_runs, int)
+        and home_runs >= 1
+    ):
+        return MomentType.WALK_OFF_HR
+    home_run_plays = context.facts.get("home_runs")
+    if (
+        not isinstance(home_runs, bool)
+        and isinstance(home_runs, int)
+        and home_runs >= 2
+        and isinstance(home_run_plays, list)
+    ):
+        return MomentType.MULTI_HR_GAME
+    return None
+
+
 def evaluate_moment(
     db: Session,
     *,
@@ -236,6 +263,7 @@ def evaluate_moment(
     context = db.get(MomentContext, moment_context_id)
     if context is None:
         raise ValueError(f"MomentContext inexistente: {moment_context_id}")
+    moment_type = detect_moment_type(context)
     if context.role != "BATTER":
         return MomentEvaluationResult(
             "SKIPPED_UNSUPPORTED",
@@ -252,31 +280,14 @@ def evaluate_moment(
     batting = context.facts.get("batting")
     if not isinstance(batting, dict):
         raise ValueError("MomentContext BATTER requiere facts.batting")
-    walk_off = batting.get("walk_off")
-    home_runs = batting.get("home_runs")
-    is_walk_off_hr = (
-        walk_off is True
-        and not isinstance(home_runs, bool)
-        and isinstance(home_runs, int)
-        and home_runs >= 1
-    )
     home_run_plays = context.facts.get("home_runs")
-    is_multi_hr_game = (
-        not is_walk_off_hr
-        and not isinstance(home_runs, bool)
-        and isinstance(home_runs, int)
-        and home_runs >= 2
-        and isinstance(home_run_plays, list)
-    )
-    if is_walk_off_hr:
-        moment_type = MomentType.WALK_OFF_HR
+    if moment_type == MomentType.WALK_OFF_HR:
         active_rules = rules
         _validate_rules(active_rules)
         significance, performance, leverage, uncommonness = _walk_off_hr_scores(
             batting, active_rules
         )
-    elif is_multi_hr_game:
-        moment_type = MomentType.MULTI_HR_GAME
+    elif moment_type == MomentType.MULTI_HR_GAME:
         active_rules = multi_hr_rules
         _validate_rules(active_rules)
         significance, performance, leverage, uncommonness = _multi_hr_game_scores(

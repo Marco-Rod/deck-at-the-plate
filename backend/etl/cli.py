@@ -55,6 +55,9 @@ from etl.services.batter_ratings2 import calculate_batter_ratings2
 from etl.services.batter_ratings2_population import generate_batter_ratings2_population
 from etl.services.player_ratings_as_of import generate_player_ratings_as_of
 from etl.services.multi_hr_game_detector import detect_multi_hr_games
+from etl.services.multi_hr_moment_evaluations import (
+    evaluate_discovered_multi_hr_moments,
+)
 from etl.services.walk_off_hr_detector import detect_walk_off_home_runs
 from etl.services.walk_off_hr_pipeline import run_walk_off_hr_pipeline
 from etl.sources.mlb import MLBStatsApiClient
@@ -317,6 +320,11 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     multi_hr.add_argument("--from", dest="date_from", type=_parse_date, required=True)
     multi_hr.add_argument("--to", dest="date_to", type=_parse_date, required=True)
+
+    sub.add_parser(
+        "evaluate-multi-hr-moments",
+        help="Evalúa los MomentContext MULTI_HR_GAME descubiertos",
+    )
 
     walk_off_pipeline = sub.add_parser(
         "run-walk-off-hr-pipeline",
@@ -898,6 +906,20 @@ def main(argv=None) -> int:
                     "multi-HR detector game_pk=%s batter=%s reason=%s",
                     failure.game_pk,
                     failure.batter_mlb_id,
+                    failure.reason,
+                )
+
+        elif args.command == "evaluate-multi-hr-moments":
+            result = evaluate_discovered_multi_hr_moments(db)
+            print(
+                f"selected={result.selected} created={result.created} "
+                f"updated={result.updated} unchanged={result.unchanged} "
+                f"failed={result.failed}"
+            )
+            for failure in result.failures:
+                logger.warning(
+                    "multi-HR evaluation context=%s reason=%s",
+                    failure.moment_context_id,
                     failure.reason,
                 )
 
