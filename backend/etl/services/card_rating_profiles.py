@@ -118,6 +118,7 @@ def generate_card_rating_profile(
     policy_adjustments: dict[str, int] | None = None,
     policy_reason: str | None = None,
     calculation_metadata: Mapping | None = None,
+    commit: bool = True,
 ) -> CardRatingProfileResult:
     """Crea o actualiza la proyección de ratings para una edición específica."""
     ratings = db.get(PlayerRatings, source_player_ratings_id)
@@ -164,5 +165,8 @@ def generate_card_rating_profile(
         for field_name, value in persisted_values.items():
             setattr(profile, field_name, value)
         status = "UPDATED"
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     return CardRatingProfileResult(status, profile.id, ratings.id, input_hash)

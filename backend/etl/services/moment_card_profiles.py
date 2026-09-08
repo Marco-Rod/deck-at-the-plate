@@ -4,15 +4,18 @@ from dataclasses import asdict, dataclass
 
 from sqlalchemy.orm import Session
 
-from app.models import MomentEvaluation, PlayerRatings
+from app.models import MomentEvaluation, MomentType, PlayerRatings
 from etl.services.card_rating_profiles import (
     CardRatingProfileResult,
     generate_card_rating_profile,
 )
 from etl.services.moment_rating_adjustments import (
+    MULTI_HR_GAME_ADJUSTMENT_RULES,
     WALK_OFF_HR_ADJUSTMENT_RULES,
     MomentRatingAdjustments,
+    MultiHrGameAdjustmentRules,
     WalkOffHrAdjustmentRules,
+    calculate_multi_hr_game_rating_adjustments,
     calculate_moment_rating_adjustments,
 )
 
@@ -30,7 +33,7 @@ class MomentCardRatingProfileResult:
 def _calculation_metadata(
     evaluation: MomentEvaluation,
     adjustments: MomentRatingAdjustments,
-    adjustment_rules: WalkOffHrAdjustmentRules,
+    adjustment_rules: WalkOffHrAdjustmentRules | MultiHrGameAdjustmentRules,
 ) -> dict:
     context = evaluation.moment_context
     return {
@@ -81,6 +84,10 @@ def generate_moment_card_rating_profile(
     moment_evaluation_id: str,
     source_player_ratings_id: str,
     adjustment_rules: WalkOffHrAdjustmentRules = WALK_OFF_HR_ADJUSTMENT_RULES,
+    multi_hr_adjustment_rules: MultiHrGameAdjustmentRules = (
+        MULTI_HR_GAME_ADJUSTMENT_RULES
+    ),
+    commit: bool = True,
 ) -> MomentCardRatingProfileResult:
     """Conecta la cadena existente y persiste únicamente su resultado final."""
     evaluation = db.get(MomentEvaluation, moment_evaluation_id)
@@ -90,9 +97,18 @@ def generate_moment_card_rating_profile(
     if ratings is None:
         raise ValueError(f"PlayerRatings inexistente: {source_player_ratings_id}")
 
-    adjustments = calculate_moment_rating_adjustments(
-        evaluation, ratings, rules=adjustment_rules
-    )
+    if evaluation.moment_type == MomentType.WALK_OFF_HR:
+        active_rules = adjustment_rules
+        adjustments = calculate_moment_rating_adjustments(
+            evaluation, ratings, rules=active_rules
+        )
+    elif evaluation.moment_type == MomentType.MULTI_HR_GAME:
+        active_rules = multi_hr_adjustment_rules
+        adjustments = calculate_multi_hr_game_rating_adjustments(
+            evaluation, ratings, rules=active_rules
+        )
+    else:
+        raise ValueError(f"moment_type no soportado: {evaluation.moment_type}")
     profile_result: CardRatingProfileResult = generate_card_rating_profile(
         db,
         source_player_ratings_id=ratings.id,
@@ -100,8 +116,9 @@ def generate_moment_card_rating_profile(
         policy_adjustments=adjustments.as_card_policy_adjustments(),
         policy_reason=adjustments.reason,
         calculation_metadata=_calculation_metadata(
-            evaluation, adjustments, adjustment_rules
+            evaluation, adjustments, active_rules
         ),
+        commit=commit,
     )
     return MomentCardRatingProfileResult(
         status=profile_result.status,

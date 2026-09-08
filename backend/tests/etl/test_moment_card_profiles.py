@@ -199,6 +199,39 @@ def test_repeticion_es_unchanged(db):
     assert db.query(CardRatingProfile).count() == 1
 
 
+def test_multi_hr_usa_policy_power_oriented_y_recalcula_overall(db):
+    _, _, ratings, _, evaluation = _scenario(db)
+    evaluation.moment_type = MomentType.MULTI_HR_GAME
+    evaluation.performance_score = Decimal("0.91500")
+    evaluation.statistical_uncommonness = Decimal("0.93000")
+    evaluation.leverage_score = Decimal("0.31667")
+    evaluation.significance_score = Decimal("0.80058")
+    evaluation.input_hash = "m" * 64
+    db.commit()
+
+    result = generate_moment_card_rating_profile(
+        db,
+        moment_evaluation_id=evaluation.id,
+        source_player_ratings_id=ratings.id,
+    )
+    profile = db.get(CardRatingProfile, result.card_rating_profile_id)
+
+    assert (result.adjustments.contact, result.adjustments.power) == (7, 17)
+    assert (result.adjustments.vision, result.adjustments.clutch) == (2, 4)
+    assert (
+        profile.contact_rating,
+        profile.power_rating,
+        profile.vision_rating,
+        profile.clutch_rating,
+        profile.overall_rating,
+    ) == (77, 89, 70, 74, 78)
+    assert result.adjustments.reason == "MULTI_HR_GAME"
+    metadata = profile.metadata_payload["calculation_metadata"]
+    assert metadata["rating_adjustment_policy"]["requested_adjustments"][
+        "power_rating"
+    ] == 17
+
+
 def test_cambio_de_evaluacion_actualiza_aunque_redondee_a_mismos_deltas(db):
     _, _, ratings, _, evaluation = _scenario(db)
     created = generate_moment_card_rating_profile(
