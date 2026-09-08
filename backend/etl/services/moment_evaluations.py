@@ -258,6 +258,7 @@ def evaluate_moment(
     moment_context_id: str,
     rules: WalkOffHrEvaluationRules = WALK_OFF_HR_RULES,
     multi_hr_rules: MultiHrGameEvaluationRules = MULTI_HR_GAME_RULES,
+    commit: bool = True,
 ) -> MomentEvaluationResult:
     """Interpreta tipos de Moment soportados sin producir ajustes ni ratings."""
     context = db.get(MomentContext, moment_context_id)
@@ -344,7 +345,10 @@ def evaluate_moment(
         for field_name, value in values.items():
             setattr(evaluation, field_name, value)
         status = "UPDATED"
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     return MomentEvaluationResult(
         status,
         evaluation.id,

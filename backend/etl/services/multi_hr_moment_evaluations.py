@@ -49,18 +49,21 @@ def evaluate_discovered_multi_hr_moments(
     failures = []
     for context in selected:
         try:
-            result = evaluate_moment(db, moment_context_id=context.id)
-            if result.moment_type != MomentType.MULTI_HR_GAME:
-                raise ValueError("evaluate_moment devolvió un tipo inesperado")
+            with db.begin_nested():
+                result = evaluate_moment(
+                    db, moment_context_id=context.id, commit=False
+                )
+                if result.moment_type != MomentType.MULTI_HR_GAME:
+                    raise ValueError("evaluate_moment devolvió un tipo inesperado")
             counts[result.status.lower()] += 1
             evaluation_ids.append(result.moment_evaluation_id)
         except Exception as exc:
-            db.rollback()
             counts["failed"] += 1
             failures.append(MultiHrMomentEvaluationFailure(context.id, str(exc)))
             logger.exception(
                 "multi-HR evaluation failed moment_context_id=%s", context.id
             )
+    db.commit()
     return MultiHrMomentEvaluationBatchResult(
         selected=len(selected),
         created=counts["created"],

@@ -37,7 +37,7 @@ def db():
     engine.dispose()
 
 
-def _context(db, mlb_id, *, multi_hr=True):
+def _context(db, mlb_id, *, multi_hr=True, occurred_at=OCCURRED_AT):
     player = Player(mlb_id=mlb_id, full_name=f"Player {mlb_id}")
     edition = CardEdition(
         code=f"2026_MOMENT_{mlb_id}",
@@ -79,7 +79,7 @@ def _context(db, mlb_id, *, multi_hr=True):
         player_id=player.id,
         card_edition_id=edition.id,
         role="BATTER",
-        occurred_at=OCCURRED_AT,
+        occurred_at=occurred_at,
         source_type=MomentContextSourceType.MLB_STATS_API,
         source_reference=f"mlb-stats-api:game/900001:batter/{mlb_id}",
         facts=facts,
@@ -103,24 +103,30 @@ def test_evalua_solo_multi_hr_y_es_idempotente(db):
     } == {MomentType.MULTI_HR_GAME}
 
 
-def test_fallo_de_un_contexto_no_aborta_el_resto(db, monkeypatch):
-    first_id = _context(db, 100)
-    _context(db, 200)
+def test_dos_exitos_sobreviven_al_fallo_del_tercer_contexto(db, monkeypatch):
+    _context(db, 100, occurred_at=OCCURRED_AT - dt.timedelta(hours=2))
+    _context(db, 200, occurred_at=OCCURRED_AT - dt.timedelta(hours=1))
+    failing_id = _context(db, 300, occurred_at=OCCURRED_AT)
     from etl.services import multi_hr_moment_evaluations as service
 
     real_evaluate = service.evaluate_moment
 
-    def evaluate(db, *, moment_context_id):
-        if moment_context_id == first_id:
+    def evaluate(db, *, moment_context_id, commit=True):
+        if moment_context_id == failing_id:
             raise RuntimeError("broken context")
-        return real_evaluate(db, moment_context_id=moment_context_id)
+        return real_evaluate(
+            db, moment_context_id=moment_context_id, commit=commit
+        )
 
     monkeypatch.setattr(service, "evaluate_moment", evaluate)
-    result = evaluate_discovered_multi_hr_moments(db)
+    first = evaluate_discovered_multi_hr_moments(db)
+    second = evaluate_discovered_multi_hr_moments(db)
 
-    assert (result.selected, result.created, result.failed) == (2, 1, 1)
-    assert result.failures[0].moment_context_id == first_id
-    assert db.query(MomentEvaluation).count() == 1
+    assert (first.selected, first.created, first.failed) == (3, 2, 1)
+    assert (second.selected, second.unchanged, second.failed) == (3, 2, 1)
+    assert first.failures[0].moment_context_id == failing_id
+    assert second.failures[0].moment_context_id == failing_id
+    assert db.query(MomentEvaluation).count() == 2
 
 
 def test_cli_expone_batch_sin_parametros_de_ratings():
