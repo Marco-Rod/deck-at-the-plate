@@ -19,6 +19,7 @@ from app.models import (
 )
 from etl.cli import _build_parser
 from etl.services.moment_contexts import persist_moment_context
+from etl.services.moment_evaluation_pipeline import evaluate_moment_contexts
 from etl.services.multi_hr_moment_evaluations import (
     evaluate_discovered_multi_hr_moments,
 )
@@ -104,10 +105,13 @@ def test_evalua_solo_multi_hr_y_es_idempotente(db):
 
 
 def test_dos_exitos_sobreviven_al_fallo_del_tercer_contexto(db, monkeypatch):
-    _context(db, 100, occurred_at=OCCURRED_AT - dt.timedelta(hours=2))
-    _context(db, 200, occurred_at=OCCURRED_AT - dt.timedelta(hours=1))
-    failing_id = _context(db, 300, occurred_at=OCCURRED_AT)
-    from etl.services import multi_hr_moment_evaluations as service
+    _context(db, 100, occurred_at=OCCURRED_AT - dt.timedelta(hours=3))
+    _context(db, 200, occurred_at=OCCURRED_AT - dt.timedelta(hours=2))
+    failing_id = _context(
+        db, 300, occurred_at=OCCURRED_AT - dt.timedelta(hours=1)
+    )
+    _context(db, 400, occurred_at=OCCURRED_AT)
+    from etl.services import moment_evaluation_pipeline as service
 
     real_evaluate = service.evaluate_moment
 
@@ -119,14 +123,18 @@ def test_dos_exitos_sobreviven_al_fallo_del_tercer_contexto(db, monkeypatch):
         )
 
     monkeypatch.setattr(service, "evaluate_moment", evaluate)
-    first = evaluate_discovered_multi_hr_moments(db)
-    second = evaluate_discovered_multi_hr_moments(db)
+    first = evaluate_moment_contexts(
+        db, moment_type=MomentType.MULTI_HR_GAME
+    )
+    second = evaluate_moment_contexts(
+        db, moment_type=MomentType.MULTI_HR_GAME
+    )
 
-    assert (first.selected, first.created, first.failed) == (3, 2, 1)
-    assert (second.selected, second.unchanged, second.failed) == (3, 2, 1)
+    assert (first.selected, first.created, first.failed) == (4, 3, 1)
+    assert (second.selected, second.unchanged, second.failed) == (4, 3, 1)
     assert first.failures[0].moment_context_id == failing_id
     assert second.failures[0].moment_context_id == failing_id
-    assert db.query(MomentEvaluation).count() == 2
+    assert db.query(MomentEvaluation).count() == 3
 
 
 def test_cli_expone_batch_sin_parametros_de_ratings():

@@ -1,15 +1,11 @@
-"""Evaluación batch de MomentContext clasificados como MULTI_HR_GAME."""
+"""Adaptador de evaluación batch para MULTI_HR_GAME."""
 
-import logging
 from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
 
-from app.models import MomentContext, MomentType
-from etl.services.moment_evaluations import detect_moment_type, evaluate_moment
-
-
-logger = logging.getLogger("etl.services.multi_hr_moment_evaluations")
+from app.models import MomentType
+from etl.services.moment_evaluation_pipeline import evaluate_moment_contexts
 
 
 @dataclass(frozen=True)
@@ -33,43 +29,20 @@ def evaluate_discovered_multi_hr_moments(
     db: Session,
 ) -> MultiHrMomentEvaluationBatchResult:
     """Evalúa todos los MULTI_HR_GAME conocidos, aislando fallos por contexto."""
-    contexts = (
-        db.query(MomentContext)
-        .filter(MomentContext.role == "BATTER")
-        .order_by(MomentContext.occurred_at.asc(), MomentContext.id.asc())
-        .all()
+    result = evaluate_moment_contexts(
+        db, moment_type=MomentType.MULTI_HR_GAME
     )
-    selected = [
-        context
-        for context in contexts
-        if detect_moment_type(context) == MomentType.MULTI_HR_GAME
-    ]
-    counts = {key: 0 for key in ("created", "updated", "unchanged", "failed")}
-    evaluation_ids = []
-    failures = []
-    for context in selected:
-        try:
-            with db.begin_nested():
-                result = evaluate_moment(
-                    db, moment_context_id=context.id, commit=False
-                )
-                if result.moment_type != MomentType.MULTI_HR_GAME:
-                    raise ValueError("evaluate_moment devolvió un tipo inesperado")
-            counts[result.status.lower()] += 1
-            evaluation_ids.append(result.moment_evaluation_id)
-        except Exception as exc:
-            counts["failed"] += 1
-            failures.append(MultiHrMomentEvaluationFailure(context.id, str(exc)))
-            logger.exception(
-                "multi-HR evaluation failed moment_context_id=%s", context.id
-            )
-    db.commit()
     return MultiHrMomentEvaluationBatchResult(
-        selected=len(selected),
-        created=counts["created"],
-        updated=counts["updated"],
-        unchanged=counts["unchanged"],
-        failed=counts["failed"],
-        moment_evaluation_ids=tuple(evaluation_ids),
-        failures=tuple(failures),
+        selected=result.selected,
+        created=result.created,
+        updated=result.updated,
+        unchanged=result.unchanged,
+        failed=result.failed,
+        moment_evaluation_ids=result.moment_evaluation_ids,
+        failures=tuple(
+            MultiHrMomentEvaluationFailure(
+                failure.moment_context_id, failure.reason
+            )
+            for failure in result.failures
+        ),
     )
