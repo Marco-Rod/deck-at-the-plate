@@ -56,6 +56,9 @@ from etl.services.batter_ratings2_population import generate_batter_ratings2_pop
 from etl.services.player_ratings_as_of import generate_player_ratings_as_of
 from etl.services.multi_hr_game_detector import detect_multi_hr_games
 from etl.services.ten_strikeout_game_detector import detect_ten_strikeout_games
+from etl.services.ten_strikeout_moment_evaluations import (
+    evaluate_discovered_ten_strikeout_moments,
+)
 from etl.services.multi_hr_moment_evaluations import (
     evaluate_discovered_multi_hr_moments,
 )
@@ -339,6 +342,10 @@ def _build_parser() -> argparse.ArgumentParser:
     sub.add_parser(
         "evaluate-multi-hr-moments",
         help="Evalúa los MomentContext MULTI_HR_GAME descubiertos",
+    )
+    sub.add_parser(
+        "evaluate-ten-strikeout-moments",
+        help="Evalúa los MomentContext 10_STRIKEOUT_GAME descubiertos",
     )
     sub.add_parser(
         "generate-multi-hr-moment-card-profiles",
@@ -959,6 +966,20 @@ def main(argv=None) -> int:
             for failure in result.failures:
                 logger.warning(
                     "multi-HR evaluation context=%s reason=%s",
+                    failure.moment_context_id,
+                    failure.reason,
+                )
+
+        elif args.command == "evaluate-ten-strikeout-moments":
+            result = evaluate_discovered_ten_strikeout_moments(db)
+            print(
+                f"selected={result.selected} created={result.created} "
+                f"updated={result.updated} unchanged={result.unchanged} "
+                f"failed={result.failed}"
+            )
+            for failure in result.failures:
+                logger.warning(
+                    "10-K evaluation context=%s reason=%s",
                     failure.moment_context_id,
                     failure.reason,
                 )

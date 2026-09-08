@@ -25,7 +25,7 @@ from etl.sources.mlb import MLBStatsApiClient
 
 
 logger = logging.getLogger("etl.services.ten_strikeout_game_detector")
-TEN_STRIKEOUT_GAME_DETECTOR_VERSION = "ten-strikeout-game-detector-1.0"
+TEN_STRIKEOUT_GAME_DETECTOR_VERSION = "ten-strikeout-game-detector-1.1"
 STRIKEOUT_EVENT_TYPES = {"strikeout", "strikeout_double_play"}
 
 
@@ -69,6 +69,11 @@ def _innings_pitched(value) -> str | None:
     return normalized
 
 
+def _outs_recorded(innings_pitched: str) -> int:
+    innings, partial_outs = innings_pitched.split(".")
+    return int(innings) * 3 + int(partial_outs)
+
+
 def _boxscore_pitchers(feed: dict) -> dict[int, dict]:
     teams = feed.get("liveData", {}).get("boxscore", {}).get("teams", {})
     pitchers = {}
@@ -102,6 +107,7 @@ def _boxscore_pitchers(feed: dict) -> dict[int, dict]:
                 )
             ):
                 continue
+            fields["outs_recorded"] = _outs_recorded(fields["innings_pitched"])
             pitches = _integer(pitching.get("pitchesThrown"))
             strikes = _integer(pitching.get("strikes"))
             if (

@@ -60,6 +60,37 @@ MULTI_HR_GAME_RULES = MultiHrGameEvaluationRules()
 
 
 @dataclass(frozen=True)
+class TenStrikeoutGameEvaluationRules:
+    evaluation_version: str = "moment-eval-1.0"
+    strikeout_score_base: Decimal = Decimal("0.60")
+    strikeout_score_per_k_above_ten: Decimal = Decimal("0.10")
+    strikeout_rate_score_base: Decimal = Decimal("0.50")
+    strikeout_rate_reference: Decimal = Decimal("0.30")
+    strikeout_rate_slope: Decimal = Decimal("2.00")
+    performance_strikeout_weight: Decimal = Decimal("0.30")
+    performance_strikeout_rate_weight: Decimal = Decimal("0.30")
+    performance_run_prevention_weight: Decimal = Decimal("0.25")
+    performance_depth_weight: Decimal = Decimal("0.15")
+    depth_score_at_fifteen_outs: Decimal = Decimal("0.45")
+    depth_score_per_out: Decimal = Decimal("0.05")
+    uncommonness_ten_k: Decimal = Decimal("0.70")
+    uncommonness_eleven_k: Decimal = Decimal("0.80")
+    uncommonness_twelve_k: Decimal = Decimal("0.90")
+    uncommonness_thirteen_k: Decimal = Decimal("0.95")
+    uncommonness_fourteen_plus_k: Decimal = Decimal("1.00")
+    uncommonness_eight_plus_ip_bonus: Decimal = Decimal("0.05")
+    uncommonness_nine_ip_bonus: Decimal = Decimal("0.05")
+    uncommonness_zero_er_bonus: Decimal = Decimal("0.05")
+    neutral_leverage: Decimal = Decimal("0.50")
+    significance_performance_weight: Decimal = Decimal("0.60")
+    significance_uncommonness_weight: Decimal = Decimal("0.35")
+    significance_leverage_weight: Decimal = Decimal("0.05")
+
+
+TEN_STRIKEOUT_GAME_RULES = TenStrikeoutGameEvaluationRules()
+
+
+@dataclass(frozen=True)
 class MomentEvaluationResult:
     status: str
     moment_evaluation_id: str | None
@@ -92,12 +123,25 @@ def _validate_rules(rules) -> None:
     )
     if any(weight < 0 for weight in weights) or sum(weights) != Decimal("1"):
         raise ValueError("los pesos de significance deben ser no negativos y sumar 1")
+    if hasattr(rules, "performance_strikeout_weight"):
+        performance_weights = (
+            rules.performance_strikeout_weight,
+            rules.performance_strikeout_rate_weight,
+            rules.performance_run_prevention_weight,
+            rules.performance_depth_weight,
+        )
+        if any(weight < 0 for weight in performance_weights) or sum(
+            performance_weights
+        ) != Decimal("1"):
+            raise ValueError(
+                "los pesos de performance deben ser no negativos y sumar 1"
+            )
 
 
-def _integer_fact(facts: dict, key: str) -> int:
+def _integer_fact(facts: dict, key: str, scope: str = "batting") -> int:
     value = facts.get(key)
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        raise ValueError(f"batting.{key} debe ser un entero no negativo")
+        raise ValueError(f"{scope}.{key} debe ser un entero no negativo")
     return value
 
 
@@ -208,6 +252,96 @@ def _multi_hr_game_scores(
     return significance, performance, leverage, uncommonness
 
 
+def _outs_from_innings_pitched(value) -> int | None:
+    normalized = str(value).strip() if value is not None else ""
+    parts = normalized.split(".")
+    if (
+        len(parts) != 2
+        or not parts[0].isdigit()
+        or parts[1] not in {"0", "1", "2"}
+    ):
+        return None
+    return int(parts[0]) * 3 + int(parts[1])
+
+
+def _run_prevention_score(earned_runs: int) -> Decimal:
+    scores = {
+        0: Decimal("1.00"),
+        1: Decimal("0.85"),
+        2: Decimal("0.70"),
+        3: Decimal("0.50"),
+        4: Decimal("0.30"),
+    }
+    return scores.get(earned_runs, Decimal("0.10"))
+
+
+def _ten_strikeout_game_scores(
+    pitching: dict,
+    strikeout_plays: list,
+    rules: TenStrikeoutGameEvaluationRules,
+) -> tuple[Decimal, Decimal, Decimal, Decimal]:
+    strikeouts = _integer_fact(pitching, "strikeouts", "pitching")
+    batters_faced = _integer_fact(pitching, "batters_faced", "pitching")
+    earned_runs = _integer_fact(pitching, "earned_runs", "pitching")
+    outs_recorded = _integer_fact(pitching, "outs_recorded", "pitching")
+    parsed_outs = _outs_from_innings_pitched(pitching.get("innings_pitched"))
+    if strikeouts < 10:
+        raise ValueError("pitching.strikeouts debe ser al menos 10")
+    if batters_faced <= 0 or strikeouts > batters_faced:
+        raise ValueError("pitching.batters_faced es inconsistente")
+    if parsed_outs is None or parsed_outs != outs_recorded:
+        raise ValueError("innings_pitched y outs_recorded son inconsistentes")
+    if not isinstance(strikeout_plays, list) or len(strikeout_plays) != strikeouts:
+        raise ValueError("facts.strikeouts debe coincidir con pitching.strikeouts")
+
+    strikeout_score = _score(
+        rules.strikeout_score_base
+        + Decimal(strikeouts - 10) * rules.strikeout_score_per_k_above_ten
+    )
+    strikeout_rate = Decimal(strikeouts) / Decimal(batters_faced)
+    strikeout_rate_score = _score(
+        rules.strikeout_rate_score_base
+        + (strikeout_rate - rules.strikeout_rate_reference)
+        * rules.strikeout_rate_slope
+    )
+    run_prevention_score = _run_prevention_score(earned_runs)
+    depth_score = _score(
+        rules.depth_score_at_fifteen_outs
+        + Decimal(outs_recorded - 15) * rules.depth_score_per_out
+    )
+    performance = _score(
+        strikeout_score * rules.performance_strikeout_weight
+        + strikeout_rate_score * rules.performance_strikeout_rate_weight
+        + run_prevention_score * rules.performance_run_prevention_weight
+        + depth_score * rules.performance_depth_weight
+    )
+
+    if strikeouts == 10:
+        uncommonness = rules.uncommonness_ten_k
+    elif strikeouts == 11:
+        uncommonness = rules.uncommonness_eleven_k
+    elif strikeouts == 12:
+        uncommonness = rules.uncommonness_twelve_k
+    elif strikeouts == 13:
+        uncommonness = rules.uncommonness_thirteen_k
+    else:
+        uncommonness = rules.uncommonness_fourteen_plus_k
+    if outs_recorded >= 24:
+        uncommonness += rules.uncommonness_eight_plus_ip_bonus
+    if outs_recorded >= 27:
+        uncommonness += rules.uncommonness_nine_ip_bonus
+    if earned_runs == 0:
+        uncommonness += rules.uncommonness_zero_er_bonus
+    uncommonness = _score(uncommonness)
+    leverage = _score(rules.neutral_leverage)
+    significance = _score(
+        performance * rules.significance_performance_weight
+        + uncommonness * rules.significance_uncommonness_weight
+        + leverage * rules.significance_leverage_weight
+    )
+    return significance, performance, leverage, uncommonness
+
+
 def _input_hash(
     context: MomentContext, moment_type: MomentType, rules_payload: dict
 ) -> str:
@@ -227,9 +361,21 @@ def _input_hash(
 
 def detect_moment_type(context: MomentContext) -> MomentType | None:
     """Clasifica un contexto por sus hechos, sin evaluarlo ni persistir nada."""
+    facts = context.facts if isinstance(context.facts, dict) else {}
+    if context.role == "PITCHER":
+        pitching = facts.get("pitching")
+        if isinstance(pitching, dict):
+            strikeouts = pitching.get("strikeouts")
+            if (
+                not isinstance(strikeouts, bool)
+                and isinstance(strikeouts, int)
+                and strikeouts >= 10
+            ):
+                return MomentType.TEN_STRIKEOUT_GAME
+        return None
     if context.role != "BATTER":
         return None
-    batting = context.facts.get("batting")
+    batting = facts.get("batting")
     if not isinstance(batting, dict):
         return None
     walk_off = batting.get("walk_off")
@@ -241,7 +387,7 @@ def detect_moment_type(context: MomentContext) -> MomentType | None:
         and home_runs >= 1
     ):
         return MomentType.WALK_OFF_HR
-    home_run_plays = context.facts.get("home_runs")
+    home_run_plays = facts.get("home_runs")
     if (
         not isinstance(home_runs, bool)
         and isinstance(home_runs, int)
@@ -258,6 +404,9 @@ def evaluate_moment(
     moment_context_id: str,
     rules: WalkOffHrEvaluationRules = WALK_OFF_HR_RULES,
     multi_hr_rules: MultiHrGameEvaluationRules = MULTI_HR_GAME_RULES,
+    ten_strikeout_rules: TenStrikeoutGameEvaluationRules = (
+        TEN_STRIKEOUT_GAME_RULES
+    ),
     commit: bool = True,
 ) -> MomentEvaluationResult:
     """Interpreta tipos de Moment soportados sin producir ajustes ni ratings."""
@@ -265,34 +414,35 @@ def evaluate_moment(
     if context is None:
         raise ValueError(f"MomentContext inexistente: {moment_context_id}")
     moment_type = detect_moment_type(context)
-    if context.role != "BATTER":
-        return MomentEvaluationResult(
-            "SKIPPED_UNSUPPORTED",
-            None,
-            context.id,
-            None,
-            None,
-            None,
-            None,
-            None,
-            rules.evaluation_version,
-            None,
-        )
-    batting = context.facts.get("batting")
-    if not isinstance(batting, dict):
-        raise ValueError("MomentContext BATTER requiere facts.batting")
-    home_run_plays = context.facts.get("home_runs")
+    facts = context.facts if isinstance(context.facts, dict) else {}
+    batting = facts.get("batting")
+    home_run_plays = facts.get("home_runs")
     if moment_type == MomentType.WALK_OFF_HR:
+        if not isinstance(batting, dict):
+            raise ValueError("MomentContext BATTER requiere facts.batting")
         active_rules = rules
         _validate_rules(active_rules)
         significance, performance, leverage, uncommonness = _walk_off_hr_scores(
             batting, active_rules
         )
     elif moment_type == MomentType.MULTI_HR_GAME:
+        if not isinstance(batting, dict):
+            raise ValueError("MomentContext BATTER requiere facts.batting")
         active_rules = multi_hr_rules
         _validate_rules(active_rules)
         significance, performance, leverage, uncommonness = _multi_hr_game_scores(
             batting, home_run_plays, active_rules
+        )
+    elif moment_type == MomentType.TEN_STRIKEOUT_GAME:
+        active_rules = ten_strikeout_rules
+        _validate_rules(active_rules)
+        pitching = facts.get("pitching")
+        if not isinstance(pitching, dict):
+            raise ValueError("MomentContext PITCHER requiere facts.pitching")
+        significance, performance, leverage, uncommonness = (
+            _ten_strikeout_game_scores(
+                pitching, facts.get("strikeouts"), active_rules
+            )
         )
     else:
         return MomentEvaluationResult(

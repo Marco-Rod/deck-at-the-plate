@@ -69,7 +69,7 @@ def _context(db, *, role="BATTER", batting=None):
         if role == "BATTER"
         else {
             "game": {"game_pk": 824230},
-            "pitching": {"pitches": 101, "strikeouts": 12},
+            "pitching": {"pitches": 101, "strikeouts": 9},
         }
     )
     result = persist_moment_context(

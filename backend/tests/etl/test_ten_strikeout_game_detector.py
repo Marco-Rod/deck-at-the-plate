@@ -161,6 +161,7 @@ def test_descubre_exactamente_diez_k_y_persiste_solo_hechos(db):
     assert context.facts["game"]["game_date"] == GAME_DATE.isoformat()
     assert context.facts["pitching"] == {
         "innings_pitched": "7.0",
+        "outs_recorded": 21,
         "strikeouts": 10,
         "batters_faced": 27,
         "hits": 4,
