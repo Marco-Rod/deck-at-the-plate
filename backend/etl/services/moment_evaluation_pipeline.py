@@ -33,12 +33,16 @@ def evaluate_moment_contexts(
     db: Session,
     *,
     moment_type: MomentType,
+    moment_context_ids: tuple[str, ...] | None = None,
 ) -> MomentEvaluationBatchResult:
     """Evalúa contextos de un tipo con un SAVEPOINT independiente por contexto."""
+    query = db.query(MomentContext)
+    if moment_context_ids is not None:
+        if not moment_context_ids:
+            return MomentEvaluationBatchResult(0, 0, 0, 0, 0, (), ())
+        query = query.filter(MomentContext.id.in_(moment_context_ids))
     contexts = (
-        db.query(MomentContext)
-        .order_by(MomentContext.occurred_at.asc(), MomentContext.id.asc())
-        .all()
+        query.order_by(MomentContext.occurred_at.asc(), MomentContext.id.asc()).all()
     )
     selected = [
         context

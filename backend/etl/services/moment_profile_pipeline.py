@@ -108,14 +108,19 @@ def generate_moment_card_profiles(
     moment_type: MomentType,
     rating_model_version: str = RATING_MODEL_VERSION,
     distribution_version: str = DISTRIBUTION_MODEL_VERSION,
+    moment_evaluation_ids: tuple[str, ...] | None = None,
 ) -> MomentProfileBatchResult:
     """Procesa todas las evaluaciones de un tipo con aislamiento individual."""
-    evaluations = (
-        db.query(MomentEvaluation)
-        .filter(MomentEvaluation.moment_type == moment_type)
-        .order_by(MomentEvaluation.created_at.asc(), MomentEvaluation.id.asc())
-        .all()
+    query = db.query(MomentEvaluation).filter(
+        MomentEvaluation.moment_type == moment_type
     )
+    if moment_evaluation_ids is not None:
+        if not moment_evaluation_ids:
+            return MomentProfileBatchResult(0, 0, 0, 0, 0, 0, (), ())
+        query = query.filter(MomentEvaluation.id.in_(moment_evaluation_ids))
+    evaluations = query.order_by(
+        MomentEvaluation.created_at.asc(), MomentEvaluation.id.asc()
+    ).all()
     counts = {
         key: 0
         for key in (

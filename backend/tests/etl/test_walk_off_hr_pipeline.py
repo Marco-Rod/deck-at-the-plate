@@ -40,7 +40,13 @@ def db():
     engine.dispose()
 
 
-def _seed_context(db, *, mlb_id=660271, with_ratings=True):
+def _seed_context(
+    db,
+    *,
+    mlb_id=660271,
+    with_ratings=True,
+    occurred_at=None,
+):
     player = Player(mlb_id=mlb_id, full_name=f"Moment Batter {mlb_id}")
     edition = CardEdition(
         code=f"2026_WALK_OFF_HR_{mlb_id}",
@@ -58,7 +64,8 @@ def _seed_context(db, *, mlb_id=660271, with_ratings=True):
         card_edition_id=edition.id,
         role="BATTER",
         season=2026,
-        occurred_at=dt.datetime(2026, 9, 2, 23, 30, tzinfo=dt.timezone.utc),
+        occurred_at=occurred_at
+        or dt.datetime(2026, 9, 2, 23, 30, tzinfo=dt.timezone.utc),
         source_type=MomentContextSourceType.MLB_STATS_API,
         source_reference="mlb-stats-api:game/824230/feed/live",
         context_version="moment-context-1.0",
@@ -113,6 +120,7 @@ def _detection(*context_ids, created=1, unchanged=0, failures=()):
 
 def test_orquesta_servicios_y_crea_evaluacion_y_perfil(db, monkeypatch):
     _, context = _seed_context(db)
+    _seed_context(db, mlb_id=999999)
     monkeypatch.setattr(
         "etl.services.walk_off_hr_pipeline.detect_walk_off_home_runs",
         lambda *_args, **_kwargs: _detection(context.id),
@@ -212,3 +220,51 @@ def test_no_cuenta_candidato_no_confirmado_como_fallo(db, monkeypatch):
 
     result = run_walk_off_hr_pipeline(db, object(), date_from=START, date_to=END)
     assert (result.candidates, result.unconfirmed, result.failed) == (1, 1, 0)
+
+
+def test_fallo_intermedio_no_borra_ni_impide_otros_moments(db, monkeypatch):
+    base_time = dt.datetime(2026, 9, 2, 20, 0, tzinfo=dt.timezone.utc)
+    _, first = _seed_context(db, mlb_id=100001, occurred_at=base_time)
+    _, failing = _seed_context(
+        db, mlb_id=100002, occurred_at=base_time + dt.timedelta(hours=1)
+    )
+    _, last = _seed_context(
+        db, mlb_id=100003, occurred_at=base_time + dt.timedelta(hours=2)
+    )
+    context_ids = (first.id, failing.id, last.id)
+    monkeypatch.setattr(
+        "etl.services.walk_off_hr_pipeline.detect_walk_off_home_runs",
+        lambda *_args, **_kwargs: _detection(*context_ids, created=3),
+    )
+    from etl.services import moment_evaluation_pipeline as service
+
+    real_evaluate = service.evaluate_moment
+
+    def evaluate(db, *, moment_context_id, commit=True):
+        if moment_context_id == failing.id:
+            raise RuntimeError("broken walk-off context")
+        return real_evaluate(
+            db, moment_context_id=moment_context_id, commit=commit
+        )
+
+    monkeypatch.setattr(service, "evaluate_moment", evaluate)
+
+    first_run = run_walk_off_hr_pipeline(
+        db, object(), date_from=START, date_to=END
+    )
+    second_run = run_walk_off_hr_pipeline(
+        db, object(), date_from=START, date_to=END
+    )
+
+    assert (
+        first_run.evaluations_created,
+        first_run.profiles_created,
+        first_run.failed,
+    ) == (2, 2, 1)
+    assert (
+        second_run.evaluations_unchanged,
+        second_run.profiles_unchanged,
+        second_run.failed,
+    ) == (2, 2, 1)
+    assert db.query(MomentEvaluation).count() == 2
+    assert db.query(CardRatingProfile).count() == 2
