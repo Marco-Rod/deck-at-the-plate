@@ -21,6 +21,7 @@ from app.models import (
 )
 from etl.services.moment_contexts import persist_moment_context
 from etl.services.moment_evaluations import (
+    MULTI_HR_GAME_RULES,
     WALK_OFF_HR_RULES,
     evaluate_moment,
 )
@@ -84,6 +85,55 @@ def _context(db, *, role="BATTER", batting=None):
     return result.moment_context_id, player, edition
 
 
+def _multi_context(db, *, mlb_id, batting, home_runs):
+    player = Player(mlb_id=mlb_id, full_name=f"Player {mlb_id}")
+    edition = CardEdition(
+        code=f"2026_MULTI_HR_{mlb_id}",
+        name="Multi-Home Run Game",
+        edition_type=CardEditionType.MOMENT,
+        season=2026,
+        version="edition-1.0",
+        source_type=CardEditionSourceType.GAME,
+        source_reference=f"mlb-game:900001:batter:{mlb_id}",
+        metadata_payload={},
+    )
+    db.add_all([player, edition])
+    db.commit()
+    result = persist_moment_context(
+        db,
+        player_id=player.id,
+        card_edition_id=edition.id,
+        role="BATTER",
+        occurred_at=OCCURRED_AT,
+        source_type=MomentContextSourceType.MLB_STATS_API,
+        source_reference=f"mlb-stats-api:game/900001:batter/{mlb_id}",
+        facts={
+            "game": {"game_pk": 900001, "inning_count": 9},
+            "batting": {
+                "plate_appearances": 5,
+                "at_bats": 4,
+                **batting,
+            },
+            "home_runs": home_runs,
+        },
+    )
+    return result.moment_context_id
+
+
+def _hr(inning, half, pre_home, pre_away, post_home, post_away):
+    return {
+        "inning": inning,
+        "half_inning": half,
+        "at_bat_index": inning * 10,
+        "occurred_at": OCCURRED_AT.isoformat(),
+        "runs_batted_in": 1,
+        "pre_home_score": pre_home,
+        "pre_away_score": pre_away,
+        "post_home_score": post_home,
+        "post_away_score": post_away,
+    }
+
+
 def test_evalua_walk_off_hr_con_scores_reproducibles(db):
     context_id, _, _ = _context(db)
 
@@ -109,6 +159,103 @@ def test_misma_evaluacion_es_unchanged(db):
     assert unchanged.status == "UNCHANGED"
     assert unchanged.moment_evaluation_id == created.moment_evaluation_id
     assert unchanged.input_hash == created.input_hash
+    assert db.query(MomentEvaluation).count() == 1
+
+
+def test_evalua_multi_hr_game_con_performance_y_uncommonness_versionados(db):
+    context_id = _multi_context(
+        db,
+        mlb_id=100,
+        batting={"hits": 2, "home_runs": 2, "runs_batted_in": 2},
+        home_runs=[
+            _hr(2, "Bottom", 0, 0, 1, 0),
+            _hr(6, "Bottom", 7, 1, 9, 1),
+        ],
+    )
+
+    result = evaluate_moment(db, moment_context_id=context_id)
+
+    assert result.status == "CREATED"
+    assert result.moment_type == MomentType.MULTI_HR_GAME
+    assert result.performance_score == Decimal("0.62000")
+    assert result.statistical_uncommonness == Decimal("0.72000")
+    assert result.leverage_score == Decimal("0.30000")
+    assert result.significance_score == Decimal("0.59100")
+    assert result.evaluation_version == "moment-eval-1.0"
+
+
+def test_tres_hr_superan_claramente_un_juego_de_dos_hr(db):
+    two_hr_id = _multi_context(
+        db,
+        mlb_id=101,
+        batting={"hits": 2, "home_runs": 2, "runs_batted_in": 2},
+        home_runs=[
+            _hr(2, "Top", 0, 0, 0, 1),
+            _hr(5, "Top", 1, 1, 1, 2),
+        ],
+    )
+    three_hr_id = _multi_context(
+        db,
+        mlb_id=102,
+        batting={"hits": 4, "home_runs": 3, "runs_batted_in": 6},
+        home_runs=[
+            _hr(2, "Top", 0, 0, 0, 1),
+            _hr(5, "Top", 1, 1, 1, 2),
+            _hr(8, "Top", 2, 2, 2, 3),
+        ],
+    )
+
+    two_hr = evaluate_moment(db, moment_context_id=two_hr_id)
+    three_hr = evaluate_moment(db, moment_context_id=three_hr_id)
+
+    assert three_hr.performance_score == Decimal("0.91500")
+    assert three_hr.statistical_uncommonness == Decimal("0.93000")
+    assert three_hr.significance_score > two_hr.significance_score
+
+
+def test_empate_tardio_tiene_mas_leverage_que_dos_hr_en_paliza(db):
+    yainer_id = _multi_context(
+        db,
+        mlb_id=103,
+        batting={"hits": 2, "home_runs": 2, "runs_batted_in": 2},
+        home_runs=[
+            _hr(2, "Bottom", 0, 0, 1, 0),
+            _hr(8, "Top", 6, 5, 6, 6),
+        ],
+    )
+    wells_id = _multi_context(
+        db,
+        mlb_id=104,
+        batting={"hits": 2, "home_runs": 2, "runs_batted_in": 4},
+        home_runs=[
+            _hr(3, "Bottom", 7, 1, 9, 1),
+            _hr(8, "Bottom", 14, 1, 16, 1),
+        ],
+    )
+
+    yainer = evaluate_moment(db, moment_context_id=yainer_id)
+    wells = evaluate_moment(db, moment_context_id=wells_id)
+
+    assert yainer.leverage_score == Decimal("0.65000")
+    assert wells.leverage_score == Decimal("0.02500")
+    assert yainer.leverage_score > wells.leverage_score
+
+
+def test_multi_hr_rerun_es_unchanged(db):
+    context_id = _multi_context(
+        db,
+        mlb_id=105,
+        batting={"hits": 3, "home_runs": 2, "runs_batted_in": 3},
+        home_runs=[
+            _hr(2, "Top", 0, 0, 0, 1),
+            _hr(7, "Top", 1, 1, 1, 2),
+        ],
+    )
+    created = evaluate_moment(db, moment_context_id=context_id)
+    unchanged = evaluate_moment(db, moment_context_id=context_id)
+
+    assert unchanged.status == "UNCHANGED"
+    assert unchanged.moment_evaluation_id == created.moment_evaluation_id
     assert db.query(MomentEvaluation).count() == 1
 
 

@@ -27,6 +27,7 @@ def _new_id() -> str:
 
 class MomentType(str, enum.Enum):
     WALK_OFF_HR = "WALK_OFF_HR"
+    MULTI_HR_GAME = "MULTI_HR_GAME"
 
 
 class MomentEvaluation(Base):
