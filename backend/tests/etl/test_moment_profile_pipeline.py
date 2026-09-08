@@ -21,6 +21,7 @@ from app.models import (
     PlayerRatings,
 )
 from etl.services.moment_profile_pipeline import (
+    generate_moment_card_profiles,
     generate_profile_for_moment_evaluation,
 )
 
@@ -39,16 +40,22 @@ def db():
     engine.dispose()
 
 
-def _scenario(db, *, moment_type=MomentType.MULTI_HR_GAME, with_ratings=True):
-    player = Player(mlb_id=100, full_name="Moment Player")
+def _scenario(
+    db,
+    *,
+    moment_type=MomentType.MULTI_HR_GAME,
+    with_ratings=True,
+    mlb_id=100,
+):
+    player = Player(mlb_id=mlb_id, full_name=f"Moment Player {mlb_id}")
     edition = CardEdition(
-        code=f"2026_{moment_type.value}_100",
+        code=f"2026_{moment_type.value}_{mlb_id}",
         name=moment_type.value,
         edition_type=CardEditionType.MOMENT,
         season=2026,
         version="edition-1.0",
         source_type=CardEditionSourceType.GAME,
-        source_reference="mlb-game:900001:batter:100",
+        source_reference=f"mlb-game:900001:batter:{mlb_id}",
         metadata_payload={},
     )
     db.add_all([player, edition])
@@ -76,7 +83,7 @@ def _scenario(db, *, moment_type=MomentType.MULTI_HR_GAME, with_ratings=True):
         season=2026,
         occurred_at=dt.datetime(2026, 8, 31, tzinfo=dt.timezone.utc),
         source_type=MomentContextSourceType.MLB_STATS_API,
-        source_reference="mlb-stats-api:game/900001/feed/live",
+        source_reference=f"mlb-stats-api:game/900001:batter/{mlb_id}",
         context_version="moment-context-1.0",
         facts=facts,
         input_hash="c" * 64,
@@ -157,3 +164,34 @@ def test_commit_false_respeta_savepoint_del_caller(db):
             raise RuntimeError("rollback savepoint")
 
     assert db.query(CardRatingProfile).count() == 0
+
+
+def test_batch_aisla_fallo_intermedio_y_conserva_exitos(db, monkeypatch):
+    evaluations = [
+        _scenario(db, mlb_id=mlb_id)[0]
+        for mlb_id in (101, 102, 103, 104)
+    ]
+    failing_id = evaluations[2].id
+    original = generate_profile_for_moment_evaluation
+
+    def generate_or_fail(db, *, evaluation, **kwargs):
+        if evaluation.id == failing_id:
+            raise RuntimeError("fallo sintético")
+        return original(db, evaluation=evaluation, **kwargs)
+
+    monkeypatch.setattr(
+        "etl.services.moment_profile_pipeline."
+        "generate_profile_for_moment_evaluation",
+        generate_or_fail,
+    )
+
+    first = generate_moment_card_profiles(
+        db, moment_type=MomentType.MULTI_HR_GAME
+    )
+    second = generate_moment_card_profiles(
+        db, moment_type=MomentType.MULTI_HR_GAME
+    )
+
+    assert (first.selected, first.created, first.failed) == (4, 3, 1)
+    assert (second.selected, second.unchanged, second.failed) == (4, 3, 1)
+    assert db.query(CardRatingProfile).count() == 3
