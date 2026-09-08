@@ -11,6 +11,7 @@ from etl.config.league_distributions import DISTRIBUTION_MODEL_VERSION
 from etl.config.ratings_2 import RATING_MODEL_VERSION
 from etl.services.moment_card_profiles import generate_moment_card_rating_profile
 from etl.services.moment_evaluations import evaluate_moment
+from etl.services.moment_facts import moment_game_date
 from etl.services.player_ratings_resolver import resolve_player_ratings_as_of
 from etl.services.walk_off_hr_detector import detect_walk_off_home_runs
 from etl.sources.mlb import MLBStatsApiClient
@@ -44,16 +45,6 @@ class WalkOffHrPipelineResult:
     profiles_skipped_no_ratings: int
     failed: int
     failures: tuple[WalkOffHrPipelineFailure, ...]
-
-
-def _moment_game_date(facts: dict) -> date:
-    raw_value = facts.get("schedule_candidate", {}).get("game_date")
-    if not isinstance(raw_value, str):
-        raise ValueError("MomentContext no contiene game_date factual")
-    try:
-        return date.fromisoformat(raw_value)
-    except ValueError as exc:
-        raise ValueError("MomentContext contiene game_date factual inválido") from exc
 
 
 def run_walk_off_hr_pipeline(
@@ -103,13 +94,13 @@ def run_walk_off_hr_pipeline(
             if evaluation is None or evaluation.moment_context is None:
                 raise ValueError("MomentEvaluation persistida no tiene contexto")
             context = evaluation.moment_context
-            moment_game_date = _moment_game_date(context.facts)
+            event_date = moment_game_date(context)
             ratings = resolve_player_ratings_as_of(
                 db,
                 player_id=context.player_id,
                 role=context.role,
                 season=context.season,
-                as_of_date=moment_game_date,
+                as_of_date=event_date,
                 rating_model_version=rating_model_version,
                 distribution_version=distribution_version,
             )
@@ -120,7 +111,7 @@ def run_walk_off_hr_pipeline(
                     "moment_context_id=%s player_id=%s game_date=%s",
                     context.id,
                     context.player_id,
-                    moment_game_date,
+                    event_date,
                 )
                 continue
             profile_result = generate_moment_card_rating_profile(

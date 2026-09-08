@@ -2,14 +2,13 @@
 
 import logging
 from dataclasses import dataclass
-from datetime import date
-
 from sqlalchemy.orm import Session
 
 from app.models import MomentEvaluation, MomentType
 from etl.config.league_distributions import DISTRIBUTION_MODEL_VERSION
 from etl.config.ratings_2 import RATING_MODEL_VERSION
 from etl.services.moment_card_profiles import generate_moment_card_rating_profile
+from etl.services.moment_facts import moment_game_date
 from etl.services.player_ratings_resolver import resolve_player_ratings_as_of
 
 
@@ -32,16 +31,6 @@ class MultiHrMomentCardProfileBatchResult:
     failed: int
     card_rating_profile_ids: tuple[str, ...]
     failures: tuple[MultiHrMomentCardProfileFailure, ...]
-
-
-def _game_date(evaluation: MomentEvaluation) -> date:
-    raw_value = evaluation.moment_context.facts.get("game", {}).get("game_date")
-    if not isinstance(raw_value, str):
-        raise ValueError("MomentContext MULTI_HR_GAME no contiene game.game_date")
-    try:
-        return date.fromisoformat(raw_value)
-    except ValueError as exc:
-        raise ValueError("MomentContext contiene game.game_date inválido") from exc
 
 
 def generate_multi_hr_moment_card_profiles(
@@ -69,7 +58,7 @@ def generate_multi_hr_moment_card_profiles(
                 context = evaluation.moment_context
                 if context is None:
                     raise ValueError("MomentEvaluation no tiene MomentContext")
-                event_date = _game_date(evaluation)
+                event_date = moment_game_date(context)
                 ratings = resolve_player_ratings_as_of(
                     db,
                     player_id=context.player_id,
