@@ -54,6 +54,7 @@ from etl.services.batter_vision import calculate_batter_vision
 from etl.services.batter_ratings2 import calculate_batter_ratings2
 from etl.services.batter_ratings2_population import generate_batter_ratings2_population
 from etl.services.player_ratings_as_of import generate_player_ratings_as_of
+from etl.services.multi_hr_game_detector import detect_multi_hr_games
 from etl.services.walk_off_hr_detector import detect_walk_off_home_runs
 from etl.services.walk_off_hr_pipeline import run_walk_off_hr_pipeline
 from etl.sources.mlb import MLBStatsApiClient
@@ -309,6 +310,13 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     walk_off.add_argument("--from", dest="date_from", type=_parse_date, required=True)
     walk_off.add_argument("--to", dest="date_to", type=_parse_date, required=True)
+
+    multi_hr = sub.add_parser(
+        "detect-multi-hr-games",
+        help="Detecta juegos de 2+ HR y persiste sus MomentContext",
+    )
+    multi_hr.add_argument("--from", dest="date_from", type=_parse_date, required=True)
+    multi_hr.add_argument("--to", dest="date_to", type=_parse_date, required=True)
 
     walk_off_pipeline = sub.add_parser(
         "run-walk-off-hr-pipeline",
@@ -868,6 +876,27 @@ def main(argv=None) -> int:
                     "walk-off detector game_pk=%s at_bat=%s batter=%s reason=%s",
                     failure.game_pk,
                     failure.at_bat_number,
+                    failure.batter_mlb_id,
+                    failure.reason,
+                )
+
+        elif args.command == "detect-multi-hr-games":
+            result = detect_multi_hr_games(
+                db,
+                MLBStatsApiClient(),
+                date_from=args.date_from,
+                date_to=args.date_to,
+            )
+            print(
+                f"selected={result.selected} confirmed={result.confirmed} "
+                f"created={result.created} updated={result.updated} "
+                f"unchanged={result.unchanged} unconfirmed={result.unconfirmed} "
+                f"failed={result.failed}"
+            )
+            for failure in result.failures:
+                logger.warning(
+                    "multi-HR detector game_pk=%s batter=%s reason=%s",
+                    failure.game_pk,
                     failure.batter_mlb_id,
                     failure.reason,
                 )
