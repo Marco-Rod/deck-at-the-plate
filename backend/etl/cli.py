@@ -55,6 +55,7 @@ from etl.services.batter_ratings2 import calculate_batter_ratings2
 from etl.services.batter_ratings2_population import generate_batter_ratings2_population
 from etl.services.player_ratings_as_of import generate_player_ratings_as_of
 from etl.services.multi_hr_game_detector import detect_multi_hr_games
+from etl.services.ten_strikeout_game_detector import detect_ten_strikeout_games
 from etl.services.multi_hr_moment_evaluations import (
     evaluate_discovered_multi_hr_moments,
 )
@@ -323,6 +324,17 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     multi_hr.add_argument("--from", dest="date_from", type=_parse_date, required=True)
     multi_hr.add_argument("--to", dest="date_to", type=_parse_date, required=True)
+
+    ten_strikeouts = sub.add_parser(
+        "detect-ten-strikeout-games",
+        help="Detecta juegos de pitcher con 10+ K y persiste sus MomentContext",
+    )
+    ten_strikeouts.add_argument(
+        "--from", dest="date_from", type=_parse_date, required=True
+    )
+    ten_strikeouts.add_argument(
+        "--to", dest="date_to", type=_parse_date, required=True
+    )
 
     sub.add_parser(
         "evaluate-multi-hr-moments",
@@ -913,6 +925,27 @@ def main(argv=None) -> int:
                     "multi-HR detector game_pk=%s batter=%s reason=%s",
                     failure.game_pk,
                     failure.batter_mlb_id,
+                    failure.reason,
+                )
+
+        elif args.command == "detect-ten-strikeout-games":
+            result = detect_ten_strikeout_games(
+                db,
+                MLBStatsApiClient(),
+                date_from=args.date_from,
+                date_to=args.date_to,
+            )
+            print(
+                f"selected={result.selected} confirmed={result.confirmed} "
+                f"created={result.created} updated={result.updated} "
+                f"unchanged={result.unchanged} unconfirmed={result.unconfirmed} "
+                f"failed={result.failed}"
+            )
+            for failure in result.failures:
+                logger.warning(
+                    "10-K detector game_pk=%s pitcher=%s reason=%s",
+                    failure.game_pk,
+                    failure.pitcher_mlb_id,
                     failure.reason,
                 )
 
