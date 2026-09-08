@@ -9,10 +9,10 @@ from sqlalchemy.orm import Session
 from app.models import MomentEvaluation
 from etl.config.league_distributions import DISTRIBUTION_MODEL_VERSION
 from etl.config.ratings_2 import RATING_MODEL_VERSION
-from etl.services.moment_card_profiles import generate_moment_card_rating_profile
 from etl.services.moment_evaluations import evaluate_moment
-from etl.services.moment_facts import moment_game_date
-from etl.services.player_ratings_resolver import resolve_player_ratings_as_of
+from etl.services.moment_profile_pipeline import (
+    generate_profile_for_moment_evaluation,
+)
 from etl.services.walk_off_hr_detector import detect_walk_off_home_runs
 from etl.sources.mlb import MLBStatsApiClient
 
@@ -93,32 +93,20 @@ def run_walk_off_hr_pipeline(
             )
             if evaluation is None or evaluation.moment_context is None:
                 raise ValueError("MomentEvaluation persistida no tiene contexto")
-            context = evaluation.moment_context
-            event_date = moment_game_date(context)
-            ratings = resolve_player_ratings_as_of(
+            profile_result = generate_profile_for_moment_evaluation(
                 db,
-                player_id=context.player_id,
-                role=context.role,
-                season=context.season,
-                as_of_date=event_date,
+                evaluation=evaluation,
                 rating_model_version=rating_model_version,
                 distribution_version=distribution_version,
             )
-            if ratings is None:
+            if profile_result.status == "SKIPPED_NO_RATINGS":
                 counts["profiles_skipped_no_ratings"] += 1
                 logger.info(
                     "moment profile skipped: no PlayerRatings as-of "
-                    "moment_context_id=%s player_id=%s game_date=%s",
-                    context.id,
-                    context.player_id,
-                    event_date,
+                    "moment_context_id=%s",
+                    evaluation.moment_context_id,
                 )
                 continue
-            profile_result = generate_moment_card_rating_profile(
-                db,
-                moment_evaluation_id=evaluation.id,
-                source_player_ratings_id=ratings.id,
-            )
             counts[f"profiles_{profile_result.status.lower()}"] += 1
         except Exception as exc:
             db.rollback()

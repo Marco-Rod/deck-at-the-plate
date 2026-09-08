@@ -7,9 +7,9 @@ from sqlalchemy.orm import Session
 from app.models import MomentEvaluation, MomentType
 from etl.config.league_distributions import DISTRIBUTION_MODEL_VERSION
 from etl.config.ratings_2 import RATING_MODEL_VERSION
-from etl.services.moment_card_profiles import generate_moment_card_rating_profile
-from etl.services.moment_facts import moment_game_date
-from etl.services.player_ratings_resolver import resolve_player_ratings_as_of
+from etl.services.moment_profile_pipeline import (
+    generate_profile_for_moment_evaluation,
+)
 
 
 logger = logging.getLogger("etl.services.multi_hr_moment_card_profiles")
@@ -55,28 +55,16 @@ def generate_multi_hr_moment_card_profiles(
     for evaluation in evaluations:
         try:
             with db.begin_nested():
-                context = evaluation.moment_context
-                if context is None:
-                    raise ValueError("MomentEvaluation no tiene MomentContext")
-                event_date = moment_game_date(context)
-                ratings = resolve_player_ratings_as_of(
+                result = generate_profile_for_moment_evaluation(
                     db,
-                    player_id=context.player_id,
-                    role=context.role,
-                    season=context.season,
-                    as_of_date=event_date,
+                    evaluation=evaluation,
                     rating_model_version=rating_model_version,
                     distribution_version=distribution_version,
-                )
-                if ratings is None:
-                    counts["skipped_no_ratings"] += 1
-                    continue
-                result = generate_moment_card_rating_profile(
-                    db,
-                    moment_evaluation_id=evaluation.id,
-                    source_player_ratings_id=ratings.id,
                     commit=False,
                 )
+                if result.status == "SKIPPED_NO_RATINGS":
+                    counts["skipped_no_ratings"] += 1
+                    continue
             counts[result.status.lower()] += 1
             profile_ids.append(result.card_rating_profile_id)
         except Exception as exc:
