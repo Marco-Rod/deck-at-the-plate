@@ -9,7 +9,9 @@ import pytest
 from app.models import MomentContext, MomentEvaluation, MomentType, PlayerRatings
 from etl.services.moment_rating_adjustments import (
     MOMENT_RATING_ADJUSTMENT_VERSION,
+    MULTI_HR_GAME_ADJUSTMENT_RULES,
     WALK_OFF_HR_ADJUSTMENT_RULES,
+    calculate_multi_hr_game_rating_adjustments,
     calculate_moment_rating_adjustments,
 )
 
@@ -65,6 +67,16 @@ def _evaluation(**overrides):
     return MomentEvaluation(**values)
 
 
+def _multi_evaluation(*, performance, uncommonness, leverage, significance):
+    return _evaluation(
+        moment_type=MomentType.MULTI_HR_GAME,
+        performance_score=Decimal(performance),
+        statistical_uncommonness=Decimal(uncommonness),
+        leverage_score=Decimal(leverage),
+        significance_score=Decimal(significance),
+    )
+
+
 def test_walk_off_hr_produce_ajustes_auditables_sin_mutar_fuentes():
     ratings = _ratings()
     evaluation = _evaluation()
@@ -104,6 +116,129 @@ def test_as_card_policy_adjustments_usa_nombres_del_contrato():
         "vision_rating": 3,
         "clutch_rating": 16,
     }
+
+
+@pytest.mark.parametrize(
+    ("scores", "expected"),
+    [
+        ((".915", ".930", ".31667", ".80058"), (7, 17, 2, 4)),
+        ((".680", ".720", ".650", ".688"), (6, 14, 2, 6)),
+        ((".695", ".720", ".050", ".57475"), (6, 14, 2, 2)),
+        ((".830", ".930", ".06667", ".71233"), (7, 16, 2, 3)),
+    ],
+)
+def test_multi_hr_reproduce_los_cuatro_controles_reales(scores, expected):
+    result = calculate_multi_hr_game_rating_adjustments(
+        _multi_evaluation(
+            performance=scores[0],
+            uncommonness=scores[1],
+            leverage=scores[2],
+            significance=scores[3],
+        ),
+        _ratings(),
+    )
+
+    assert (result.contact, result.power, result.vision, result.clutch) == expected
+    assert result.reason == "MULTI_HR_GAME"
+    assert result.policy_version == MOMENT_RATING_ADJUSTMENT_VERSION
+
+
+def test_multi_hr_cap_distingue_power_solicitado_y_aplicado():
+    result = calculate_multi_hr_game_rating_adjustments(
+        _multi_evaluation(
+            performance=".915",
+            uncommonness=".930",
+            leverage=".31667",
+            significance=".80058",
+        ),
+        _ratings(power_rating=90),
+    )
+
+    assert result.requested_adjustments["power_rating"] == 17
+    assert result.transformed_ratings["power_rating"] == 99
+    assert result.applied_adjustments["power_rating"] == 9
+    assert "power_rating" in result.capped_attributes
+
+
+def test_multi_hr_es_determinista_y_no_muta_player_ratings():
+    ratings = _ratings()
+    evaluation = _multi_evaluation(
+        performance=".680",
+        uncommonness=".720",
+        leverage=".650",
+        significance=".688",
+    )
+    original = tuple(getattr(ratings, field) for field in (
+        "contact_rating", "power_rating", "vision_rating", "clutch_rating"
+    ))
+
+    first = calculate_multi_hr_game_rating_adjustments(evaluation, ratings)
+    second = calculate_multi_hr_game_rating_adjustments(evaluation, ratings)
+
+    assert first == second
+    assert tuple(getattr(ratings, field) for field in (
+        "contact_rating", "power_rating", "vision_rating", "clutch_rating"
+    )) == original
+
+
+def test_multi_hr_power_y_clutch_son_monotonicos():
+    base = dict(
+        performance=".60",
+        uncommonness=".70",
+        leverage=".10",
+        significance=".60",
+    )
+    low = calculate_multi_hr_game_rating_adjustments(
+        _multi_evaluation(**base), _ratings()
+    )
+    higher_performance = calculate_multi_hr_game_rating_adjustments(
+        _multi_evaluation(**{**base, "performance": ".90"}), _ratings()
+    )
+    higher_uncommonness = calculate_multi_hr_game_rating_adjustments(
+        _multi_evaluation(**{**base, "uncommonness": ".95"}), _ratings()
+    )
+    higher_leverage = calculate_multi_hr_game_rating_adjustments(
+        _multi_evaluation(**{**base, "leverage": ".90"}), _ratings()
+    )
+
+    assert higher_performance.power >= low.power
+    assert higher_uncommonness.power >= low.power
+    assert higher_leverage.clutch >= low.clutch
+
+
+def test_multi_hr_rechaza_pitcher_y_walk_off():
+    multi = _multi_evaluation(
+        performance=".68",
+        uncommonness=".72",
+        leverage=".65",
+        significance=".688",
+    )
+    with pytest.raises(ValueError, match="BATTER"):
+        calculate_multi_hr_game_rating_adjustments(
+            multi, _ratings(role="PITCHER")
+        )
+    with pytest.raises(ValueError, match="moment_type no soportado"):
+        calculate_multi_hr_game_rating_adjustments(_evaluation(), _ratings())
+
+
+def test_multi_hr_reglas_forman_parte_del_fingerprint():
+    evaluation = _multi_evaluation(
+        performance=".68",
+        uncommonness=".72",
+        leverage=".65",
+        significance=".688",
+    )
+    v1 = calculate_multi_hr_game_rating_adjustments(evaluation, _ratings())
+    changed = calculate_multi_hr_game_rating_adjustments(
+        evaluation,
+        _ratings(),
+        rules=replace(
+            MULTI_HR_GAME_ADJUSTMENT_RULES,
+            power_base=Decimal("6"),
+        ),
+    )
+
+    assert v1.input_hash != changed.input_hash
 
 
 def test_mayor_significance_nunca_reduce_un_boost():

@@ -38,6 +38,24 @@ WALK_OFF_HR_ADJUSTMENT_RULES = WalkOffHrAdjustmentRules()
 
 
 @dataclass(frozen=True)
+class MultiHrGameAdjustmentRules:
+    policy_version: str = MOMENT_RATING_ADJUSTMENT_VERSION
+    contact_base: Decimal = Decimal("2")
+    contact_performance_weight: Decimal = Decimal("4")
+    contact_significance_weight: Decimal = Decimal("2")
+    power_base: Decimal = Decimal("5")
+    power_performance_weight: Decimal = Decimal("6")
+    power_uncommonness_weight: Decimal = Decimal("5")
+    power_significance_weight: Decimal = Decimal("2")
+    vision_significance_weight: Decimal = Decimal("3")
+    clutch_leverage_weight: Decimal = Decimal("6")
+    clutch_significance_weight: Decimal = Decimal("3")
+
+
+MULTI_HR_GAME_ADJUSTMENT_RULES = MultiHrGameAdjustmentRules()
+
+
+@dataclass(frozen=True)
 class MomentRatingAdjustments:
     contact: int
     power: int
@@ -105,11 +123,44 @@ def _requested_adjustments(
     }
 
 
-def _rules_payload(rules: WalkOffHrAdjustmentRules) -> dict[str, str]:
+def _multi_hr_requested_adjustments(
+    evaluation: MomentEvaluation, rules: MultiHrGameAdjustmentRules
+) -> dict[str, int]:
+    significance = _validate_score(
+        "significance_score", evaluation.significance_score
+    )
+    performance = _validate_score("performance_score", evaluation.performance_score)
+    leverage = _validate_score("leverage_score", evaluation.leverage_score)
+    uncommonness = _validate_score(
+        "statistical_uncommonness", evaluation.statistical_uncommonness
+    )
+    return {
+        "contact_rating": round_rating(
+            rules.contact_base
+            + performance * rules.contact_performance_weight
+            + significance * rules.contact_significance_weight
+        ),
+        "power_rating": round_rating(
+            rules.power_base
+            + performance * rules.power_performance_weight
+            + uncommonness * rules.power_uncommonness_weight
+            + significance * rules.power_significance_weight
+        ),
+        "vision_rating": round_rating(
+            significance * rules.vision_significance_weight
+        ),
+        "clutch_rating": round_rating(
+            leverage * rules.clutch_leverage_weight
+            + significance * rules.clutch_significance_weight
+        ),
+    }
+
+
+def _rules_payload(rules) -> dict[str, str]:
     return {key: str(value) for key, value in asdict(rules).items()}
 
 
-def _validate_rules(rules: WalkOffHrAdjustmentRules) -> None:
+def _validate_rules(rules) -> None:
     if not rules.policy_version or not rules.policy_version.strip():
         raise ValueError("policy_version es obligatorio")
     coefficients = (
@@ -128,18 +179,19 @@ def _input_hash(payload: dict) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def calculate_moment_rating_adjustments(
+def _calculate_adjustments(
     evaluation: MomentEvaluation,
     player_ratings: PlayerRatings,
     *,
-    rules: WalkOffHrAdjustmentRules = WALK_OFF_HR_ADJUSTMENT_RULES,
+    moment_type: MomentType,
+    rules,
+    requested_factory,
 ) -> MomentRatingAdjustments:
-    """Calcula deltas capped para BATTER; no escribe ni modifica los modelos."""
     _validate_rules(rules)
-    if evaluation.moment_type != MomentType.WALK_OFF_HR:
+    if evaluation.moment_type != moment_type:
         raise ValueError(f"moment_type no soportado: {evaluation.moment_type}")
     if player_ratings.role != "BATTER":
-        raise ValueError("WALK_OFF_HR solo soporta PlayerRatings BATTER")
+        raise ValueError(f"{moment_type.value} solo soporta PlayerRatings BATTER")
     context = evaluation.moment_context
     if context is None:
         raise ValueError("MomentEvaluation no tiene MomentContext")
@@ -151,7 +203,7 @@ def calculate_moment_rating_adjustments(
         for value in base_ratings.values()
     ):
         raise ValueError("PlayerRatings BATTER está incompleto")
-    requested = _requested_adjustments(evaluation, rules)
+    requested = requested_factory(evaluation, rules)
     transformed = {}
     applied = {}
     capped = []
@@ -166,7 +218,7 @@ def calculate_moment_rating_adjustments(
     rules_payload = _rules_payload(rules)
     payload = {
         "policy_version": rules.policy_version,
-        "reason": MomentType.WALK_OFF_HR.value,
+        "reason": moment_type.value,
         "source_moment_evaluation": {
             "id": evaluation.id,
             "input_hash": evaluation.input_hash,
@@ -201,10 +253,42 @@ def calculate_moment_rating_adjustments(
         transformed_ratings=transformed,
         capped_attributes=tuple(capped),
         policy_version=rules.policy_version,
-        reason=MomentType.WALK_OFF_HR.value,
+        reason=moment_type.value,
         source_moment_evaluation_id=evaluation.id,
         source_moment_evaluation_hash=evaluation.input_hash,
         source_player_ratings_id=player_ratings.id,
         source_player_ratings_hash=player_ratings.input_hash,
         input_hash=_input_hash(payload),
+    )
+
+
+def calculate_moment_rating_adjustments(
+    evaluation: MomentEvaluation,
+    player_ratings: PlayerRatings,
+    *,
+    rules: WalkOffHrAdjustmentRules = WALK_OFF_HR_ADJUSTMENT_RULES,
+) -> MomentRatingAdjustments:
+    """Calcula deltas WALK_OFF_HR; conserva el contrato público original."""
+    return _calculate_adjustments(
+        evaluation,
+        player_ratings,
+        moment_type=MomentType.WALK_OFF_HR,
+        rules=rules,
+        requested_factory=_requested_adjustments,
+    )
+
+
+def calculate_multi_hr_game_rating_adjustments(
+    evaluation: MomentEvaluation,
+    player_ratings: PlayerRatings,
+    *,
+    rules: MultiHrGameAdjustmentRules = MULTI_HR_GAME_ADJUSTMENT_RULES,
+) -> MomentRatingAdjustments:
+    """Calcula boosts Power-oriented para MULTI_HR_GAME sin persistir nada."""
+    return _calculate_adjustments(
+        evaluation,
+        player_ratings,
+        moment_type=MomentType.MULTI_HR_GAME,
+        rules=rules,
+        requested_factory=_multi_hr_requested_adjustments,
     )
