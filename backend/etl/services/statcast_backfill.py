@@ -12,6 +12,7 @@ from etl.services.statcast_population import (
     import_statcast_population,
     select_population_players,
 )
+from etl.services.season_bounds import resolve_regular_season_start
 from etl.sources.mlb import MLBStatsApiClient
 
 
@@ -34,30 +35,6 @@ class StatcastBackfillResult:
     rows_rejected: int
     players_failed: int
     import_result: PopulationImportResult
-
-
-def resolve_regular_season_start(
-    client: MLBStatsApiClient, *, season: int, date_to: date
-) -> date:
-    """Resuelve el primer juego de temporada regular hasta el corte solicitado."""
-    if date_to.year != season:
-        raise ValueError("date_to debe pertenecer a season")
-    schedule = client.get_schedule(
-        date(season, 1, 1), date_to, game_type="R"
-    )
-    dates = []
-    for day in schedule.get("dates", []):
-        try:
-            game_date = date.fromisoformat(day.get("date"))
-        except (TypeError, ValueError):
-            continue
-        if any(game.get("gameType") == "R" for game in day.get("games", [])):
-            dates.append(game_date)
-    if not dates:
-        raise ValueError(
-            f"MLB Schedule no contiene juegos regulares de {season} hasta {date_to}"
-        )
-    return min(dates)
 
 
 def _coverage(

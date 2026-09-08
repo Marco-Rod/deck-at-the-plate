@@ -19,6 +19,8 @@ from etl.services.pitcher_ratings2_population import (
     PitcherRatings2PopulationResult,
     generate_pitcher_ratings2_population,
 )
+from etl.services.season_bounds import resolve_regular_season_start
+from etl.sources.mlb import MLBStatsApiClient
 
 
 @dataclass(frozen=True)
@@ -59,8 +61,9 @@ def generate_player_ratings_as_of(
     as_of_date: date,
     distribution_version: str | None = None,
     limit: int | None = None,
+    mlb_client: MLBStatsApiClient | None = None,
 ) -> PlayerRatingsAsOfResult:
-    """Construye Analytics, distribuciones y ratings desde enero 1 hasta as-of."""
+    """Construye Analytics, distribuciones y ratings desde Opening Day hasta as-of."""
     normalized_role = role.upper()
     if normalized_role not in {"BATTER", "PITCHER"}:
         raise ValueError("role debe ser batter o pitcher")
@@ -69,7 +72,9 @@ def generate_player_ratings_as_of(
     if limit is not None and limit < 1:
         raise ValueError("limit debe ser mayor que cero")
 
-    data_start_date = date(season, 1, 1)
+    data_start_date = resolve_regular_season_start(
+        mlb_client or MLBStatsApiClient(), season=season, date_to=as_of_date
+    )
     _require_raw_data(
         db,
         season=season,

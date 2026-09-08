@@ -13,7 +13,7 @@ from etl.services.player_ratings_as_of import generate_player_ratings_as_of
 
 
 AS_OF = dt.date(2026, 8, 24)
-SEASON_START = dt.date(2026, 1, 1)
+SEASON_START = dt.date(2026, 3, 25)
 
 
 def _install_fakes(monkeypatch):
@@ -52,6 +52,10 @@ def _install_fakes(monkeypatch):
         calls.append(("pitcher", db, kwargs))
         return ratings_result
 
+    monkeypatch.setattr(
+        "etl.services.player_ratings_as_of.resolve_regular_season_start",
+        lambda *_args, **_kwargs: SEASON_START,
+    )
     monkeypatch.setattr(
         "etl.services.player_ratings_as_of._require_raw_data",
         lambda *_args, **_kwargs: calls.append(("raw_guard", _kwargs)),
@@ -154,7 +158,20 @@ def test_no_genera_snapshot_vacio_si_falta_raw():
     try:
         with pytest.raises(ValueError, match="sin RawPitchEvent"):
             generate_player_ratings_as_of(
-                db, season=2026, role="batter", as_of_date=AS_OF
+                db,
+                season=2026,
+                role="batter",
+                as_of_date=AS_OF,
+                mlb_client=SimpleNamespace(
+                    get_schedule=lambda *_args, **_kwargs: {
+                        "dates": [
+                            {
+                                "date": SEASON_START.isoformat(),
+                                "games": [{"gameType": "R"}],
+                            }
+                        ]
+                    }
+                ),
             )
     finally:
         db.close()
