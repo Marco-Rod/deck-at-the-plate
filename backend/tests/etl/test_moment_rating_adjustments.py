@@ -10,9 +10,11 @@ from app.models import MomentContext, MomentEvaluation, MomentType, PlayerRating
 from etl.services.moment_rating_adjustments import (
     MOMENT_RATING_ADJUSTMENT_VERSION,
     MULTI_HR_GAME_ADJUSTMENT_RULES,
+    TEN_STRIKEOUT_GAME_ADJUSTMENT_RULES,
     WALK_OFF_HR_ADJUSTMENT_RULES,
     calculate_multi_hr_game_rating_adjustments,
     calculate_moment_rating_adjustments,
+    calculate_ten_strikeout_game_rating_adjustments,
 )
 
 
@@ -74,6 +76,49 @@ def _multi_evaluation(*, performance, uncommonness, leverage, significance):
         statistical_uncommonness=Decimal(uncommonness),
         leverage_score=Decimal(leverage),
         significance_score=Decimal(significance),
+    )
+
+
+def _pitcher_ratings(*, velocity, control, movement, stuff, **overrides):
+    return _ratings(
+        role="PITCHER",
+        contact_rating=None,
+        power_rating=None,
+        vision_rating=None,
+        clutch_rating=None,
+        velocity_rating=velocity,
+        control_rating=control,
+        movement_rating=movement,
+        stuff_rating=stuff,
+        **overrides,
+    )
+
+
+def _ten_k_evaluation(*, performance, uncommonness, significance):
+    context = MomentContext(
+        id="ten-k-context-1",
+        player_id="player-1",
+        card_edition_id="edition-1",
+        role="PITCHER",
+        season=2026,
+        occurred_at=dt.datetime(2026, 9, 5, tzinfo=dt.timezone.utc),
+        source_type="MLB_STATS_API",
+        source_reference="mlb:ten-k",
+        context_version="moment-context-1.0",
+        facts={"pitching": {"strikeouts": 10}},
+        input_hash="t" * 64,
+    )
+    return MomentEvaluation(
+        id="ten-k-evaluation-1",
+        moment_context=context,
+        moment_type=MomentType.TEN_STRIKEOUT_GAME,
+        significance_score=Decimal(significance),
+        performance_score=Decimal(performance),
+        leverage_score=Decimal("0.50000"),
+        statistical_uncommonness=Decimal(uncommonness),
+        evaluation_version="moment-eval-1.0",
+        rules_payload={},
+        input_hash="k" * 64,
     )
 
 
@@ -239,6 +284,124 @@ def test_multi_hr_reglas_forman_parte_del_fingerprint():
     )
 
     assert v1.input_hash != changed.input_hash
+
+
+@pytest.mark.parametrize(
+    ("ratings", "scores", "budget", "boosts"),
+    [
+        ((76, 78, 69, 89), (".91450", "1", ".92370"), 29, (5, 7, 7, 10)),
+        ((60, 84, 82, 88), (".77412", ".95", ".82197"), 27, (3, 6, 7, 11)),
+        ((51, 81, 79, 54), (".74929", ".80", ".75457"), 26, (4, 6, 7, 9)),
+        ((54, 60, 77, 49), (".77337", ".75", ".75152"), 26, (4, 5, 8, 9)),
+        ((63, 87, 72, 67), (".73500", ".80", ".74600"), 26, (4, 6, 6, 10)),
+        ((86, 55, 78, 70), (".70750", ".70", ".69450"), 25, (4, 4, 7, 10)),
+        ((68, 63, 77, 88), (".70273", ".70", ".69164"), 25, (4, 4, 6, 11)),
+        ((89, 68, 75, 70), (".59571", ".80", ".66243"), 24, (4, 5, 6, 9)),
+        ((48, 79, 81, 83), (".62250", ".70", ".64350"), 24, (3, 5, 6, 10)),
+    ],
+)
+def test_ten_k_reproduce_nueve_casos_reales(ratings, scores, budget, boosts):
+    result = calculate_ten_strikeout_game_rating_adjustments(
+        _ten_k_evaluation(
+            performance=scores[0], uncommonness=scores[1], significance=scores[2]
+        ),
+        _pitcher_ratings(
+            velocity=ratings[0],
+            control=ratings[1],
+            movement=ratings[2],
+            stuff=ratings[3],
+        ),
+    )
+
+    assert result.boost_budget == budget
+    assert (result.velocity, result.control, result.movement, result.stuff) == boosts
+    assert sum(result.applied_adjustments.values()) == budget
+
+
+def test_ten_k_gavin_redistribuye_cap_y_conserva_budget():
+    result = calculate_ten_strikeout_game_rating_adjustments(
+        _ten_k_evaluation(
+            performance=".91450", uncommonness="1", significance=".92370"
+        ),
+        _pitcher_ratings(velocity=76, control=78, movement=69, stuff=89),
+    )
+
+    assert result.requested_adjustments == {
+        "velocity_rating": 4,
+        "control_rating": 6,
+        "movement_rating": 7,
+        "stuff_rating": 12,
+    }
+    assert result.applied_adjustments == {
+        "velocity_rating": 5,
+        "control_rating": 7,
+        "movement_rating": 7,
+        "stuff_rating": 10,
+    }
+    assert result.transformed_ratings == {
+        "velocity_rating": 81,
+        "control_rating": 85,
+        "movement_rating": 76,
+        "stuff_rating": 99,
+    }
+    assert result.capped_attributes == ("stuff_rating",)
+
+
+def test_ten_k_reporta_budget_no_aplicado_si_todo_esta_en_cap():
+    result = calculate_ten_strikeout_game_rating_adjustments(
+        _ten_k_evaluation(performance="1", uncommonness="1", significance="1"),
+        _pitcher_ratings(velocity=99, control=99, movement=99, stuff=99),
+    )
+
+    assert sum(result.applied_adjustments.values()) == 0
+    assert sum(result.requested_adjustments.values()) == result.boost_budget
+    assert set(result.capped_attributes) == set(result.requested_adjustments)
+
+
+def test_ten_k_es_determinista_no_muta_fuentes_y_versiona_reglas():
+    ratings = _pitcher_ratings(velocity=51, control=81, movement=79, stuff=54)
+    evaluation = _ten_k_evaluation(
+        performance=".74929", uncommonness=".80", significance=".75457"
+    )
+    original = tuple(getattr(ratings, field) for field in (
+        "velocity_rating",
+        "control_rating",
+        "movement_rating",
+        "stuff_rating",
+    ))
+
+    first = calculate_ten_strikeout_game_rating_adjustments(evaluation, ratings)
+    repeated = calculate_ten_strikeout_game_rating_adjustments(evaluation, ratings)
+    changed = calculate_ten_strikeout_game_rating_adjustments(
+        evaluation,
+        ratings,
+        rules=replace(
+            TEN_STRIKEOUT_GAME_ADJUSTMENT_RULES,
+            budget_base=Decimal("13"),
+        ),
+    )
+
+    assert first == repeated
+    assert first.input_hash != changed.input_hash
+    assert tuple(getattr(ratings, field) for field in (
+        "velocity_rating",
+        "control_rating",
+        "movement_rating",
+        "stuff_rating",
+    )) == original
+
+
+def test_ten_k_rechaza_batter_y_otro_moment_type():
+    evaluation = _ten_k_evaluation(
+        performance=".75", uncommonness=".80", significance=".76"
+    )
+    with pytest.raises(ValueError, match="PITCHER"):
+        calculate_ten_strikeout_game_rating_adjustments(evaluation, _ratings())
+    with pytest.raises(ValueError, match="moment_type no soportado"):
+        calculate_ten_strikeout_game_rating_adjustments(
+            _evaluation(),
+            _pitcher_ratings(velocity=70, control=70, movement=70, stuff=70),
+        )
 
 
 def test_mayor_significance_nunca_reduce_un_boost():
