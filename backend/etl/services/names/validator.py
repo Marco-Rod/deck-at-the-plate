@@ -58,9 +58,10 @@ class CollisionValidator:
     ) -> bool:
         if contains_blocked(display, self._blocked):
             return False
-        if display in used:
+        normalized_display = normalize(display)
+        if normalized_display in {normalize(value) for value in used}:
             return False
-        if normalize(display) in source_names:
+        if normalized_display in source_names:
             return False
         if not display or not display.strip():
             return False

@@ -85,6 +85,30 @@ class FictionalNameGenerator:
             ):
                 return GameIdentityName(first=first_case, last=last_case, display=display)
 
+        # Los retries pseudoaleatorios son rápidos, pero una población grande
+        # puede no encontrar en 20 intentos una combinación todavía libre. Antes
+        # de usar el fallback, recorremos determinísticamente todo el pool.
+        candidates = [
+            (given, family)
+            for given in pool.given
+            for family in pool.family
+        ]
+        if candidates:
+            start = seed_for(player_id, generator_version, 0) % len(candidates)
+            for offset in range(len(candidates)):
+                given_part, family_part = candidates[(start + offset) % len(candidates)]
+                first_case = title_case(given_part)
+                last_case = title_case(family_part)
+                display = f"{first_case} {last_case}".strip()
+                if self._validator.is_acceptable(
+                    display, used=used, source_names=source_names
+                ):
+                    return GameIdentityName(
+                        first=first_case,
+                        last=last_case,
+                        display=display,
+                    )
+
         fallback = self._fallback(player_id, generator_version, used)
         return fallback
 

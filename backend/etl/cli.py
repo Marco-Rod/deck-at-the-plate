@@ -452,8 +452,10 @@ def main(argv=None) -> int:
 
                 print(render_report(result))
             logger.info(
-                "generate-game-identities dry_run=%s created=%s unchanged=%s version=%s",
-                result.dry_run, result.created, result.unchanged, result.version,
+                "generate-game-identities dry_run=%s created=%s regenerated=%s "
+                "unchanged=%s version=%s",
+                result.dry_run, result.created, result.regenerated,
+                result.unchanged, result.version,
             )
 
         elif args.command == "validate-game-identities":

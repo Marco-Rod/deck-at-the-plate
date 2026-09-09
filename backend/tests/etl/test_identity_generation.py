@@ -57,6 +57,68 @@ def test_persistencia_gana_y_rerun_estable(db):
     assert db.query(GamePlayerIdentity).one().display_name == identity.display_name
 
 
+def test_regenera_fallback_legacy_una_vez_y_luego_queda_estable(db):
+    player = _player(db, 514888, "Jose", "Example")
+    db.add(
+        GamePlayerIdentity(
+            player_id=player.id,
+            display_first_name="Player",
+            display_last_name="18006",
+            display_name="Player 18006",
+            name_profile="UNKNOWN",
+            generator_version="names-1.0",
+        )
+    )
+    db.commit()
+
+    regenerated = generate_identity_batch(db, missing_only=True)
+    identity = db.query(GamePlayerIdentity).one()
+
+    assert regenerated.created == 0
+    assert regenerated.regenerated == 1
+    assert regenerated.unchanged == 0
+    assert identity.display_name != "Player 18006"
+    assert not identity.display_name.startswith("Player ")
+    assert identity.name_profile in ("UNKNOWN", "SPANISH")
+    assert validate_game_identities(db).ok is True
+
+    repeated = generate_identity_batch(db, missing_only=True)
+    assert repeated.regenerated == 0
+    assert repeated.unchanged == 1
+    assert db.query(GamePlayerIdentity).one().display_name == identity.display_name
+
+
+def test_gate_conserva_deteccion_de_colisiones_normalizadas(db):
+    first = _player(db, 600001, "Alpha", "One")
+    second = _player(db, 600002, "Beta", "Two")
+    db.add_all(
+        [
+            GamePlayerIdentity(
+                player_id=first.id,
+                display_first_name="Jose",
+                display_last_name="Foo",
+                display_name="José Foo",
+                name_profile="SPANISH",
+                generator_version="names-1.0",
+            ),
+            GamePlayerIdentity(
+                player_id=second.id,
+                display_first_name="Jose",
+                display_last_name="Foo",
+                display_name="Jose Foo",
+                name_profile="SPANISH",
+                generator_version="names-1.0",
+            ),
+        ]
+    )
+    db.commit()
+
+    result = validate_game_identities(db)
+
+    assert result.ok is False
+    assert any("display_name duplicado" in issue for issue in result.detail)
+
+
 def test_dry_run_no_escribe_pero_reporta(db):
     _player(db, 660272, "Jose", "Ramirez")
     result = generate_identity_batch(db, missing_only=True, dry_run=True)

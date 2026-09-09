@@ -72,6 +72,30 @@ def test_retry_determinista_ante_colision(generated):
     assert third.display == second.display  # el retry es determinista
 
 
+def test_colision_usa_la_misma_normalizacion_que_el_gate():
+    validator = CollisionValidator()
+    assert not validator.is_acceptable(
+        "Jose Foo", used={"José Foo"}, source_names=set()
+    )
+
+
+def test_busqueda_exhaustiva_evade_colisiones_tras_retries_rapidos():
+    generator = FictionalNameGenerator(DEFAULT_POOLS, max_attempts=0)
+    name = generator.generate(
+        player_id="exhaustive-player",
+        generator_version="names-1.0",
+        first="Jose",
+        last="Example",
+        profile="UNKNOWN",
+        used=set(),
+        source_names=set(),
+    )
+
+    assert not name.display.startswith("Player ")
+    assert name.first.lower() in DEFAULT_POOLS.given_for("UNKNOWN")
+    assert name.last.lower() in DEFAULT_POOLS.family_for("UNKNOWN")
+
+
 def test_evita_repeticion_de_nombres_fuente(generated):
     source = {"Jose Ramirez"}
     name = generated.generate(

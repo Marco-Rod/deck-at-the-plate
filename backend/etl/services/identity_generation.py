@@ -10,6 +10,7 @@ Reglas medulares:
 """
 
 import logging
+import re
 from dataclasses import dataclass, field
 
 from sqlalchemy.orm import Session
@@ -28,6 +29,7 @@ from etl.services.names import (
 from etl.services.names.text import normalize
 
 logger = logging.getLogger("etl.services.identity_generation")
+LEGACY_FALLBACK_RE = re.compile(r"^Player \d+$")
 
 
 @dataclass
@@ -48,6 +50,7 @@ class IdentityRunEntry:
 @dataclass
 class IdentityRunResult:
     created: int = 0
+    regenerated: int = 0
     unchanged: int = 0
     dry_run: bool = False
     version: str = NAMES_GENERATOR_VERSION
@@ -79,6 +82,14 @@ def _source_name(player: Player) -> str:
     return (player.full_name or "").strip() or f"{player.first_name or ''} {player.last_name or ''}".strip()
 
 
+def _is_legacy_fallback(identity: GamePlayerIdentity | None) -> bool:
+    return bool(
+        identity is not None
+        and identity.name_profile == "UNKNOWN"
+        and LEGACY_FALLBACK_RE.fullmatch(identity.display_name or "")
+    )
+
+
 def generate_identity_batch(
     db: Session,
     *,
@@ -97,16 +108,20 @@ def generate_identity_batch(
     generator = FictionalNameGenerator(DEFAULT_POOLS)
     result = IdentityRunResult(dry_run=dry_run, version=generator_version)
 
-    existing_rows = db.query(GamePlayerIdentity.player_id, GamePlayerIdentity.display_name).all()
-    has_identity = {row[0] for row in existing_rows}
-    used = {row[1] for row in existing_rows}
+    existing_rows = db.query(GamePlayerIdentity).all()
+    existing_by_player = {row.player_id: row for row in existing_rows}
+    used = {row.display_name for row in existing_rows}
     source_names = {normalize(_source_name(p)) for p in db.query(Player).all()}
 
     players = _eligible_players(db, season=season, player_id=player_id, limit=limit)
     for player in players:
-        if missing_only and player.id in has_identity:
+        existing_identity = existing_by_player.get(player.id)
+        legacy_fallback = _is_legacy_fallback(existing_identity)
+        if missing_only and existing_identity is not None and not legacy_fallback:
             result.unchanged += 1
             continue
+        if legacy_fallback:
+            used.discard(existing_identity.display_name)
 
         first = player.first_name or ""
         last = player.last_name or ""
@@ -142,7 +157,10 @@ def generate_identity_batch(
             name_profile=profile,
             generator_version=generator_version,
         )
-        result.created += 1
+        if legacy_fallback:
+            result.regenerated += 1
+        else:
+            result.created += 1
 
     if not dry_run:
         db.commit()
@@ -224,7 +242,9 @@ def validate_game_identities(
 
 def render_report(result: IdentityRunResult) -> str:
     lines = [
-        f"QA report (dry_run={result.dry_run}, version={result.version}, created={result.created}, unchanged={result.unchanged})",
+        f"QA report (dry_run={result.dry_run}, version={result.version}, "
+        f"created={result.created}, regenerated={result.regenerated}, "
+        f"unchanged={result.unchanged})",
         "source player                     profile        game identity",
         "-" * 70,
     ]
