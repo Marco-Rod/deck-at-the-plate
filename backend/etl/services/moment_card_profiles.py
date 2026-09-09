@@ -11,12 +11,16 @@ from etl.services.card_rating_profiles import (
 )
 from etl.services.moment_rating_adjustments import (
     MULTI_HR_GAME_ADJUSTMENT_RULES,
+    TEN_STRIKEOUT_GAME_ADJUSTMENT_RULES,
     WALK_OFF_HR_ADJUSTMENT_RULES,
     MomentRatingAdjustments,
     MultiHrGameAdjustmentRules,
+    PitcherMomentRatingAdjustments,
+    TenStrikeoutGameAdjustmentRules,
     WalkOffHrAdjustmentRules,
     calculate_multi_hr_game_rating_adjustments,
     calculate_moment_rating_adjustments,
+    calculate_ten_strikeout_game_rating_adjustments,
 )
 
 
@@ -27,13 +31,17 @@ class MomentCardRatingProfileResult:
     source_player_ratings_id: str
     source_moment_evaluation_id: str
     input_hash: str
-    adjustments: MomentRatingAdjustments
+    adjustments: MomentRatingAdjustments | PitcherMomentRatingAdjustments
 
 
 def _calculation_metadata(
     evaluation: MomentEvaluation,
-    adjustments: MomentRatingAdjustments,
-    adjustment_rules: WalkOffHrAdjustmentRules | MultiHrGameAdjustmentRules,
+    adjustments: MomentRatingAdjustments | PitcherMomentRatingAdjustments,
+    adjustment_rules: (
+        WalkOffHrAdjustmentRules
+        | MultiHrGameAdjustmentRules
+        | TenStrikeoutGameAdjustmentRules
+    ),
 ) -> dict:
     context = evaluation.moment_context
     return {
@@ -87,6 +95,9 @@ def generate_moment_card_rating_profile(
     multi_hr_adjustment_rules: MultiHrGameAdjustmentRules = (
         MULTI_HR_GAME_ADJUSTMENT_RULES
     ),
+    ten_strikeout_adjustment_rules: TenStrikeoutGameAdjustmentRules = (
+        TEN_STRIKEOUT_GAME_ADJUSTMENT_RULES
+    ),
     commit: bool = True,
 ) -> MomentCardRatingProfileResult:
     """Conecta la cadena existente y persiste únicamente su resultado final."""
@@ -105,6 +116,11 @@ def generate_moment_card_rating_profile(
     elif evaluation.moment_type == MomentType.MULTI_HR_GAME:
         active_rules = multi_hr_adjustment_rules
         adjustments = calculate_multi_hr_game_rating_adjustments(
+            evaluation, ratings, rules=active_rules
+        )
+    elif evaluation.moment_type == MomentType.TEN_STRIKEOUT_GAME:
+        active_rules = ten_strikeout_adjustment_rules
+        adjustments = calculate_ten_strikeout_game_rating_adjustments(
             evaluation, ratings, rules=active_rules
         )
     else:

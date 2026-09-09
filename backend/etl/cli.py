@@ -65,6 +65,9 @@ from etl.services.multi_hr_moment_evaluations import (
 from etl.services.multi_hr_moment_card_profiles import (
     generate_multi_hr_moment_card_profiles,
 )
+from etl.services.ten_strikeout_moment_card_profiles import (
+    generate_ten_strikeout_moment_card_profiles,
+)
 from etl.services.walk_off_hr_detector import detect_walk_off_home_runs
 from etl.services.walk_off_hr_pipeline import run_walk_off_hr_pipeline
 from etl.sources.mlb import MLBStatsApiClient
@@ -350,6 +353,10 @@ def _build_parser() -> argparse.ArgumentParser:
     sub.add_parser(
         "generate-multi-hr-moment-card-profiles",
         help="Genera perfiles MOMENT desde evaluaciones MULTI_HR_GAME",
+    )
+    sub.add_parser(
+        "generate-ten-strikeout-moment-card-profiles",
+        help="Genera perfiles MOMENT desde evaluaciones 10_STRIKEOUT_GAME",
     )
 
     walk_off_pipeline = sub.add_parser(
@@ -995,6 +1002,21 @@ def main(argv=None) -> int:
             for failure in result.failures:
                 logger.warning(
                     "multi-HR profile evaluation=%s reason=%s",
+                    failure.moment_evaluation_id,
+                    failure.reason,
+                )
+
+        elif args.command == "generate-ten-strikeout-moment-card-profiles":
+            result = generate_ten_strikeout_moment_card_profiles(db)
+            print(
+                f"selected={result.selected} created={result.created} "
+                f"updated={result.updated} unchanged={result.unchanged} "
+                f"skipped_no_ratings={result.skipped_no_ratings} "
+                f"failed={result.failed}"
+            )
+            for failure in result.failures:
+                logger.warning(
+                    "10-K profile evaluation=%s reason=%s",
                     failure.moment_evaluation_id,
                     failure.reason,
                 )

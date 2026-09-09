@@ -13,7 +13,10 @@ from etl.services.moment_card_profiles import (
     generate_moment_card_rating_profile,
 )
 from etl.services.moment_facts import moment_game_date
-from etl.services.moment_rating_adjustments import MomentRatingAdjustments
+from etl.services.moment_rating_adjustments import (
+    MomentRatingAdjustments,
+    PitcherMomentRatingAdjustments,
+)
 from etl.services.player_ratings_resolver import resolve_player_ratings_as_of
 
 
@@ -27,7 +30,7 @@ class MomentProfileGenerationResult:
     card_rating_profile_id: str | None
     source_player_ratings_id: str | None
     input_hash: str | None
-    adjustments: MomentRatingAdjustments | None
+    adjustments: MomentRatingAdjustments | PitcherMomentRatingAdjustments | None
 
 
 @dataclass(frozen=True)
