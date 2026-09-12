@@ -6,7 +6,7 @@ Centraliza las consultas de cartas usadas por el motor y los routers.
 from typing import Iterable, Sequence
 
 from app.core.enums import PITCHER_POSITIONS
-from app.models import PlayerCardModel, TacticCard
+from app.models import CardCatalog, PlayerCardModel, TacticCard
 from app.models.user_data import UserCardInventory
 from app.repositories.team_repository import resolve_team_to_uuid
 
@@ -154,9 +154,27 @@ def find_cards_excluding_team(db, team_ref: str) -> Sequence["PlayerCardModel"]:
     return db.query(PlayerCardModel).filter(PlayerCardModel.team_id != team_id).all()
 
 
-def find_cards_by_rarity(db, rarity) -> Sequence["PlayerCardModel"]:
-    """Retorna todas las cartas con la rareza indicada."""
-    return db.query(PlayerCardModel).filter(PlayerCardModel.rarity == rarity).all()
+def find_cards_by_rarity(
+    db, rarity, *, catalog_id: str | None = None
+) -> Sequence["PlayerCardModel"]:
+    """Cartas de la rareza indicada del pool jugable del juego.
+
+    Contrato (plan V2 §25): el pack pool solo contiene cartas de un catálogo
+    ACTIVE y con is_pack_eligible; jamás legacy, semillas ni catálogos
+    retirados. Un catalog_id opcional restringe a esa edición publicada.
+    """
+    query = (
+        db.query(PlayerCardModel)
+        .join(CardCatalog, PlayerCardModel.catalog_id == CardCatalog.id)
+        .filter(
+            CardCatalog.status == "ACTIVE",
+            PlayerCardModel.is_pack_eligible.is_(True),
+            PlayerCardModel.rarity == rarity,
+        )
+    )
+    if catalog_id is not None:
+        query = query.filter(PlayerCardModel.catalog_id == catalog_id)
+    return query.all()
 
 
 def find_any_card(db) -> "PlayerCardModel | None":

@@ -18,6 +18,7 @@ import logging
 import uuid
 from dataclasses import dataclass, field
 from datetime import date
+from typing import Iterable
 
 from sqlalchemy.orm import Session
 
@@ -25,6 +26,7 @@ from app.models import (
     CardCatalog,
     CardEdition,
     CardGenerationProfile,
+    CardRarity,
     CardRatingProfile,
     PlayerCardModel,
     PlayerSeason,
@@ -417,8 +419,32 @@ class ValidationResult:
     detail: list[str] = field(default_factory=list)
 
 
-def validate_pack_pool(db: Session, *, season: int, edition_type: str = "BASE") -> ValidationResult:
-    """Pack pool: catálogo ACTIVE y cartas elegibles (jamás legacy)."""
+# Las drop rates activas (PackService.PACK_RATES) requieren los cinco tiers:
+# BRONZE usa COMMON/BRONZE/SILVER, GOLD BRONZE/SILVER/GOLD/DIAMOND, DIAMOND
+# SILVER/GOLD/DIAMOND. El pool debe proveer al menos una carta por tier.
+_POOL_RARITIES = (
+    CardRarity.COMMON,
+    CardRarity.BRONZE,
+    CardRarity.SILVER,
+    CardRarity.GOLD,
+    CardRarity.DIAMOND,
+)
+
+
+def validate_pack_pool(
+    db: Session,
+    *,
+    season: int,
+    edition_type: str = "BASE",
+    required_rarities: Iterable[CardRarity] | None = None,
+) -> ValidationResult:
+    """Pack pool: catálogo ACTIVE, cartas elegibles y pool no vacío por rarity.
+
+    Ninguna carta legacy/semilla entra al pool: solo las del catálogo ACTIVE
+    con is_pack_eligible. Valida además que cada rarity requerida (por defecto
+    las cinco de las drop rates activas) tenga al menos una carta elegible.
+    """
+    rarities = tuple(required_rarities) if required_rarities is not None else _POOL_RARITIES
     active = _active_catalog(db, season=season, edition_type=edition_type)
     detail = []
     if active is None:
@@ -438,7 +464,19 @@ def validate_pack_pool(db: Session, *, season: int, edition_type: str = "BASE") 
         detail.append(
             f"{len(cards) - len(pack_eligible)} cartas del catálogo sin is_pack_eligible"
         )
-    return ValidationResult(ok=len(pack_eligible) == len(cards), detail=detail)
+    rarity_counts: dict[str, int] = {}
+    for rarity in rarities:
+        count = sum(1 for c in pack_eligible if c.rarity == rarity)
+        rarity_counts[rarity.name] = count
+        if count == 0:
+            detail.append(f"pool sin cartas elegibles para {rarity.name}")
+    detail.append("pool por rarity: " + "; ".join(
+        f"{name}={count}" for name, count in rarity_counts.items()
+    ))
+    return ValidationResult(
+        ok=(len(pack_eligible) == len(cards)) and not any(v == 0 for v in rarity_counts.values()),
+        detail=detail,
+    )
 
 
 def validate_cpu_rosters(db: Session, *, season: int, edition_type: str = "BASE") -> ValidationResult:
