@@ -28,11 +28,16 @@ from app.models import (
     CardRatingProfile,
     PlayerCardModel,
     PlayerSeason,
+    RatingDistribution,
     SourceTeamGameTeamMapping,
     SourceTeamRosterMember,
     SourceTeamRosterSnapshot,
 )
 from app.services.card_editions import ensure_system_base_edition
+from etl.services.rarity_policies import (
+    final_performance_tier,
+    resolve_card_rarity,
+)
 
 logger = logging.getLogger("etl.services.card_catalog")
 
@@ -145,6 +150,7 @@ def publish_card_catalog(
     rows_to_insert: list[PlayerCardModel] = []
     seen_players: set[str] = set()
     skipped_unresolved = 0
+    rarity_failures: list[str] = []
 
     for profile in profiles:
         player = profile.player_season.player
@@ -161,8 +167,22 @@ def publish_card_catalog(
         rating_profile = _resolve_rating_profile(
             db, card_edition, profile, player.id
         )
+        source = rating_profile if rating_profile is not None else profile
+        try:
+            rarity = _resolve_published_rarity(
+                db, card_edition, profile, source.overall_rating
+            )
+        except ValueError as exc:
+            rarity_failures.append(f"mlb_id={player.mlb_id}: {exc}")
+            continue
         payload = _card_from_profile(
-            catalog, card_edition, profile, player, game_team, rating_profile
+            catalog,
+            card_edition,
+            profile,
+            player,
+            game_team,
+            rating_profile,
+            rarity=rarity,
         )
         if payload is None:
             skipped_unresolved += 1
@@ -170,7 +190,7 @@ def publish_card_catalog(
         rows_to_insert.append(payload)
 
     # ------ VALIDATING: gates de calidad (§52) --------------------------
-    issues = _validate_rows(rows_to_insert)
+    issues = rarity_failures + _validate_rows(rows_to_insert)
     if issues:
         catalog.status = "FAILED"
         db.commit()
@@ -272,6 +292,39 @@ def _resolve_rating_profile(
     )
 
 
+def _resolve_published_rarity(
+    db: Session,
+    card_edition: CardEdition,
+    profile: CardGenerationProfile,
+    final_overall: int,
+):
+    """Rareza publicada: legacy si la edición no declara política; si la
+    declara, resolución obligatoria sobre el OVR final publicado (nunca COMMON
+    silencioso). El tier se recalcula sobre la población del mismo snapshot
+    (rating_distribution_id persistido en generación); el tier histórico de
+    metadata solo queda como provenance.
+    """
+    if card_edition.rarity_policy_version is None:
+        return profile.calculated_rarity
+    distribution_id = (profile.calculation_metadata or {}).get(
+        "rating_distribution_id"
+    )
+    if distribution_id is None:
+        raise ValueError(
+            "generation profile sin rating_distribution_id; "
+            "no se puede resolver el tier final"
+        )
+    distribution = db.get(RatingDistribution, distribution_id)
+    if distribution is None:
+        raise ValueError(f"rating_distribution inexistente: {distribution_id}")
+    tier = final_performance_tier(final_overall, distribution)
+    return resolve_card_rarity(
+        card_edition,
+        final_overall=final_overall,
+        performance_tier=tier.performance_tier,
+    )
+
+
 def _card_from_profile(
     catalog,
     card_edition: CardEdition,
@@ -279,6 +332,7 @@ def _card_from_profile(
     player,
     game_team_id: str,
     rating_profile: CardRatingProfile | None = None,
+    rarity=None,
 ) -> PlayerCardModel | None:
     source = rating_profile if rating_profile is not None else profile
     values = {field: getattr(source, field) for field in _RATING_FIELDS}
@@ -301,7 +355,7 @@ def _card_from_profile(
         number=identity.default_jersey_number or "00",
         position=position,
         overall=overall,
-        rarity=profile.calculated_rarity,
+        rarity=rarity,
         is_two_way=is_two_way,
         # PlayerCard conserva el contrato numérico del motor; los N/A del
         # perfil estadístico se materializan aquí, no en el perfil.

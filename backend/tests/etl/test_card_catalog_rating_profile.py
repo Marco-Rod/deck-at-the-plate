@@ -18,6 +18,7 @@ from app.models import (
     PlayerCardModel,
     PlayerRatings,
     PlayerSeason,
+    RatingDistribution,
     SourceTeam,
     SourceTeamGameTeamMapping,
     SourceTeamRosterMember,
@@ -28,6 +29,7 @@ from app.models.card import CardRarity
 from app.services.card_editions import ensure_system_base_edition
 from etl.services.card_catalog import publish_card_catalog
 from etl.services.card_rating_profiles import generate_card_rating_profile
+from etl.services.rarity_policies import RARITY_POLICY_VERSION
 
 
 START = dt.date(2026, 8, 25)
@@ -122,7 +124,14 @@ def _batter_ratings(db, player):
     return ratings
 
 
-def _generation_profile(db, player_season, ratings):
+def _generation_profile(
+    db,
+    player_season,
+    ratings,
+    *,
+    calculated_rarity=CardRarity.COMMON,
+    calculation_metadata=None,
+):
     profile = CardGenerationProfile(
         player_season_id=player_season.id,
         rating_model_version="ratings-2.0",
@@ -138,15 +147,65 @@ def _generation_profile(db, player_season, ratings):
         movement_rating=None,
         stuff_rating=None,
         overall_rating=64,
-        calculated_rarity=CardRarity.COMMON,
+        calculated_rarity=calculated_rarity,
         primary_batter_trait=None,
         primary_pitcher_trait=None,
         repertoire_payload=None,
-        calculation_metadata={"adapter_version": "fixture"},
+        calculation_metadata=calculation_metadata or {"adapter_version": "fixture"},
     )
     db.add(profile)
     db.flush()
     return profile
+
+
+def _rating_distribution(db, *, histogram=None, role="BATTER"):
+    histogram = {
+        int(key): int(value) for key, value in (histogram or {"64": 5, "80": 5}).items()
+    }
+    population_size = sum(histogram.values())
+    lo, hi = min(histogram), max(histogram)
+    dist = RatingDistribution(
+        season=2026,
+        role=role,
+        rating_model_version="ratings-2.0",
+        source_distribution_version="dist-1.0",
+        rarity_model_version="rarity-2.0",
+        metric="overall_rating",
+        population_size=population_size,
+        population_histogram={str(k): v for k, v in histogram.items()},
+        minimum=lo,
+        p05=lo,
+        p10=lo,
+        p25=lo,
+        p50=lo + (hi - lo) // 2,
+        p75=hi,
+        p90=hi,
+        p95=hi,
+        maximum=hi,
+        population_mean=(lo + hi) / 2,
+        data_start_date=START,
+        data_end_date=END,
+    )
+    db.add(dist)
+    db.flush()
+    return dist
+
+
+def _rarity_policy_edition(db, code="2026_BASE_RARITY"):
+    edition = CardEdition(
+        code=code,
+        name="Base Rarity",
+        edition_type=CardEditionType.BASE,
+        season=2026,
+        version="edition-1.0",
+        source_type=CardEditionSourceType.SYSTEM,
+        rating_policy_version="base-card-ratings-1.0",
+        rarity_policy_version=RARITY_POLICY_VERSION,
+        metadata_payload={},
+    )
+    db.add(edition)
+    db.flush()
+    return edition
 
 
 def test_publica_atributos_desde_card_rating_profile(db):
@@ -335,3 +394,85 @@ def test_edicion_sin_politica_declarada_fallbacks_a_generation_profile(db):
     assert card.card_rating_profile_id is None
     assert card.generation_profile_id is not None
     assert (card.overall, card.power) == (64, 68)
+
+
+def test_edicion_sin_rarity_policy_conserva_calculated_rarity(db):
+    team, player, player_season, edition = _publication_context(db)
+    ratings = _batter_ratings(db, player)
+    _generation_profile(db, player_season, ratings, calculated_rarity=CardRarity.GOLD)
+    generate_card_rating_profile(
+        db, source_player_ratings_id=ratings.id, card_edition_id=edition.id
+    )
+    db.commit()
+
+    result = publish_card_catalog(
+        db,
+        season=2026,
+        card_edition_id=edition.id,
+        rating_model_version="ratings-2.0",
+        data_end_date=END,
+    )
+    card = db.query(PlayerCardModel).one()
+
+    assert result.status == "ACTIVE"
+    assert card.card_rating_profile_id is not None
+    assert card.rarity == CardRarity.GOLD
+
+
+def test_edicion_con_rarity_policy_resuelve_sobre_ovr_final(db):
+    team, player, player_season, edition = _publication_context(
+        db, edition=_rarity_policy_edition(db)
+    )
+    ratings = _batter_ratings(db, player)
+    distribution = _rating_distribution(db)
+    _generation_profile(
+        db,
+        player_season,
+        ratings,
+        calculated_rarity=CardRarity.GOLD,
+        calculation_metadata={
+            "adapter_version": "fixture",
+            "rating_distribution_id": distribution.id,
+            "performance_tier_model_version": "rarity-2.0",
+        },
+    )
+    generate_card_rating_profile(
+        db, source_player_ratings_id=ratings.id, card_edition_id=edition.id
+    )
+    db.commit()
+
+    result = publish_card_catalog(
+        db,
+        season=2026,
+        card_edition_id=edition.id,
+        rating_model_version="ratings-2.0",
+        data_end_date=END,
+    )
+    card = db.query(PlayerCardModel).one()
+
+    # OVR 64 en histograma {"64": 5, "80": 5} -> percentil 0.25 -> COMMON.
+    # NO hereda el calculated_rarity legacy (GOLD).
+    assert result.status == "ACTIVE"
+    assert card.rarity == CardRarity.COMMON
+
+
+def test_edicion_con_rarity_policy_sin_distribucion_falla_publicacion(db):
+    team, player, player_season, edition = _publication_context(
+        db,
+        edition=_rarity_policy_edition(db, code="2026_BASE_RARITY_FAIL"),
+    )
+    ratings = _batter_ratings(db, player)
+    _generation_profile(db, player_season, ratings)
+    db.commit()
+
+    result = publish_card_catalog(
+        db,
+        season=2026,
+        card_edition_id=edition.id,
+        rating_model_version="ratings-2.0",
+        data_end_date=END,
+    )
+
+    assert result.status == "FAILED"
+    assert db.query(PlayerCardModel).count() == 0
+    assert any("rating_distribution_id" in issue for issue in result.issues)
