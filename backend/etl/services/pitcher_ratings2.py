@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass, field
 from datetime import date
+from decimal import Decimal
 from typing import Callable
 
 from sqlalchemy.orm import Session
@@ -12,6 +13,7 @@ from etl.services.pitcher_movement import MovementCandidateResult, calculate_mov
 from etl.services.pitcher_stuff import PitcherStuffResult, calculate_stuff_candidate
 from etl.services.pitcher_velocity import PitcherVelocityResult, calculate_velocity_candidate
 from etl.services.rating_math import round_rating
+from etl.services.rating_evidence import component_evidence, movement_evidence, quantize_evidence
 
 
 PITCHER_OVERALL_WEIGHTS = {
@@ -32,6 +34,26 @@ class PitcherRatings2Result:
     stuff: PitcherStuffResult
     overall: int | None
     unavailable_attributes: list[str] = field(default_factory=list)
+
+    @property
+    def velocity_evidence(self) -> Decimal | None:
+        return quantize_evidence(getattr(self.velocity, "shrinkage_weight", None))
+
+    @property
+    def control_evidence(self) -> Decimal | None:
+        return component_evidence(self.control)
+
+    @property
+    def movement_evidence(self) -> Decimal | None:
+        return movement_evidence(self.movement)
+
+    @property
+    def stuff_evidence(self) -> Decimal | None:
+        return component_evidence(self.stuff)
+
+    @property
+    def clutch_evidence(self) -> Decimal | None:
+        return None
 
 
 def calculate_pitcher_ratings2(

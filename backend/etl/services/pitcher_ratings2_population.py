@@ -28,6 +28,7 @@ class PitcherRatings2PopulationResult:
     created: int = 0
     updated: int = 0
     unchanged: int = 0
+    evidence_backfilled: int = 0
     skipped_incomplete: int = 0
     failed: int = 0
     failures: list[PitcherRatings2PopulationFailure] = field(default_factory=list)
@@ -110,7 +111,7 @@ def generate_pitcher_ratings2_population(
                 data_end_date=data_end_date,
             )
             status = persisted.status.lower()
-            if status not in {"created", "updated", "unchanged"}:
+            if status not in {"created", "updated", "unchanged", "evidence_backfilled"}:
                 raise RuntimeError(f"estado de persistencia inesperado: {persisted.status}")
             setattr(result, status, getattr(result, status) + 1)
             result.completed += 1

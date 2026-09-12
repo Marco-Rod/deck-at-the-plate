@@ -10,6 +10,7 @@ from enum import Enum
 from sqlalchemy.orm import Session
 
 from app.models import Player, PlayerRatings, PlayerSeason
+from app.models.player_ratings import EVIDENCE_COLUMNS
 from etl.config.ratings_2 import BATTER_OVERALL_WEIGHTS, RATING_MODEL_VERSION
 from etl.services.batter_ratings2 import BatterRatings2
 from etl.services.pitcher_ratings2 import PitcherRatings2Result
@@ -114,14 +115,22 @@ def persist_pitcher_ratings2(
         "stuff_rating": result.stuff.rating,
         "overall_rating": result.overall,
     }
+    evidence = {name: getattr(result, name, None) for name in EVIDENCE_COLUMNS}
     if row is None:
-        row = PlayerRatings(**identity, **ratings, input_hash=input_hash)
+        row = PlayerRatings(**identity, **ratings, **evidence, input_hash=input_hash)
         db.add(row)
         db.commit()
         return PlayerRatingsPersistenceResult("CREATED", row.id, input_hash)
     if row.input_hash == input_hash:
-        return PlayerRatingsPersistenceResult("UNCHANGED", row.id, input_hash)
-    for field_name, value in ratings.items():
+        missing = {name: value for name, value in evidence.items()
+                   if value is not None and getattr(row, name) is None}
+        if not missing:
+            return PlayerRatingsPersistenceResult("UNCHANGED", row.id, input_hash)
+        for name, value in missing.items():
+            setattr(row, name, value)
+        db.commit()
+        return PlayerRatingsPersistenceResult("EVIDENCE_BACKFILLED", row.id, input_hash)
+    for field_name, value in {**ratings, **evidence}.items():
         setattr(row, field_name, value)
     row.input_hash = input_hash
     db.commit()
@@ -224,14 +233,22 @@ def persist_batter_ratings2(
         "overall_rating": result.overall_rating,
     }
     row = db.query(PlayerRatings).filter_by(**identity).one_or_none()
+    evidence = {name: getattr(result, name, None) for name in EVIDENCE_COLUMNS}
     if row is None:
-        row = PlayerRatings(**identity, **ratings, input_hash=input_hash)
+        row = PlayerRatings(**identity, **ratings, **evidence, input_hash=input_hash)
         db.add(row)
         db.commit()
         return PlayerRatingsPersistenceResult("CREATED", row.id, input_hash)
     if row.input_hash == input_hash:
-        return PlayerRatingsPersistenceResult("UNCHANGED", row.id, input_hash)
-    for field_name, value in ratings.items():
+        missing = {name: value for name, value in evidence.items()
+                   if value is not None and getattr(row, name) is None}
+        if not missing:
+            return PlayerRatingsPersistenceResult("UNCHANGED", row.id, input_hash)
+        for name, value in missing.items():
+            setattr(row, name, value)
+        db.commit()
+        return PlayerRatingsPersistenceResult("EVIDENCE_BACKFILLED", row.id, input_hash)
+    for field_name, value in {**ratings, **evidence}.items():
         setattr(row, field_name, value)
     row.input_hash = input_hash
     db.commit()

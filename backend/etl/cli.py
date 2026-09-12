@@ -833,7 +833,7 @@ def main(argv=None) -> int:
             print(
                 f"selected={result.selected} completed={result.completed} "
                 f"created={result.created} updated={result.updated} "
-                f"unchanged={result.unchanged} "
+                f"unchanged={result.unchanged} evidence_backfilled={result.evidence_backfilled} "
                 f"skipped_incomplete={result.skipped_incomplete} failed={result.failed}"
             )
             for failure in result.failures:
@@ -855,7 +855,7 @@ def main(argv=None) -> int:
             print(
                 f"selected={result.selected} completed={result.completed} "
                 f"created={result.created} updated={result.updated} "
-                f"unchanged={result.unchanged} "
+                f"unchanged={result.unchanged} evidence_backfilled={result.evidence_backfilled} "
                 f"skipped_incomplete={result.skipped_incomplete} failed={result.failed}"
             )
             for failure in result.failures:
@@ -897,6 +897,7 @@ def main(argv=None) -> int:
                 f"created={result.ratings.created} "
                 f"updated={result.ratings.updated} "
                 f"unchanged={result.ratings.unchanged} "
+                f"evidence_backfilled={result.ratings.evidence_backfilled} "
                 f"skipped_incomplete={result.ratings.skipped_incomplete} "
                 f"failed={result.ratings.failed}"
             )

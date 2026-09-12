@@ -11,6 +11,8 @@ from app.database import Base
 from app.models import Player, PlayerRatings
 from etl.services.pitcher_ratings2 import PitcherRatings2Result
 from etl.services.player_ratings import persist_pitcher_ratings2
+from decimal import Decimal
+from sqlalchemy import event
 
 
 START = dt.date(2026, 8, 25)
@@ -86,3 +88,29 @@ def test_resultado_incompleto_no_se_persiste(db):
     )
     assert persisted.status == "SKIPPED_INCOMPLETE"
     assert db.query(PlayerRatings).count() == 0
+
+
+def test_evidence_backfill_keeps_hash_and_does_not_write_ratings(db, monkeypatch):
+    result = _result()
+    first = persist_pitcher_ratings2(db, result, season=2026, data_start_date=START, data_end_date=END)
+    # Exposing derived properties must not change the serialized dataclass hash.
+    for attribute in ("velocity", "control", "movement", "stuff"):
+        monkeypatch.setattr(PitcherRatings2Result, attribute + "_evidence", property(lambda self: Decimal("0.12345")))
+    statements = []
+    def record(conn, cursor, statement, parameters, context, executemany):
+        if statement.lstrip().upper().startswith("UPDATE"):
+            statements.append(statement)
+    event.listen(db.bind, "before_cursor_execute", record)
+    try:
+        backfill = persist_pitcher_ratings2(db, result, season=2026, data_start_date=START, data_end_date=END)
+        assert backfill.status == "EVIDENCE_BACKFILLED"
+        assert backfill.input_hash == first.input_hash
+        assert len(statements) == 1
+        assignments = statements[0].split(" SET ")[1].split(" WHERE ")[0]
+        assert "_rating=" not in assignments and "input_hash=" not in assignments
+        assert db.query(PlayerRatings).one().stuff_evidence == Decimal("0.12345")
+        again = persist_pitcher_ratings2(db, result, season=2026, data_start_date=START, data_end_date=END)
+        assert again.status == "UNCHANGED"
+        assert len(statements) == 1
+    finally:
+        event.remove(db.bind, "before_cursor_execute", record)

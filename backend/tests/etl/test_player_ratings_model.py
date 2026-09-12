@@ -41,6 +41,16 @@ def _pitcher(player, **overrides):
     return PlayerRatings(**values)
 
 
+@pytest.mark.parametrize("column", ["contact", "power", "vision", "clutch", "velocity", "control", "movement", "stuff"])
+@pytest.mark.parametrize("value", [-0.00001, 1.00001])
+def test_evidence_range_enforced(db, column, value):
+    session, player = db
+    session.add(_pitcher(player, **{column + "_evidence": value}))
+    with pytest.raises(IntegrityError):
+        session.commit()
+    session.rollback()
+
+
 def test_acepta_pitcher_y_batter_completos(db):
     session, player = db
     session.add(_pitcher(player))

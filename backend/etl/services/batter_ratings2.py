@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from datetime import date
+from decimal import Decimal
 from typing import Callable
 
 from sqlalchemy.orm import Session
@@ -12,6 +13,7 @@ from etl.services.batter_contact import BatterContactRating, calculate_batter_co
 from etl.services.batter_power import BatterPowerRating, calculate_batter_power
 from etl.services.batter_vision import BatterVisionRating, calculate_batter_vision
 from etl.services.rating_math import round_rating
+from etl.services.rating_evidence import component_evidence
 
 
 @dataclass(frozen=True)
@@ -24,6 +26,22 @@ class BatterRatings2:
     overall_rating: int | None
     model_version: str
     skipped_components: tuple[str, ...]
+
+    @property
+    def contact_evidence(self) -> Decimal | None:
+        return component_evidence(self.contact)
+
+    @property
+    def power_evidence(self) -> Decimal | None:
+        return component_evidence(self.power)
+
+    @property
+    def vision_evidence(self) -> Decimal | None:
+        return component_evidence(self.vision)
+
+    @property
+    def clutch_evidence(self) -> Decimal | None:
+        return None
 
 
 def calculate_batter_ratings2(

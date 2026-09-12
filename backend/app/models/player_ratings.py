@@ -2,7 +2,7 @@
 
 import uuid
 
-from sqlalchemy import CheckConstraint, Column, Date, DateTime, ForeignKey, SmallInteger, String, UniqueConstraint
+from sqlalchemy import CheckConstraint, Column, Date, DateTime, ForeignKey, Numeric, SmallInteger, String, UniqueConstraint
 from sqlalchemy.orm import relationship
 
 from app.core.time import utcnow
@@ -17,6 +17,12 @@ RATING_COLUMNS = (
     "contact_rating", "power_rating", "vision_rating", "clutch_rating",
     "velocity_rating", "control_rating", "movement_rating", "stuff_rating",
     "overall_rating",
+)
+
+
+EVIDENCE_COLUMNS = (
+    "contact_evidence", "power_evidence", "vision_evidence", "clutch_evidence",
+    "velocity_evidence", "control_evidence", "movement_evidence", "stuff_evidence",
 )
 
 
@@ -53,6 +59,13 @@ class PlayerRatings(Base):
         ),
         *(
             CheckConstraint(
+                f"{column} IS NULL OR ({column} >= 0 AND {column} <= 1)",
+                name=f"ck_player_ratings_{column}_range",
+            )
+            for column in EVIDENCE_COLUMNS
+        ),
+        *(
+            CheckConstraint(
                 f"{column} IS NULL OR ({column} >= 40 AND {column} <= 99)",
                 name=f"ck_player_ratings_{column}_range",
             )
@@ -78,6 +91,15 @@ class PlayerRatings(Base):
     movement_rating = Column(SmallInteger, nullable=True)
     stuff_rating = Column(SmallInteger, nullable=True)
     overall_rating = Column(SmallInteger, nullable=False)
+
+    contact_evidence = Column(Numeric(6, 5), nullable=True)
+    power_evidence = Column(Numeric(6, 5), nullable=True)
+    vision_evidence = Column(Numeric(6, 5), nullable=True)
+    clutch_evidence = Column(Numeric(6, 5), nullable=True)
+    velocity_evidence = Column(Numeric(6, 5), nullable=True)
+    control_evidence = Column(Numeric(6, 5), nullable=True)
+    movement_evidence = Column(Numeric(6, 5), nullable=True)
+    stuff_evidence = Column(Numeric(6, 5), nullable=True)
 
     input_hash = Column(String(64), nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)

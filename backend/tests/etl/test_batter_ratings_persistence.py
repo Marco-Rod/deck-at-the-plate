@@ -2,6 +2,7 @@
 
 import datetime as dt
 from dataclasses import dataclass
+from decimal import Decimal
 
 import pytest
 from sqlalchemy import create_engine
@@ -85,6 +86,34 @@ def _persist(db, result):
         data_start_date=START,
         data_end_date=END,
     )
+
+
+def test_partial_evidence_backfill_preserves_existing_values_hash_and_ratings(db, monkeypatch):
+    result = _result()
+    initial = _persist(db, result)
+    row = db.query(PlayerRatings).one()
+    row.contact_evidence = Decimal("0.50000")
+    db.commit()
+    for attribute in ("contact", "power", "vision"):
+        monkeypatch.setattr(BatterRatings2, attribute + "_evidence", property(lambda self: Decimal("0.50000")))
+    before = (row.contact_rating, row.power_rating, row.vision_rating, row.clutch_rating, row.overall_rating)
+    assert _persist(db, result).status == "EVIDENCE_BACKFILLED"
+    db.refresh(row)
+    assert row.input_hash == initial.input_hash
+    assert (row.contact_rating, row.power_rating, row.vision_rating, row.clutch_rating, row.overall_rating) == before
+    assert (row.contact_evidence, row.power_evidence, row.vision_evidence) == (Decimal("0.50000"),) * 3
+    assert row.clutch_evidence is None and row.velocity_evidence is None
+    assert _persist(db, result).status == "UNCHANGED"
+
+
+def test_new_and_changed_calculations_persist_evidence(db, monkeypatch):
+    for attribute in ("contact", "power", "vision"):
+        monkeypatch.setattr(BatterRatings2, attribute + "_evidence", property(lambda self: Decimal("0.09091")))
+    assert _persist(db, _result()).status == "CREATED"
+    assert db.query(PlayerRatings).one().power_evidence == Decimal("0.09091")
+    monkeypatch.setattr(BatterRatings2, "power_evidence", property(lambda self: Decimal("0.20000")))
+    assert _persist(db, _result(contact_observed=.7)).status == "UPDATED"
+    assert db.query(PlayerRatings).one().power_evidence == Decimal("0.20000")
 
 
 def test_persiste_shape_batter_y_es_idempotente(db):
