@@ -335,3 +335,39 @@ def test_modelo_no_define_rarity_ni_boosts():
     assert "rarity" not in columns
     assert "boosts" not in columns
     assert "rating_boost" not in columns
+
+
+def test_generador_auto_declara_la_politica_en_la_edicion(db):
+    player = _player(db)
+    ratings = _batter_ratings(db, player)
+    base = _edition(db)
+    moment = _edition(
+        db, code="2026_WALK_OFF", edition_type=CardEditionType.MOMENT
+    )
+    db.commit()
+
+    generate_card_rating_profile(
+        db, source_player_ratings_id=ratings.id, card_edition_id=base.id
+    )
+    generate_card_rating_profile(
+        db,
+        source_player_ratings_id=ratings.id,
+        card_edition_id=moment.id,
+        policy_reason="Contrato MOMENT sin boosts automáticos",
+    )
+
+    assert base.rating_policy_version == "base-card-ratings-1.0"
+    assert moment.rating_policy_version == "moment-card-ratings-1.0"
+
+
+def test_generador_rechaza_politica_declarada_diferente(db):
+    player = _player(db)
+    ratings = _batter_ratings(db, player)
+    edition = _edition(db)
+    edition.rating_policy_version = "base-card-ratings-9.9"
+    db.commit()
+
+    with pytest.raises(ValueError, match="rating_policy_version"):
+        generate_card_rating_profile(
+            db, source_player_ratings_id=ratings.id, card_edition_id=edition.id
+        )

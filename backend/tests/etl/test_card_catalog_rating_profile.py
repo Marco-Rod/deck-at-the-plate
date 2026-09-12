@@ -49,7 +49,7 @@ def db():
     engine.dispose()
 
 
-def _publication_context(db, *, rating_model_version="ratings-2.0"):
+def _publication_context(db, *, rating_model_version="ratings-2.0", edition=None):
     team = Team(id="team-1", abbreviation="TST", name="Test Team", city="Test City")
     source_team = SourceTeam(
         source="MLB",
@@ -92,7 +92,12 @@ def _publication_context(db, *, rating_model_version="ratings-2.0"):
     )
     db.add(player_season)
     db.flush()
-    edition = ensure_system_base_edition(db, season=2026)
+    if edition is not None:
+        if edition.id is None:
+            db.add(edition)
+            db.flush()
+    else:
+        edition = ensure_system_base_edition(db, season=2026)
     return team, player, player_season, edition
 
 
@@ -256,3 +261,77 @@ def test_fallback_sin_anclaje_a_player_ratings(db):
     assert card.card_rating_profile_id is None
     assert card.rarity == CardRarity.BRONZE
     assert db.query(CardRatingProfile).count() == 0
+
+
+def test_resuelve_politica_declarada_sin_ambiguedad(db):
+    team, player, player_season, edition = _publication_context(db)
+    ratings = _batter_ratings(db, player)
+    _generation_profile(db, player_season, ratings)
+    declared = generate_card_rating_profile(
+        db, source_player_ratings_id=ratings.id, card_edition_id=edition.id
+    )
+    # Perfil especulativo de una política futura (base-card-ratings-1.1):
+    # coexiste bajo la misma identidad salvo rating_policy_version, y NO debe
+    # enmascarar a la política que la edición declara.
+    db.add(
+        CardRatingProfile(
+            player_id=player.id,
+            card_edition_id=edition.id,
+            role="BATTER",
+            rating_policy_version="base-card-ratings-1.1",
+            contact_rating=56,
+            power_rating=88,
+            vision_rating=66,
+            clutch_rating=70,
+            overall_rating=70,
+            source_player_ratings_id=ratings.id,
+            input_hash="d" * 64,
+            metadata_payload={"fixture": "futura-politica"},
+        )
+    )
+    db.commit()
+
+    result = publish_card_catalog(
+        db,
+        season=2026,
+        card_edition_id=edition.id,
+        rating_model_version="ratings-2.0",
+        data_end_date=END,
+    )
+    card = db.query(PlayerCardModel).one()
+
+    assert result.status == "ACTIVE"
+    assert card.card_rating_profile_id == declared.card_rating_profile_id
+    assert (card.overall, card.power) == (64, 68)
+
+
+def test_edicion_sin_politica_declarada_fallbacks_a_generation_profile(db):
+    team, player, player_season, edition = _publication_context(
+        db,
+        edition=CardEdition(
+            code="2026_BASE_LEGACY",
+            name="Base Legacy",
+            edition_type=CardEditionType.BASE,
+            season=2026,
+            version="edition-1.0",
+            source_type=CardEditionSourceType.SYSTEM,
+            metadata_payload={},
+        ),
+    )
+    ratings = _batter_ratings(db, player)
+    _generation_profile(db, player_season, ratings)
+    db.commit()
+
+    result = publish_card_catalog(
+        db,
+        season=2026,
+        card_edition_id=edition.id,
+        rating_model_version="ratings-2.0",
+        data_end_date=END,
+    )
+    card = db.query(PlayerCardModel).one()
+
+    assert result.status == "ACTIVE"
+    assert card.card_rating_profile_id is None
+    assert card.generation_profile_id is not None
+    assert (card.overall, card.power) == (64, 68)

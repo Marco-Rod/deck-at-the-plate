@@ -141,6 +141,17 @@ def generate_card_rating_profile(
         adjustments=policy_adjustments,
         reason=policy_reason,
     )
+    # Contrato Edition -> Rating Policy: la edición declara qué versión de
+    # política exige. Si aún no la declara (legacy), la generación la
+    # auto-declara; si declara otra, es una política no implementada.
+    if edition.rating_policy_version is None:
+        edition.rating_policy_version = policy.policy_version
+    elif edition.rating_policy_version != policy.policy_version:
+        raise ValueError(
+            "edición declara rating_policy_version "
+            f"{edition.rating_policy_version} pero la política aplicada es "
+            f"{policy.policy_version}"
+        )
     values = policy.transformed_ratings
     evidence_assessment = None
     if edition.edition_type.value == "BASE":

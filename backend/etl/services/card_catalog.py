@@ -246,8 +246,17 @@ def _resolve_rating_profile(
     profile: CardGenerationProfile,
     player_id: str,
 ) -> CardRatingProfile | None:
-    """CardRatingProfile autoritativo, anclado al mismo PlayerRatings fuente."""
+    """CardRatingProfile autoritativo, determinista y del mismo snapshot.
+
+    Identidad = (player, edición, role) + rating_policy_version que la edición
+    declara. La uq_card_rating_profiles_identity garantiza a lo sumo un perfil
+    por esa tupla, sin depender de orden temporal de inserción. Si la edición
+    no declara política (legacy) se devuelve None y la publicación usa el
+    CardGenerationProfile como puente de compatibilidad (frontera a revisar).
+    """
     if profile.player_ratings_id is None or profile.role is None:
+        return None
+    if card_edition.rating_policy_version is None:
         return None
     return (
         db.query(CardRatingProfile)
@@ -255,6 +264,8 @@ def _resolve_rating_profile(
             CardRatingProfile.player_id == player_id,
             CardRatingProfile.card_edition_id == card_edition.id,
             CardRatingProfile.role == profile.role,
+            CardRatingProfile.rating_policy_version
+            == card_edition.rating_policy_version,
             CardRatingProfile.source_player_ratings_id == profile.player_ratings_id,
         )
         .one_or_none()

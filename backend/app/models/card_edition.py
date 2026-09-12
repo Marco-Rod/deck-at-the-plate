@@ -88,6 +88,11 @@ class CardEdition(Base):
     )
     season = Column(SmallInteger, nullable=False, index=True)
     version = Column(String(40), nullable=False, index=True)
+    # Política de ratings exigida por esta edición: CardRatingProfile se
+    # resuelve contra este valor exacto (uq_card_rating_profiles_identity).
+    # Nullable solo para ediciones legacy sin política implementada; la
+    # generación auto-declara la política si está pendiente.
+    rating_policy_version = Column(String(40), nullable=True, index=True)
     is_active = Column(Boolean, nullable=False, default=True, index=True)
     source_type = Column(
         Enum(
