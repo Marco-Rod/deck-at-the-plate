@@ -1,7 +1,8 @@
 """Eligibility BASE (dry-run v2): población post-dedupe + bandas de evidencia.
 
-NO activa nada. Sobre la población REAL ratings-2.0 midamos la frontera de
-base-eligibility-1.0 en DOS vistas (el catalogo publica cartas, no filas):
+NO activa nada. Sobre la población REAL ratings-2.0 mide la frontera de
+la política vigente (base-eligibility-1.1) en DOS vistas (el catalogo publica
+cartas, no filas):
 
     vista A (before dedupe): 869 rating rows — cada rol del two-way cuenta.
     vista B (after dedupe) : 829 cartas — replica profile_publish_order

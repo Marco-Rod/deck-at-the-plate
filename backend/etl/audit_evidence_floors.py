@@ -253,12 +253,12 @@ def main(argv=None) -> int:
                 .all()
             )
 
-            # ---- 5. v1 de referencia -----------------------------------------
-            v1 = Counter(c["assessment"].decision for c in cards)
-            report["reference_v1"] = {
-                "INELIGIBLE": v1.get(INELIGIBLE, 0),
-                "PROVISIONAL": v1.get(PROVISIONAL, 0),
-                "ELIGIBLE": v1.get(ELIGIBLE, 0),
+            # ---- 5. policy vigente de referencia -----------------------------
+            current_policy = Counter(c["assessment"].decision for c in cards)
+            report["reference_policy"] = {
+                "INELIGIBLE": current_policy.get(INELIGIBLE, 0),
+                "PROVISIONAL": current_policy.get(PROVISIONAL, 0),
+                "ELIGIBLE": current_policy.get(ELIGIBLE, 0),
             }
 
             # ---- 6. per-atributo: counts y muestras por floor -----------------
