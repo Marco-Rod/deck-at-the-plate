@@ -190,13 +190,18 @@ def get_active_pack_catalog(
 ) -> "CardCatalog | None":
     """Catálogo ACTIVE que define el pool de packs del juego.
 
-    Sin season, la edición activa más reciente; con season, la de esa
-    temporada. El servicio de packs lo resuelve UNA vez y lo fija via
-    catalog_id para nunca mezclar temporadas ni ediciones.
+    Determinista siempre: si hay más de un ACTIVE para la temporada, elige la
+    versión más reciente (version desc) — jamás query.first() sin orden. El
+    servicio de packs lo resuelve UNA vez y lo fija via catalog_id para nunca
+    mezclar temporadas ni ediciones.
     """
-    query = db.query(CardCatalog).filter(
-        CardCatalog.edition_type == edition_type,
-        CardCatalog.status == "ACTIVE",
+    query = (
+        db.query(CardCatalog)
+        .filter(
+            CardCatalog.edition_type == edition_type,
+            CardCatalog.status == "ACTIVE",
+        )
+        .order_by(CardCatalog.version.desc())
     )
     if season is not None:
         query = query.filter(CardCatalog.season == season)

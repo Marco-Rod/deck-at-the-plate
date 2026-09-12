@@ -164,3 +164,19 @@ def test_seed_y_retirados_jamas_cubren_el_gap_de_pool(db, monkeypatch):
     wallet = db.query(UserWallet).filter_by(user_id=user.id).one()
     assert wallet.stamps == 4000
     assert count_user_inventory(db, user.id) == 0
+
+
+def test_catalog_id_explicito_de_otro_edition_type_se_rechaza(db):
+    edition = _edition(db)
+    moment = _catalog(db, season=2026, edition_type="MOMENT")
+    _card(db, moment, edition, rarity=CardRarity.COMMON, card_id="moment-common")
+    user = _user_with_wallet(db, stamps=1500)
+
+    with pytest.raises(PackPoolError) as excinfo:
+        PackService.open_pack(
+            db, user_id=user.id, pack_type="BRONZE", catalog_id=moment.id
+        )
+
+    assert "no es de tipo BASE" in excinfo.value.detail
+    wallet = db.query(UserWallet).filter_by(user_id=user.id).one()
+    assert wallet.stamps == 1500

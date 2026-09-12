@@ -185,15 +185,17 @@ class PackService:
         *,
         season: int | None = None,
         catalog_id: str | None = None,
+        edition_type: str = "BASE",
     ) -> List[PlayerCardModel]:
         """
         Abre un sobre de cartas usando stamps del usuario.
 
         El pool de packs se fija a UN catálogo ACTIVE (nunca a todos los
         ACTIVE del sistema): si no se provee catalog_id, se resuelve la edición
-        base ACTIVE de la temporada (o la más reciente si no hay season). Un
-        tier configurado sin pool con cartas elegibles aborta el sobre con
-        PackPoolError ANTES de cobrar; jamás cae a legacy/semillas/retirados.
+        ACTIVE de la temporada (la más reciente si no hay season). Debe ser
+        además del edition_type dado (BASE por defecto). Un tier configurado
+        sin pool con cartas elegibles aborta el sobre con PackPoolError ANTES
+        de cobrar; jamás cae a legacy/semillas/retirados.
 
         Args:
             db: Sesión de base de datos
@@ -201,9 +203,7 @@ class PackService:
             pack_type: Tipo de sobre ("BRONZE", "GOLD", "DIAMOND")
             season: Temporada del catálogo ACTIVE (opcional)
             catalog_id: Catálogo publicado exacto (opcional)
-
-        Returns:
-            Lista de cartas obtenidas
+            edition_type: Tipo de edición de catálogo ("BASE" por defecto)
         """
         pack_type = pack_type.upper()
         if pack_type not in cls.PACK_RATES:
@@ -216,8 +216,12 @@ class PackService:
             target = db.get(CardCatalog, catalog_id)
             if target is None or target.status != "ACTIVE":
                 raise PackPoolError(f"catálogo no active para packs: {catalog_id}")
+            if target.edition_type != edition_type:
+                raise PackPoolError(
+                    f"catálogo {catalog_id} no es de tipo {edition_type} para packs"
+                )
         else:
-            target = get_active_pack_catalog(db, season=season)
+            target = get_active_pack_catalog(db, season=season, edition_type=edition_type)
         if target is None:
             raise PackPoolError("sin catálogo ACTIVE para abrir sobres")
 

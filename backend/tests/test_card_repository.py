@@ -13,7 +13,10 @@ from app.models import (
     PlayerCardModel,
 )
 from app.models.card import CardRarity
-from app.repositories.card_repository import find_cards_by_rarity
+from app.repositories.card_repository import (
+    find_cards_by_rarity,
+    get_active_pack_catalog,
+)
 
 
 @pytest.fixture
@@ -112,3 +115,20 @@ def test_catalog_id_restringe_a_esa_edicion(db):
     result = find_cards_by_rarity(db, CardRarity.SILVER, catalog_id=catalog_a.id)
 
     assert [c.id for c in result] == ["silver-a"]
+
+
+def test_pack_catalog_determinista_por_season(db):
+    _edition(db, code="2026_BASE")
+    base_2026 = _catalog(db, season=2026, version=1)
+    base_2025 = _catalog(db, season=2025, version=1)
+    team_star_2026 = _catalog(db, season=2026, edition_type="TEAM_STAR", version=1)
+
+    # El único BASE ACTIVE de 2026 gana sobre el ACTIVE de 2025 (season mandó).
+    assert get_active_pack_catalog(db, season=2026).id == base_2026.id
+    assert get_active_pack_catalog(db).id == base_2026.id
+    assert get_active_pack_catalog(db, season=2026, edition_type="BASE") != base_2025
+    # edition_type aislado: solo resuelve el ACTIVE de ese tipo.
+    assert (
+        get_active_pack_catalog(db, season=2026, edition_type="TEAM_STAR").id
+        == team_star_2026.id
+    )
