@@ -57,9 +57,15 @@ def _new_id() -> str:
 def profile_publish_order(profile):
     """Orden de publicación de un perfil de generación (determinista).
 
-    Dos-way (BATTER + PITCHER para el mismo jugador): gana el perfil cuyo rol
+    Two-way (BATTER + PITCHER para el mismo jugador): gana el perfil cuyo rol
     coincide con la posición primaria — PITCHER si lanzador (SP/RP/P/...),
     BATTER si posición jugada. Legacy (role NULL) se trata como BATTER.
+
+    POLÍTICA: si no existe posición primaria confiable (NULL), BASE publica el
+    perfil BATTER. La decisión se basa en Player.primary_position, no en el
+    mejor rol estadístico de la temporada: la carta representa el rol primario
+    del jugador.
+
     Desempates por player_season_id y role: orden completo estable para todo el
     catálogo, sin depender del plan de ejecución de postgres.
     """
