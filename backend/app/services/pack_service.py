@@ -5,7 +5,7 @@ from typing import List
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
 
-from app.models import CardRarity, PlayerCardModel, UserLineup
+from app.models import CardCatalog, CardRarity, PlayerCardModel, UserLineup
 from app.core.enums import PITCHER_POSITIONS
 from app.engine.starter_pack import select_starter_cards
 from app.engine.lineup_builder import build_optimal_lineup
@@ -14,9 +14,9 @@ from app.repositories import (
     find_cards_by_rarity,
     find_cards_by_team,
     find_cards_excluding_team,
-    find_any_card,
     find_inventory_entry,
     get_active_lineup,
+    get_active_pack_catalog,
     get_or_create_wallet,
     get_user_by_id,
     get_wallet_by_user_id,
@@ -24,6 +24,17 @@ from app.repositories import (
 from app.repositories.team_repository import resolve_team_to_uuid
 
 logger = logging.getLogger(__name__)
+
+
+class PackPoolError(HTTPException):
+    """Inconsistencia de datos/configuration del pool: nunca degrada silencioso.
+
+    409 porque el catalogo/pool no puede servir la configuracion solicitada y
+    la transaccion (y el cobro de stamps) debe abortarse.
+    """
+
+    def __init__(self, message: str):
+        super().__init__(status_code=status.HTTP_409_CONFLICT, detail=message)
 
 
 class StarterPackConfig:
@@ -166,16 +177,30 @@ class PackService:
         return selected_cards
 
     @classmethod
-    def open_pack(cls, db: Session, user_id: str, pack_type: str) -> List[PlayerCardModel]:
+    def open_pack(
+        cls,
+        db: Session,
+        user_id: str,
+        pack_type: str,
+        *,
+        season: int | None = None,
+        catalog_id: str | None = None,
+    ) -> List[PlayerCardModel]:
         """
         Abre un sobre de cartas usando stamps del usuario.
 
-        Verifica saldo → cobra cost → genera cartas según drop rates → guarda en inventario
+        El pool de packs se fija a UN catálogo ACTIVE (nunca a todos los
+        ACTIVE del sistema): si no se provee catalog_id, se resuelve la edición
+        base ACTIVE de la temporada (o la más reciente si no hay season). Un
+        tier configurado sin pool con cartas elegibles aborta el sobre con
+        PackPoolError ANTES de cobrar; jamás cae a legacy/semillas/retirados.
 
         Args:
             db: Sesión de base de datos
             user_id: ID del usuario
             pack_type: Tipo de sobre ("BRONZE", "GOLD", "DIAMOND")
+            season: Temporada del catálogo ACTIVE (opcional)
+            catalog_id: Catálogo publicado exacto (opcional)
 
         Returns:
             Lista de cartas obtenidas
@@ -186,7 +211,28 @@ class PackService:
 
         pack_info = cls.PACK_RATES[pack_type]
 
-        # Verificar saldo de stamps
+        # ── PASO 1: resolver UN catálogo ACTIVE meta del pool ──────────────
+        if catalog_id is not None:
+            target = db.get(CardCatalog, catalog_id)
+            if target is None or target.status != "ACTIVE":
+                raise PackPoolError(f"catálogo no active para packs: {catalog_id}")
+        else:
+            target = get_active_pack_catalog(db, season=season)
+        if target is None:
+            raise PackPoolError("sin catálogo ACTIVE para abrir sobres")
+
+        # ── PASO 2: pre-validar el pool de este sobre (nunca fallback) ─────
+        missing = []
+        for rarity in pack_info["rates"]:
+            if not find_cards_by_rarity(db, rarity, catalog_id=target.id):
+                missing.append(rarity.value)
+        if missing:
+            raise PackPoolError(
+                f"pool sin cartas elegibles para {', '.join(missing)} "
+                f"en catálogo {target.id}"
+            )
+
+        # ── PASO 3: verificar saldo de stamps ──────────────────────────────
         wallet = get_wallet_by_user_id(db, user_id)
         if not wallet or wallet.stamps < pack_info["price"]:
             raise HTTPException(
@@ -197,7 +243,7 @@ class PackService:
         # Deducir costo
         wallet.stamps -= pack_info["price"]
 
-        # Generar cartas según drop rates
+        # ── PASO 4: generar cartas según drop rates ────────────────────────
         pulled_cards = []
         rarities = list(pack_info["rates"].keys())
         probabilities = list(pack_info["rates"].values())
@@ -206,19 +252,19 @@ class PackService:
             # Seleccionar rareza ponderada por probabilidad
             selected_rarity = random.choices(rarities, weights=probabilities, k=1)[0]
 
-            # Buscar cartas de esa rareza en BD
-            matching_cards = find_cards_by_rarity(db, selected_rarity)
+            # Pool fijo al catálogo ACTIVE resuelto (jamás global).
+            matching_cards = find_cards_by_rarity(
+                db, selected_rarity, catalog_id=target.id
+            )
+            if not matching_cards:
+                raise PackPoolError(
+                    f"pool vacío para {selected_rarity.value} en catálogo {target.id}"
+                )
+            drawn_card = random.choice(matching_cards)
 
-            if matching_cards:
-                drawn_card = random.choice(matching_cards)
-            else:
-                # Fallback: si no hay cartas de esa rareza, tomar cualquiera
-                drawn_card = find_any_card(db)
-
-            if drawn_card:
-                # Guardar en inventario
-                add_inventory_item(db, user_id, drawn_card.id)
-                pulled_cards.append(drawn_card)
+            # Guardar en inventario
+            add_inventory_item(db, user_id, drawn_card.id)
+            pulled_cards.append(drawn_card)
 
         db.commit()
         return pulled_cards

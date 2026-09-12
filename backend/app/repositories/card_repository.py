@@ -180,3 +180,27 @@ def find_cards_by_rarity(
 def find_any_card(db) -> "PlayerCardModel | None":
     """Retorna una carta arbitraria (fallback), o None si no hay ninguna."""
     return db.query(PlayerCardModel).first()
+
+
+def get_active_pack_catalog(
+    db,
+    *,
+    season: int | None = None,
+    edition_type: str = "BASE",
+) -> "CardCatalog | None":
+    """Catálogo ACTIVE que define el pool de packs del juego.
+
+    Sin season, la edición activa más reciente; con season, la de esa
+    temporada. El servicio de packs lo resuelve UNA vez y lo fija via
+    catalog_id para nunca mezclar temporadas ni ediciones.
+    """
+    query = db.query(CardCatalog).filter(
+        CardCatalog.edition_type == edition_type,
+        CardCatalog.status == "ACTIVE",
+    )
+    if season is not None:
+        query = query.filter(CardCatalog.season == season)
+        return query.first()
+    return (
+        query.order_by(CardCatalog.season.desc(), CardCatalog.version.desc()).first()
+    )

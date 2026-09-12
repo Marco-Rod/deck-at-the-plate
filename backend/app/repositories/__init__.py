@@ -26,6 +26,7 @@ from app.repositories.card_repository import (
     find_pitchers_for_team,
     find_user_inventory_cards,
     find_user_inventory_pitchers,
+    get_active_pack_catalog,
     get_card_by_id,
     get_tactic_card_by_id,
 )
@@ -56,6 +57,7 @@ __all__ = [
     "find_inventory_entry",
     "find_inventory_with_cards",
     "find_pitchers_for_team",
+    "get_active_pack_catalog",
     "find_user_inventory_cards",
     "find_user_inventory_pitchers",
     "get_card_by_id",
