@@ -7,7 +7,7 @@ from datetime import date
 from decimal import Decimal
 
 from app.database import SessionLocal
-from etl.services.rating_stability import audit_rating_stability
+from etl.services.rating_stability import audit_rating_stability, power_tail_diagnostics
 
 
 def _date(value: str) -> date:
@@ -28,6 +28,9 @@ def main(argv=None) -> int:
     parser.add_argument("--rating-model-version", default="ratings-2.0")
     parser.add_argument("--distribution-version", default="dist-1.0")
     parser.add_argument("--snapshots", nargs="*", type=_date)
+    parser.add_argument("--bootstrap-iterations", type=int, default=1000)
+    parser.add_argument("--bootstrap-seed", type=int, default=20260902)
+    parser.add_argument("--power-tail-limit", type=int, default=20)
     args = parser.parse_args(argv)
 
     db = SessionLocal()
@@ -40,8 +43,25 @@ def main(argv=None) -> int:
             rating_model_version=args.rating_model_version,
             distribution_version=args.distribution_version,
             snapshot_dates=tuple(args.snapshots) if args.snapshots else None,
+            bootstrap_iterations=args.bootstrap_iterations,
+            bootstrap_seed=args.bootstrap_seed,
         )
-        print(json.dumps(asdict(audit), default=_json_default, indent=2))
+        power_tail = power_tail_diagnostics(
+            db,
+            season=args.season,
+            data_start_date=args.data_start_date,
+            final_date=args.final_date,
+            snapshot_dates=audit.snapshot_dates,
+            minimum_evidence=Decimal("0.90"),
+            rating_model_version=args.rating_model_version,
+            distribution_version=args.distribution_version,
+            limit=args.power_tail_limit,
+        )
+        print(json.dumps(
+            {"stability": asdict(audit), "power_tail": [asdict(row) for row in power_tail]},
+            default=_json_default,
+            indent=2,
+        ))
         return 0
     finally:
         db.rollback()

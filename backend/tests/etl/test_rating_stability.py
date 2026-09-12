@@ -85,6 +85,15 @@ def test_audit_groups_error_by_attribute_and_evidence_without_writes(db):
     assert all(row.mae == Decimal("6.00") for row in audit.buckets)
     assert all(row.within_5_pct == Decimal("0.00") for row in audit.buckets)
     assert all(row.within_10_pct == Decimal("100.00") for row in audit.buckets)
+    threshold = next(
+        row for row in audit.thresholds
+        if row.attribute == "power" and row.minimum_evidence == Decimal("0.20")
+    )
+    assert threshold.observations == 1
+    assert threshold.players == 1
+    assert threshold.p90_error == Decimal("6.00")
+    assert threshold.p90_ci_low == Decimal("6.00")
+    assert threshold.within_5_ci_high == Decimal("0.00")
     assert db.query(PlayerRatings).count() == 2
 
 
