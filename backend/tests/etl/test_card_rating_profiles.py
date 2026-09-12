@@ -1,6 +1,7 @@
 """CardRatingProfile conserva identidad, roles y provenance por edición."""
 
 import datetime as dt
+from decimal import Decimal
 
 import pytest
 from sqlalchemy import create_engine, event
@@ -17,6 +18,7 @@ from app.models import (
     PlayerRatings,
 )
 from etl.services.card_rating_profiles import generate_card_rating_profile
+from app.models.card_rating_profile import RATING_COLUMNS
 
 
 START = dt.date(2026, 8, 25)
@@ -160,6 +162,10 @@ def test_mismo_jugador_puede_tener_base_y_moment_con_los_mismos_ratings(db):
     assert first.card_rating_profile_id != second.card_rating_profile_id
     assert db.query(CardRatingProfile).count() == 2
     assert {row.overall_rating for row in db.query(CardRatingProfile)} == {64}
+    base_profile = db.get(CardRatingProfile, first.card_rating_profile_id)
+    moment_profile = db.get(CardRatingProfile, second.card_rating_profile_id)
+    assert base_profile.metadata_payload["evidence_assessment"]["eligibility"] == "UNRESOLVED"
+    assert "evidence_assessment" not in moment_profile.metadata_payload
 
 
 def test_moment_persiste_transformacion_y_actualiza_si_cambian_ajustes(db):
@@ -229,6 +235,40 @@ def test_actualiza_si_cambia_el_snapshot_fuente(db):
     assert updated.card_rating_profile_id == created.card_rating_profile_id
     assert updated.input_hash != created.input_hash
     assert (profile.power_rating, profile.overall_rating) == (70, 65)
+
+
+def test_base_evidence_changes_hash_without_changing_ratings(db):
+    player = _player(db)
+    ratings = _batter_ratings(
+        db,
+        player,
+        contact_evidence=Decimal("0.89999"),
+        power_evidence=Decimal("0.95000"),
+        vision_evidence=Decimal("0.92000"),
+    )
+    edition = _edition(db)
+    db.commit()
+    created = generate_card_rating_profile(
+        db, source_player_ratings_id=ratings.id, card_edition_id=edition.id
+    )
+    profile = db.get(CardRatingProfile, created.card_rating_profile_id)
+    before = tuple(getattr(profile, column) for column in RATING_COLUMNS)
+
+    ratings.contact_evidence = Decimal("0.90000")
+    db.commit()
+    updated = generate_card_rating_profile(
+        db, source_player_ratings_id=ratings.id, card_edition_id=edition.id
+    )
+    db.refresh(profile)
+    after = tuple(getattr(profile, column) for column in RATING_COLUMNS)
+
+    assert updated.status == "UPDATED"
+    assert updated.input_hash != created.input_hash
+    assert before == after
+    assessment = profile.metadata_payload["evidence_assessment"]
+    assert assessment["policy_version"] == "base-evidence-1.0"
+    assert assessment["eligibility"] == "UNRESOLVED"
+    assert assessment["attributes"]["contact"]["status"] == "PASS"
 
 
 def test_pitcher_conserva_solo_sus_atributos(db):

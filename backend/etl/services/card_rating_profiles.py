@@ -11,6 +11,7 @@ from typing import Mapping
 from sqlalchemy.orm import Session
 
 from app.models import CardEdition, CardRatingProfile, PlayerRatings
+from etl.services.base_evidence_policy import assess_base_evidence
 from etl.services.card_rating_policies import (
     CardRatingPolicyResult,
     apply_card_rating_policy,
@@ -61,8 +62,9 @@ def _provenance(
     edition: CardEdition,
     policy: CardRatingPolicyResult,
     calculation_metadata: Mapping | None,
+    evidence_assessment: Mapping | None,
 ) -> dict:
-    return {
+    provenance = {
         "rating_policy_version": policy.policy_version,
         "transformation": policy.transformation,
         "reason": policy.reason,
@@ -100,6 +102,9 @@ def _provenance(
             "metadata": edition.metadata_payload,
         },
     }
+    if evidence_assessment is not None:
+        provenance["evidence_assessment"] = _canonical(evidence_assessment)
+    return provenance
 
 
 def _input_hash(provenance: dict, ratings_values: dict) -> str:
@@ -137,7 +142,18 @@ def generate_card_rating_profile(
         reason=policy_reason,
     )
     values = policy.transformed_ratings
-    provenance = _provenance(ratings, edition, policy, calculation_metadata)
+    evidence_assessment = None
+    if edition.edition_type.value == "BASE":
+        evidence_assessment = assess_base_evidence(
+            role=ratings.role, player_ratings=ratings
+        ).as_dict()
+    provenance = _provenance(
+        ratings,
+        edition,
+        policy,
+        calculation_metadata,
+        evidence_assessment,
+    )
     input_hash = _input_hash(provenance, values)
     identity = {
         "player_id": ratings.player_id,
