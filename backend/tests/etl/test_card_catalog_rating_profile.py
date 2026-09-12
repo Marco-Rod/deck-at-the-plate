@@ -51,15 +51,30 @@ def db():
     engine.dispose()
 
 
-def _publication_context(db, *, rating_model_version="ratings-2.0", edition=None):
-    team = Team(id="team-1", abbreviation="TST", name="Test Team", city="Test City")
+def _publication_context(
+    db,
+    *,
+    rating_model_version="ratings-2.0",
+    edition=None,
+    primary_position="DH",
+    mlb_id=660271,
+    name="Sample Slugger",
+    team_key="team-1",
+    source_external_id=1,
+):
+    team = Team(
+        id=team_key,
+        abbreviation=f"T{source_external_id}",
+        name=f"Test Team {source_external_id}",
+        city="Test City",
+    )
     source_team = SourceTeam(
         source="MLB",
-        external_id=1,
-        source_name="Source Team",
+        external_id=source_external_id,
+        source_name=f"Source Team {source_external_id}",
         source_abbreviation="SRC",
     )
-    player = Player(mlb_id=660271, full_name="Sample Slugger", primary_position="DH")
+    player = Player(mlb_id=mlb_id, full_name=name, primary_position=primary_position)
     db.add_all([team, source_team, player])
     db.flush()
     db.add(SourceTeamGameTeamMapping(
@@ -82,9 +97,9 @@ def _publication_context(db, *, rating_model_version="ratings-2.0", edition=None
     ))
     db.add(GamePlayerIdentity(
         player_id=player.id,
-        display_first_name="Sample",
-        display_last_name="Slugger",
-        display_name="Sample Slugger",
+        display_first_name="First",
+        display_last_name=name,
+        display_name=name,
     ))
     player_season = PlayerSeason(
         player_id=player.id,
@@ -206,6 +221,153 @@ def _rarity_policy_edition(db, code="2026_BASE_RARITY"):
     db.add(edition)
     db.flush()
     return edition
+
+
+def _pitcher_ratings(db, player):
+    ratings = PlayerRatings(
+        player_id=player.id,
+        season=2026,
+        role="PITCHER",
+        rating_model_version="ratings-2.0",
+        distribution_version="dist-1.0",
+        data_start_date=START,
+        data_end_date=END,
+        velocity_rating=78,
+        control_rating=72,
+        movement_rating=70,
+        stuff_rating=74,
+        overall_rating=75,
+        input_hash="e" * 64,
+    )
+    db.add(ratings)
+    db.flush()
+    return ratings
+
+
+def _pitcher_profile(db, player_season, ratings):
+    profile = CardGenerationProfile(
+        player_season_id=player_season.id,
+        rating_model_version="ratings-2.0",
+        role="PITCHER",
+        player_ratings_id=ratings.id,
+        input_hash="f" * 64,
+        contact_rating=None,
+        power_rating=None,
+        vision_rating=None,
+        clutch_rating=None,
+        velocity_rating=78,
+        control_rating=72,
+        movement_rating=70,
+        stuff_rating=74,
+        overall_rating=75,
+        calculated_rarity=CardRarity.COMMON,
+        primary_batter_trait=None,
+        primary_pitcher_trait=None,
+        repertoire_payload=None,
+        calculation_metadata={"adapter_version": "fixture"},
+    )
+    db.add(profile)
+    db.flush()
+    return profile
+
+
+def test_two_way_gana_perfil_del_rol_primario_lanzador(db):
+    # Bateador SP: DOS perfiles (BATTER insertado PRIMERO, orden adversarial).
+    # La regla determinista debería ganar con el perfil PITCHER.
+    team, player, player_season, edition = _publication_context(
+        db, primary_position="SP"
+    )
+    batter_ratings = _batter_ratings(db, player)
+    batter_profile = _generation_profile(db, player_season, batter_ratings)
+    pitcher_ratings = _pitcher_ratings(db, player)
+    pitcher_profile = _pitcher_profile(db, player_season, pitcher_ratings)
+    db.commit()
+
+    result = publish_card_catalog(
+        db,
+        season=2026,
+        card_edition_id=edition.id,
+        rating_model_version="ratings-2.0",
+        data_end_date=END,
+    )
+    cards = db.query(PlayerCardModel).all()
+
+    assert result.status == "ACTIVE"
+    assert len(cards) == 1
+    assert cards[0].generation_profile_id == pitcher_profile.id
+    assert cards[0].position == "SP"
+    assert cards[0].velocity == 78
+    assert cards[0].power == 0
+    assert cards[0].generation_profile_id != batter_profile.id
+
+
+def test_two_way_gana_perfil_del_rol_primario_bateador(db):
+    # DH: PITCHER insertado PRIMERO (orden adversarial); debe ganar el BATTER.
+    team, player, player_season, edition = _publication_context(
+        db, primary_position="DH"
+    )
+    pitcher_ratings = _pitcher_ratings(db, player)
+    pitcher_profile = _pitcher_profile(db, player_season, pitcher_ratings)
+    batter_ratings = _batter_ratings(db, player)
+    batter_profile = _generation_profile(db, player_season, batter_ratings)
+    db.commit()
+
+    result = publish_card_catalog(
+        db,
+        season=2026,
+        card_edition_id=edition.id,
+        rating_model_version="ratings-2.0",
+        data_end_date=END,
+    )
+    cards = db.query(PlayerCardModel).all()
+
+    assert result.status == "ACTIVE"
+    assert len(cards) == 1
+    assert cards[0].generation_profile_id == batter_profile.id
+    assert cards[0].position == "DH"
+    assert cards[0].power == 68
+    assert cards[0].velocity == 0
+    assert cards[0].generation_profile_id != pitcher_profile.id
+
+
+def test_normales_no_afectados_por_dedupe_two_way(db):
+    # Dos jugadores distintos (un DH y un SP) publican DOS cartas, cada una
+    # con su perfil de rol primario; el orden del catálogo es estable.
+    team, player, player_season, edition = _publication_context(
+        db, primary_position="DH", mlb_id=660271, name="A"
+    )
+    batter_ratings = _batter_ratings(db, player)
+    _generation_profile(db, player_season, batter_ratings)
+
+    team2, player2, player_season2, _ed2 = _publication_context(
+        db,
+        primary_position="SP",
+        mlb_id=660272,
+        name="B",
+        team_key="team-2",
+        source_external_id=2,
+    )
+    pitcher_ratings = _pitcher_ratings(db, player2)
+    _pitcher_profile(db, player_season2, pitcher_ratings)
+    db.commit()
+
+    result = publish_card_catalog(
+        db,
+        season=2026,
+        card_edition_id=edition.id,
+        rating_model_version="ratings-2.0",
+        data_end_date=END,
+    )
+    cards = db.query(PlayerCardModel).order_by(PlayerCardModel.player_id).all()
+
+    assert result.status == "ACTIVE"
+    assert result.created == 2
+    assert len(cards) == 2
+    by_player = {c.player_id: c for c in cards}
+    assert by_player[player.id].position == "DH"
+    assert by_player[player2.id].position == "SP"
+    assert by_player[player.id].velocity == 0
+    assert by_player[player2.id].velocity == 78
 
 
 def test_publica_atributos_desde_card_rating_profile(db):

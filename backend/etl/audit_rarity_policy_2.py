@@ -44,6 +44,7 @@ from etl.services.card_catalog import (
     _resolve_published_rarity,
     _resolve_rating_profile,
     _validate_rows,
+    profile_publish_order,
 )
 from etl.services.card_rating_policies import BASE_RATING_POLICY_VERSION
 from etl.services.card_rating_profiles import generate_card_rating_profile
@@ -172,9 +173,11 @@ def main(argv=None) -> int:
             candidates = (
                 db.query(CardGenerationProfile)
                 .filter(CardGenerationProfile.id.in_(generated_ids))
-                .order_by(CardGenerationProfile.player_season_id, CardGenerationProfile.role)
                 .all()
             )
+            # Misma regla que publish_card_catalog: orden determinista y
+            # two-way = rol de la posición primaria (reproducibilidad del dry-run).
+            candidates.sort(key=profile_publish_order)
             seen_players = set()
             skipped_unresolved = 0
             rarity_failures = []

@@ -35,6 +35,7 @@ from app.models import (
     SourceTeamRosterMember,
     SourceTeamRosterSnapshot,
 )
+from app.core.enums import PITCHER_POSITIONS
 from app.services.card_editions import ensure_system_base_edition
 from etl.services.rarity_policies import (
     final_performance_tier,
@@ -45,9 +46,29 @@ logger = logging.getLogger("etl.services.card_catalog")
 
 _CARD_STATUSES = CardCatalog.STATUSES
 
+# "P" es lanzador explícito en algunos orígenes y no vive en Position.
+_PITCHER_POSITIONS = frozenset(PITCHER_POSITIONS) | {"P"}
+
 
 def _new_id() -> str:
     return str(uuid.uuid4())
+
+
+def profile_publish_order(profile):
+    """Orden de publicación de un perfil de generación (determinista).
+
+    Dos-way (BATTER + PITCHER para el mismo jugador): gana el perfil cuyo rol
+    coincide con la posición primaria — PITCHER si lanzador (SP/RP/P/...),
+    BATTER si posición jugada. Legacy (role NULL) se trata como BATTER.
+    Desempates por player_season_id y role: orden completo estable para todo el
+    catálogo, sin depender del plan de ejecución de postgres.
+    """
+    player = profile.player_season.player
+    position = player.primary_position or "UT"
+    wants_pitcher = position in _PITCHER_POSITIONS
+    role = profile.role or "BATTER"
+    matches = (role == "PITCHER") == wants_pitcher
+    return (0 if matches else 1, profile.player_season_id, role)
 
 
 @dataclass
@@ -147,7 +168,9 @@ def publish_card_catalog(
         profile_query = profile_query.filter(PlayerSeason.data_end_date == data_end_date)
     if rating_model_version is not None:
         profile_query = profile_query.filter(CardGenerationProfile.rating_model_version == rating_model_version)
-    profiles = profile_query.all()
+    # Orden determinista (§two-way): un jugador aporta UNA carta; para los
+    # two-way gana el rol de su posición primaria (ver profile_publish_order).
+    profiles = sorted(profile_query.all(), key=profile_publish_order)
 
     rows_to_insert: list[PlayerCardModel] = []
     seen_players: set[str] = set()
