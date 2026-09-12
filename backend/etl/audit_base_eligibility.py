@@ -282,10 +282,11 @@ def main(argv=None) -> int:
             }
 
             # ---- 6. bandas de evidencia por atributo calibrado ---------------
+            # sobre la vista cartas (829): BASE publica cartas, no role-rows.
             evidence_bands = {}
             for role in ROLES:
                 role_evidence = defaultdict(list)
-                for r in rating_rows:
+                for r in card_rows:
                     if r["role"] != role:
                         continue
                     for attribute, assessment in r["assessment"].evidence.attributes.items():

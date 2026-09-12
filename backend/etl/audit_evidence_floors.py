@@ -1,31 +1,28 @@
-"""Dry-run de minimum publication evidence floors (base-eligibility-1.1 candidate).
+"""Dry-run de minimum publication evidence floors (base-eligibility-1.1 gate).
 
-NO cambia ninguna policy. Mide sobre la población REAL ratings-2.0 dedupeada
-(829 cartas, replica profile_publish_order como audit_base_eligibility) cómo
-quedaría la frontera si eligibility distinguiera:
+NO cambia ninguna policy. Grid FINAL independiente POR ATRIBUTO sobre las 829
+cartas post profile_publish_order:
 
-    evidence <  floor              -> INELIGIBLE  (muestra insuficiente)
-    floor <= evidence < calibrated -> PROVISIONAL (evidencia sustancial)
-    evidence >= calibrated         -> PASS        (umbral intacto base-evidence-1.0)
+    contact : .20 .25 .30
+    vision  : .20 .25 .30
+    velocity: .15 .20 .25 .30
+    movement: .15 .20 .25 .30
 
-Por atributo calibrado se prueban floors candidatos separados:
+Matriz cartesiana (4x4x...): cada combinacion de floors independientes se
+evalua junto (el atributo calibrado mas debil decide). Por combinacion se
+reporta total/BATTER/PITCHER, rarity, team, drivers y cards con >1 fallo.
 
-    BATTER  contact/vision: 0.25 0.40 0.50 0.60
-    PITCHER velocity/movement: 0.10 0.20 0.25 0.30
+Por atributo (independiente de la combinacion) se reporta por floor:
+    - below_floor / missing_evidence
+    - metricas humanas del subconjunto debajo del floor
+      (BATTER: pa; PITCHER velocity: batters_faced + pitches;
+       movement: evaluable_pitches) con median/p90
 
-Por cada corte se reporta:
-    - buckets por role/floor (corte conjunto: el atributo mas debil decide)
-    - impacto por rarity y por team del corte conjunto
-    - counts por atributo (debajo del floor, y evidence NULL)
-    - metricas humanas de muestra del subconjunto debajo del floor
-      (BATTER: pa median/p90; PITCHER velocity: batters_faced y pitches;
-       movement: evaluable pitch count sobre PitcherPitchProfile)
-        -> respuesta: la exclusion corresponde a temporada/base poco confiable
-           o solo rebasa una frontera estadistica?
-
-Seguridad: misma transaccion que audit_base_eligibility (savepoint + rollback);
-integridad por conteos antes/despues de RatingDistribution y
-CardGenerationProfile.
+Inspeccion individual del candidato all-0.25: cada INELIGIBLE con player, rol,
+posicion primaria, evidencia por atributo, muestra humana y que atributo
+dispara el fallo — para confirmar que el floor captura participaciones
+marginales, no agujeros de ingestion. La DB queda intacta (savepoint+rollback,
+integridad por conteos).
 """
 
 import argparse
@@ -34,6 +31,7 @@ import math
 from collections import Counter, defaultdict
 from datetime import date
 from decimal import Decimal
+from itertools import product
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -79,13 +77,19 @@ CALIBRATED_ATTRS = {
     "PITCHER": tuple(a for a in ROLE_ATTRIBUTES["PITCHER"] if a in CALIBRATED_THRESHOLDS),
 }
 
-FLOOR_CANDIDATES = {
-    "BATTER": (
-        Decimal("0.25"), Decimal("0.40"), Decimal("0.50"), Decimal("0.60"),
-    ),
-    "PITCHER": (
-        Decimal("0.10"), Decimal("0.20"), Decimal("0.25"), Decimal("0.30"),
-    ),
+FLOOR_GRID = {
+    "contact": (Decimal("0.20"), Decimal("0.25"), Decimal("0.30")),
+    "vision": (Decimal("0.20"), Decimal("0.25"), Decimal("0.30")),
+    "velocity": (Decimal("0.15"), Decimal("0.20"), Decimal("0.25"), Decimal("0.30")),
+    "movement": (Decimal("0.15"), Decimal("0.20"), Decimal("0.25"), Decimal("0.30")),
+}
+CALIBRATED_ORDER = tuple(FLOOR_GRID)
+
+CANDIDATE_FLOORS = {
+    "contact": Decimal("0.25"),
+    "vision": Decimal("0.25"),
+    "velocity": Decimal("0.25"),
+    "movement": Decimal("0.25"),
 }
 
 
@@ -103,7 +107,6 @@ def _nearest_rank(sorted_values, quantile):
 
 
 def _summary(values):
-    """median/p90 por rango para el subconjunto debajo del floor."""
     sorted_values = sorted(values)
     if not sorted_values:
         return {"n": 0, "median": None, "p90": None}
@@ -114,17 +117,8 @@ def _summary(values):
     }
 
 
-def _decide_under_floor(assessment, role, floor) -> str:
-    """Corte conjunto: el atributo calibrado mas debil decide.
-
-    evidence NULL o debajo del floor -> INELIGIBLE; si todos pasan el floor,
-    quedan las senales de power/control/stuff que hoy son siempre PROVISIONAL.
-    """
-    for attribute in CALIBRATED_ATTRS[role]:
-        evidence = assessment.evidence.attributes[attribute].evidence
-        if evidence is None or evidence < floor:
-            return INELIGIBLE
-    return PROVISIONAL
+def _combo_key(combo) -> str:
+    return "|".join(f"{attr}={combo[attr]}" for attr in CALIBRATED_ORDER)
 
 
 def main(argv=None) -> int:
@@ -147,11 +141,11 @@ def main(argv=None) -> int:
         try:
             # ---- 1. distribuciones por role (transaccional, se descarta) ----
             edition = CardEdition(
-                code="2026_DRYRUN_FLOORS",
-                name="2026 Dry-run Evidence Floors",
+                code="2026_DRYRUN_FLOOR_GRID",
+                name="2026 Dry-run Floor Grid",
                 edition_type=CardEditionType.BASE,
                 season=args.season,
-                version="dry-run-1.1",
+                version="dry-run-1.1-grid",
                 rarity_policy_version=RARITY_POLICY_VERSION,
                 source_type=CardEditionSourceType.SYSTEM,
                 metadata_payload={},
@@ -224,6 +218,7 @@ def main(argv=None) -> int:
             report["population"] = {
                 "rating_rows": len(ratings_rows),
                 "cards_after_dedupe": len(cards),
+                "candidate_combo": _combo_key(CANDIDATE_FLOORS),
             }
 
             # ---- 4. metricas humanas de muestra por player_season ------------
@@ -258,7 +253,7 @@ def main(argv=None) -> int:
                 .all()
             )
 
-            # ---- 5. v1 de referencia sobre las 829 cartas -------------------
+            # ---- 5. v1 de referencia -----------------------------------------
             v1 = Counter(c["assessment"].decision for c in cards)
             report["reference_v1"] = {
                 "INELIGIBLE": v1.get(INELIGIBLE, 0),
@@ -266,52 +261,114 @@ def main(argv=None) -> int:
                 "ELIGIBLE": v1.get(ELIGIBLE, 0),
             }
 
-            # ---- 6. cortes de floor -----------------------------------------
-            floors_report = {}
-            for role in ROLES:
+            # ---- 6. per-atributo: counts y muestras por floor -----------------
+            per_attribute = {}
+            for attribute, floors in FLOOR_GRID.items():
+                role = "BATTER" if attribute in CALIBRATED_ATTRS["BATTER"] else "PITCHER"
                 role_cards = [c for c in cards if c["role"] == role]
-                role_floors = FLOOR_CANDIDATES[role]
-                joint = {}
-                per_attribute = {}
-                for attribute in CALIBRATED_ATTRS[role]:
-                    per_attribute[attribute] = {}
-                    for floor in role_floors:
-                        below = [
-                            c for c in role_cards
-                            if (c["assessment"].evidence.attributes[attribute].evidence or Decimal("0"))
-                            < floor
-                        ]
-                        missing = [
-                            c for c in role_cards
-                            if c["assessment"].evidence.attributes[attribute].evidence is None
-                        ]
-                        per_attribute[attribute][str(floor)] = {
-                            "below_floor": len(below),
-                            "missing_evidence": len(missing),
-                            "sample_metric": _sample_metric(db, role, attribute, below, batter_pa,
-                                                            pitcher_counts, evaluable_counts),
-                        }
-
-                for floor in role_floors:
-                    decided = Counter(_decide_under_floor(c["assessment"], role, floor) for c in role_cards)
-                    ineligible = [c for c in role_cards if _decide_under_floor(c["assessment"], role, floor) == INELIGIBLE]
-                    by_rarity = Counter(c["rarity"] for c in ineligible)
-                    by_team = Counter(c["team_id"] for c in ineligible)
-                    joint[str(floor)] = {
-                        "n_cards": len(role_cards),
-                        "INELIGIBLE": decided.get(INELIGIBLE, 0),
-                        "PROVISIONAL": decided.get(PROVISIONAL, 0),
-                        "pct_ineligible": round(decided.get(INELIGIBLE, 0) / len(role_cards), 3),
-                        "by_rarity": {k: by_rarity.get(k, 0) for k in RARITY_KEYS},
-                        "by_team": {
-                            "min": min(by_team.values()) if by_team else 0,
-                            "max": max(by_team.values()) if by_team else 0,
-                            "avg": round(sum(by_team.values()) / len(by_team), 2) if by_team else 0.0,
-                            "top": by_team.most_common(3),
-                        },
+                per_attribute[attribute] = {}
+                for floor in floors:
+                    below_floor = []
+                    missing = 0
+                    for c in role_cards:
+                        evidence = c["assessment"].evidence.attributes[attribute].evidence
+                        if evidence is None:
+                            missing += 1
+                        elif evidence < floor:
+                            below_floor.append(c)
+                    per_attribute[attribute][str(floor)] = {
+                        "below_floor": len(below_floor),
+                        "missing_evidence": missing,
+                        "sample_metric": _sample_metric(
+                            role, attribute, below_floor,
+                            batter_pa, pitcher_counts, evaluable_counts,
+                        ),
                     }
-                floors_report[role] = {"joint": joint, "per_attribute": per_attribute}
-            report["floors"] = floors_report
+            report["per_attribute_floors"] = per_attribute
+
+            # ---- 7. matriz cartesiana de floors independientes ----------------
+            def decide_under(combo, card) -> str:
+                for attribute in CALIBRATED_ATTRS[card["role"]]:
+                    evidence = card["assessment"].evidence.attributes[attribute].evidence
+                    if evidence is None or evidence < combo[attribute]:
+                        return INELIGIBLE
+                return PROVISIONAL
+
+            matrix = []
+            for floors_tuple in product(*(FLOOR_GRID[a] for a in CALIBRATED_ORDER)):
+                combo = dict(zip(CALIBRATED_ORDER, floors_tuple))
+                ineligible = []
+                for card in cards:
+                    if decide_under(combo, card) == INELIGIBLE:
+                        ineligible.append(card)
+                if not ineligible:
+                    matrix.append({
+                        "combo": _combo_key(combo),
+                        "INELIGIBLE": 0,
+                        "BATTER": 0,
+                        "PITCHER": 0,
+                    })
+                    continue
+                bat = Counter(card["role"] for card in ineligible)
+                rarity = Counter(card["rarity"] for card in ineligible)
+                team = Counter(card["team_id"] for card in ineligible)
+                drivers = defaultdict(int)
+                multi_fail = 0
+                for card in ineligible:
+                    failing = [
+                        a for a in CALIBRATED_ATTRS[card["role"]]
+                        if (card["assessment"].evidence.attributes[a].evidence or Decimal("0")) < combo[a]
+                    ]
+                    for a in failing:
+                        drivers[a] += 1
+                    if len(failing) > 1:
+                        multi_fail += 1
+                matrix.append({
+                    "combo": _combo_key(combo),
+                    "INELIGIBLE": len(ineligible),
+                    "BATTER": bat.get("BATTER", 0),
+                    "PITCHER": bat.get("PITCHER", 0),
+                    "by_rarity": {k: rarity.get(k, 0) for k in RARITY_KEYS},
+                    "by_team": {
+                        "min": min(team.values()),
+                        "max": max(team.values()),
+                        "avg": round(sum(team.values()) / len(team), 2),
+                    },
+                    "drivers": {k: drivers[k] for k in CALIBRATED_ORDER},
+                    "cards_with_multi_fail": multi_fail,
+                })
+            report["matrix"] = matrix
+
+            # ---- 8. inspeccion individual del candidato all-0.25 --------------
+            inspection = []
+            for card in cards:
+                if decide_under(CANDIDATE_FLOORS, card) != INELIGIBLE:
+                    continue
+                player = card["profile"].player_season.player
+                failing = [
+                    a for a in CALIBRATED_ATTRS[card["role"]]
+                    if (card["assessment"].evidence.attributes[a].evidence or Decimal("0")) < CANDIDATE_FLOORS[a]
+                ]
+                inspection.append({
+                    "name": player.full_name,
+                    "mlb_id": player.mlb_id,
+                    "role": card["role"],
+                    "primary_position": player.primary_position,
+                    "rarity": card["rarity"],
+                    "team_id": card["team_id"],
+                    "evidence": {
+                        a: str(card["assessment"].evidence.attributes[a].evidence)
+                        for a in CALIBRATED_ATTRS[card["role"]]
+                    },
+                    "sample": _card_sample(card, batter_pa, pitcher_counts, evaluable_counts),
+                    "drivers": failing,
+                })
+            inspection.sort(key=lambda row: row["role"])
+            report["candidate_inspection"] = {
+                "combo": _combo_key(CANDIDATE_FLOORS),
+                "total": len(inspection),
+                "cards": inspection,
+            }
 
             print(json.dumps(report, default=_json_default, indent=2))
         except Exception as exc:  # noqa: BLE001
@@ -334,27 +391,42 @@ def main(argv=None) -> int:
     return return_code
 
 
-def _sample_metric(db: Session, role, attribute, below, batter_pa, pitcher_counts, evaluable_counts) -> dict:
-    """Metricas humanas del subconjunto debajo del floor."""
-    if not below:
+def _metric_values(role, attribute, below_cards, batter_pa, pitcher_counts, evaluable_counts):
+    if role == "BATTER":
+        return [("pa", batter_pa.get(c["profile"].player_season_id, 0)) for c in below_cards]
+    if attribute == "velocity":
+        rows = []
+        for c in below_cards:
+            bf, pitches = pitcher_counts.get(c["profile"].player_season_id, (0, 0))
+            rows.append(("batters_faced", bf))
+            rows.append(("pitches", pitches))
+        return rows
+    return [
+        ("evaluable_pitches", evaluable_counts.get(c["profile"].player_season_id, 0))
+        for c in below_cards
+    ]
+
+
+def _sample_metric(role, attribute, below_cards, batter_pa, pitcher_counts, evaluable_counts) -> dict:
+    if not below_cards:
         return {"n": 0}
-    players = []
-    for card in below:
-        ps_id = card["profile"].player_season_id
-        if role == "BATTER":
-            value = batter_pa.get(ps_id, 0)
-            players.append({"metric": "pa", "value": value})
-        elif attribute == "velocity":
-            bf, pitches = pitcher_counts.get(ps_id, (0, 0))
-            players.append({"metric": "batters_faced", "value": bf})
-            players.append({"metric": "pitches", "value": pitches})
-        else:  # movement
-            players.append({"metric": "evaluable_pitches", "value": evaluable_counts.get(ps_id, 0)})
+    rows = _metric_values(role, attribute, below_cards, batter_pa, pitcher_counts, evaluable_counts)
     by_metric = {}
-    for metric in {p["metric"] for p in players}:
-        values = sorted(p["value"] for p in players if p["metric"] == metric)
-        by_metric[metric] = _summary(values)
+    for metric in {m for m, _ in rows}:
+        by_metric[metric] = _summary([value for m, value in rows if m == metric])
     return by_metric
+
+
+def _card_sample(card, batter_pa, pitcher_counts, evaluable_counts) -> dict:
+    ps_id = card["profile"].player_season_id
+    if card["role"] == "BATTER":
+        return {"pa": batter_pa.get(ps_id, 0)}
+    bf, pitches = pitcher_counts.get(ps_id, (0, 0))
+    return {
+        "batters_faced": bf,
+        "pitches": pitches,
+        "evaluable_pitches": evaluable_counts.get(ps_id, 0),
+    }
 
 
 if __name__ == "__main__":
