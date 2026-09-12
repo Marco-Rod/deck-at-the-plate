@@ -79,15 +79,19 @@ def test_audit_groups_error_by_attribute_and_evidence_without_writes(db):
 
     assert audit.final_players == 1
     assert audit.matched_player_snapshots == 1
-    assert len(audit.buckets) == 3
-    assert {row.attribute for row in audit.buckets} == {"contact", "power", "vision"}
-    assert all(row.evidence_bucket == "0.20-0.29" for row in audit.buckets)
-    assert all(row.mae == Decimal("6.00") for row in audit.buckets)
-    assert all(row.within_5_pct == Decimal("0.00") for row in audit.buckets)
-    assert all(row.within_10_pct == Decimal("100.00") for row in audit.buckets)
+    assert audit.next_matched_player_snapshots == 1
+    assert len(audit.buckets) == 6
+    final_buckets = [row for row in audit.buckets if row.comparison == "FINAL"]
+    assert {row.attribute for row in final_buckets} == {"contact", "power", "vision"}
+    assert all(row.evidence_bucket == "0.20-0.29" for row in final_buckets)
+    assert all(row.mae == Decimal("6.00") for row in final_buckets)
+    assert all(row.within_5_pct == Decimal("0.00") for row in final_buckets)
+    assert all(row.within_10_pct == Decimal("100.00") for row in final_buckets)
     threshold = next(
         row for row in audit.thresholds
-        if row.attribute == "power" and row.minimum_evidence == Decimal("0.20")
+        if row.comparison == "FINAL"
+        and row.attribute == "power"
+        and row.minimum_evidence == Decimal("0.20")
     )
     assert threshold.observations == 1
     assert threshold.players == 1
@@ -108,3 +112,41 @@ def test_requires_earlier_snapshot(db):
         audit_rating_stability(
             db, season=2026, data_start_date=START, final_date=FINAL
         )
+
+
+def test_next_snapshot_separates_short_horizon_from_final_horizon(db):
+    player = Player(mlb_id=3, full_name="Changing", primary_position="1B")
+    db.add(player)
+    db.flush()
+    first = dt.date(2026, 5, 4)
+    second = dt.date(2026, 6, 13)
+    _ratings(db, player, first, 60, Decimal("0.50"))
+    _ratings(db, player, second, 70, Decimal("0.50"))
+    _ratings(db, player, FINAL, 90, Decimal("0.90"))
+    db.commit()
+
+    audit = audit_rating_stability(
+        db,
+        season=2026,
+        data_start_date=START,
+        final_date=FINAL,
+        snapshot_dates=(first, second),
+        bootstrap_iterations=20,
+    )
+    final = next(
+        row for row in audit.thresholds
+        if row.comparison == "FINAL"
+        and row.attribute == "power"
+        and row.minimum_evidence == Decimal("0.50")
+    )
+    following = next(
+        row for row in audit.thresholds
+        if row.comparison == "NEXT"
+        and row.attribute == "power"
+        and row.minimum_evidence == Decimal("0.50")
+    )
+
+    assert final.mae == Decimal("25.00")
+    assert following.mae == Decimal("15.00")
+    assert final.p90_error == Decimal("29.00")
+    assert following.p90_error == Decimal("19.00")

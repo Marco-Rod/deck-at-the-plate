@@ -21,6 +21,7 @@ ROLE_ATTRIBUTES = {
 
 @dataclass(frozen=True)
 class StabilityBucket:
+    comparison: str
     role: str
     attribute: str
     evidence_bucket: str
@@ -35,6 +36,7 @@ class StabilityBucket:
 
 @dataclass(frozen=True)
 class StabilityThreshold:
+    comparison: str
     role: str
     attribute: str
     minimum_evidence: Decimal
@@ -96,6 +98,7 @@ class StabilityAudit:
     snapshot_dates: tuple[date, ...]
     final_players: int
     matched_player_snapshots: int
+    next_matched_player_snapshots: int
     buckets: tuple[StabilityBucket, ...]
     thresholds: tuple[StabilityThreshold, ...]
 
@@ -243,36 +246,59 @@ def audit_rating_stability(
         rendered = ", ".join(sorted(value.isoformat() for value in unavailable))
         raise ValueError(f"requested snapshots are unavailable: {rendered}")
 
+    comparison_dates = tuple(sorted(set(selected_dates + (final_date,))))
     earlier = db.query(PlayerRatings).filter(
-        *base_filters, PlayerRatings.data_end_date.in_(selected_dates)
+        *base_filters, PlayerRatings.data_end_date.in_(comparison_dates)
     ).all()
-    final_by_identity = {(row.player_id, row.role): row for row in finals}
-    errors: dict[tuple[str, str, str], list[int]] = defaultdict(list)
-    observations: dict[tuple[str, str], list[tuple[str, Decimal, int]]] = defaultdict(list)
+    by_identity_date = {
+        (row.player_id, row.role, row.data_end_date): row for row in earlier
+    }
+    errors: dict[tuple[str, str, str, str], list[int]] = defaultdict(list)
+    observations: dict[
+        tuple[str, str, str], list[tuple[str, Decimal, int]]
+    ] = defaultdict(list)
     matched = 0
+    next_matched = 0
+    next_date = {
+        selected_dates[index]: comparison_dates[index + 1]
+        for index in range(len(selected_dates))
+    }
     for snapshot in earlier:
-        final = final_by_identity.get((snapshot.player_id, snapshot.role))
-        if final is None:
+        if snapshot.data_end_date not in selected_dates:
             continue
-        matched += 1
-        for attribute in ROLE_ATTRIBUTES[snapshot.role]:
-            evidence = getattr(snapshot, f"{attribute}_evidence")
-            rating = getattr(snapshot, f"{attribute}_rating")
-            final_rating = getattr(final, f"{attribute}_rating")
-            if evidence is None or rating is None or final_rating is None:
+        targets = (
+            ("FINAL", by_identity_date.get(
+                (snapshot.player_id, snapshot.role, final_date)
+            )),
+            ("NEXT", by_identity_date.get(
+                (snapshot.player_id, snapshot.role, next_date[snapshot.data_end_date])
+            )),
+        )
+        if targets[0][1] is not None:
+            matched += 1
+        if targets[1][1] is not None:
+            next_matched += 1
+        for comparison, target in targets:
+            if target is None:
                 continue
-            errors[(snapshot.role, attribute, _bucket(Decimal(evidence)))].append(
-                abs(rating - final_rating)
-            )
-            observations[(snapshot.role, attribute)].append(
-                (snapshot.player_id, Decimal(evidence), abs(rating - final_rating))
-            )
+            for attribute in ROLE_ATTRIBUTES[snapshot.role]:
+                evidence = getattr(snapshot, f"{attribute}_evidence")
+                rating = getattr(snapshot, f"{attribute}_rating")
+                target_rating = getattr(target, f"{attribute}_rating")
+                if evidence is None or rating is None or target_rating is None:
+                    continue
+                error = abs(rating - target_rating)
+                errors[(comparison, snapshot.role, attribute, _bucket(Decimal(evidence)))].append(error)
+                observations[(comparison, snapshot.role, attribute)].append(
+                    (snapshot.player_id, Decimal(evidence), error)
+                )
 
     buckets = []
-    for (role, attribute, evidence_bucket), values in sorted(errors.items()):
+    for (comparison, role, attribute, evidence_bucket), values in sorted(errors.items()):
         total = len(values)
         summary = _summaries(values)
         buckets.append(StabilityBucket(
+            comparison=comparison,
             role=role,
             attribute=attribute,
             evidence_bucket=evidence_bucket,
@@ -288,7 +314,7 @@ def audit_rating_stability(
     if bootstrap_iterations < 1:
         raise ValueError("bootstrap_iterations must be positive")
     threshold_rows = []
-    for (role, attribute), attribute_observations in sorted(observations.items()):
+    for (comparison, role, attribute), attribute_observations in sorted(observations.items()):
         for threshold_index, threshold in enumerate(thresholds):
             eligible = [row for row in attribute_observations if row[1] >= threshold]
             if not eligible:
@@ -304,6 +330,7 @@ def audit_rating_stability(
                 seed=bootstrap_seed + threshold_index,
             )
             threshold_rows.append(StabilityThreshold(
+                comparison=comparison,
                 role=role,
                 attribute=attribute,
                 minimum_evidence=threshold,
@@ -326,6 +353,7 @@ def audit_rating_stability(
         snapshot_dates=tuple(sorted(selected_dates)),
         final_players=len(finals),
         matched_player_snapshots=matched,
+        next_matched_player_snapshots=next_matched,
         buckets=tuple(buckets),
         thresholds=tuple(threshold_rows),
     )
