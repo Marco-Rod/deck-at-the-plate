@@ -126,6 +126,15 @@ class PlayerCardModel(Base):
         nullable=False,
         index=True,
     )
+    # Fuente autoritativa de atributos del rating de la carta. Nullable:
+    # legacy (ratings-1.0) y cortes sin CardRatingProfile publican desde
+    # CardGenerationProfile.
+    card_rating_profile_id = Column(
+        String(36),
+        ForeignKey("card_rating_profiles.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
 
     # Relaciones
     team = relationship("Team", back_populates="cards")
@@ -134,6 +143,7 @@ class PlayerCardModel(Base):
     game_identity = relationship("GamePlayerIdentity", back_populates="cards")
     catalog = relationship("CardCatalog", back_populates="cards")
     card_edition = relationship("CardEdition", back_populates="cards")
+    card_rating_profile = relationship("CardRatingProfile")
 
     @property
     def is_pitcher(self) -> bool:

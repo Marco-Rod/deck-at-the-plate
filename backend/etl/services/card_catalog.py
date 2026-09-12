@@ -25,6 +25,7 @@ from app.models import (
     CardCatalog,
     CardEdition,
     CardGenerationProfile,
+    CardRatingProfile,
     PlayerCardModel,
     PlayerSeason,
     SourceTeamGameTeamMapping,
@@ -157,8 +158,11 @@ def publish_card_catalog(
         if player.id in seen_players:
             continue
         seen_players.add(player.id)
+        rating_profile = _resolve_rating_profile(
+            db, card_edition, profile, player.id
+        )
         payload = _card_from_profile(
-            catalog, card_edition, profile, player, game_team
+            catalog, card_edition, profile, player, game_team, rating_profile
         )
         if payload is None:
             skipped_unresolved += 1
@@ -223,20 +227,58 @@ def _game_team_for_player(db: Session, player_id: str) -> str | None:
     return row[0] if row else None
 
 
+_RATING_FIELDS = (
+    "contact_rating",
+    "power_rating",
+    "vision_rating",
+    "clutch_rating",
+    "velocity_rating",
+    "control_rating",
+    "movement_rating",
+    "stuff_rating",
+    "overall_rating",
+)
+
+
+def _resolve_rating_profile(
+    db: Session,
+    card_edition: CardEdition,
+    profile: CardGenerationProfile,
+    player_id: str,
+) -> CardRatingProfile | None:
+    """CardRatingProfile autoritativo, anclado al mismo PlayerRatings fuente."""
+    if profile.player_ratings_id is None or profile.role is None:
+        return None
+    return (
+        db.query(CardRatingProfile)
+        .filter(
+            CardRatingProfile.player_id == player_id,
+            CardRatingProfile.card_edition_id == card_edition.id,
+            CardRatingProfile.role == profile.role,
+            CardRatingProfile.source_player_ratings_id == profile.player_ratings_id,
+        )
+        .one_or_none()
+    )
+
+
 def _card_from_profile(
     catalog,
     card_edition: CardEdition,
     profile,
     player,
     game_team_id: str,
+    rating_profile: CardRatingProfile | None = None,
 ) -> PlayerCardModel | None:
-    if not 0 <= profile.overall_rating <= 99:
+    source = rating_profile if rating_profile is not None else profile
+    values = {field: getattr(source, field) for field in _RATING_FIELDS}
+    overall = values["overall_rating"]
+    if not 0 <= overall <= 99:
         return None
     identity = player.game_identity
     is_two_way = (
-        (profile.velocity_rating or 0) > 0
-        and (profile.power_rating or 0) > 0
-        and (profile.contact_rating or 0) > 0
+        (values["velocity_rating"] or 0) > 0
+        and (values["power_rating"] or 0) > 0
+        and (values["contact_rating"] or 0) > 0
     )
     position = player.primary_position or "UT"
     if is_two_way:
@@ -247,22 +289,23 @@ def _card_from_profile(
         name=identity.display_name,
         number=identity.default_jersey_number or "00",
         position=position,
-        overall=profile.overall_rating,
+        overall=overall,
         rarity=profile.calculated_rarity,
         is_two_way=is_two_way,
         # PlayerCard conserva el contrato numérico del motor; los N/A del
-        # perfil estadístico se materializan aquí, no en CardGenerationProfile.
-        power=profile.power_rating or 0,
-        contact=profile.contact_rating or 0,
-        velocity=profile.velocity_rating or 0,
-        control=profile.control_rating or 0,
-        movement=profile.movement_rating or 0,
-        vision=profile.vision_rating or 0,
-        clutch=profile.clutch_rating or 0,
+        # perfil estadístico se materializan aquí, no en el perfil.
+        power=values["power_rating"] or 0,
+        contact=values["contact_rating"] or 0,
+        velocity=values["velocity_rating"] or 0,
+        control=values["control_rating"] or 0,
+        movement=values["movement_rating"] or 0,
+        vision=values["vision_rating"] or 0,
+        clutch=values["clutch_rating"] or 0,
         repertoire=profile.repertoire_payload,
         player_id=player.id,
         player_season_id=profile.player_season_id,
         generation_profile_id=profile.id,
+        card_rating_profile_id=source.id if rating_profile is not None else None,
         edition_type=catalog.edition_type,
         edition_version=catalog.version,
         season=catalog.season,
