@@ -36,10 +36,14 @@ from app.models import (
     SourceTeamRosterSnapshot,
 )
 from app.core.enums import PITCHER_POSITIONS
-from app.services.card_editions import ensure_system_base_edition
 from etl.services.rarity_policies import (
     final_performance_tier,
     resolve_card_rarity,
+)
+from etl.services.base_eligibility_policy import (
+    ELIGIBLE,
+    INELIGIBLE,
+    PROVISIONAL,
 )
 
 logger = logging.getLogger("etl.services.card_catalog")
@@ -84,6 +88,7 @@ class CatalogRunResult:
     status: str = "FAILED"
     created: int = 0
     skipped_unresolved: int = 0
+    skipped_ineligible: int = 0
     issues: list[str] = field(default_factory=list)
 
 
@@ -181,6 +186,8 @@ def publish_card_catalog(
     rows_to_insert: list[PlayerCardModel] = []
     seen_players: set[str] = set()
     skipped_unresolved = 0
+    skipped_ineligible = 0
+    eligibility_failures: list[str] = []
     rarity_failures: list[str] = []
 
     for profile in profiles:
@@ -198,6 +205,16 @@ def publish_card_catalog(
         rating_profile = _resolve_rating_profile(
             db, card_edition, profile, player.id
         )
+        try:
+            eligibility = _resolve_published_eligibility(
+                card_edition, rating_profile
+            )
+        except ValueError as exc:
+            eligibility_failures.append(f"mlb_id={player.mlb_id}: {exc}")
+            continue
+        if eligibility == INELIGIBLE:
+            skipped_ineligible += 1
+            continue
         source = rating_profile if rating_profile is not None else profile
         try:
             rarity = _resolve_published_rarity(
@@ -221,7 +238,7 @@ def publish_card_catalog(
         rows_to_insert.append(payload)
 
     # ------ VALIDATING: gates de calidad (§52) --------------------------
-    issues = rarity_failures + _validate_rows(rows_to_insert)
+    issues = eligibility_failures + rarity_failures + _validate_rows(rows_to_insert)
     if issues:
         catalog.status = "FAILED"
         db.commit()
@@ -229,6 +246,8 @@ def publish_card_catalog(
             catalog_id=catalog.id,
             catalog_version=catalog.version,
             status="FAILED",
+            skipped_unresolved=skipped_unresolved,
+            skipped_ineligible=skipped_ineligible,
             issues=issues,
         )
         return result
@@ -249,8 +268,12 @@ def publish_card_catalog(
     db.commit()
 
     logger.info(
-        "catalog ACTIVE season=%s edition=%s version=%s cards=%s",
-        season, edition_type, catalog.version, len(rows_to_insert),
+        "catalog ACTIVE season=%s edition=%s version=%s cards=%s ineligible=%s",
+        season,
+        edition_type,
+        catalog.version,
+        len(rows_to_insert),
+        skipped_ineligible,
     )
     return CatalogRunResult(
         catalog_id=catalog.id,
@@ -258,6 +281,7 @@ def publish_card_catalog(
         status="ACTIVE",
         created=len(rows_to_insert),
         skipped_unresolved=skipped_unresolved,
+        skipped_ineligible=skipped_ineligible,
     )
 
 
@@ -321,6 +345,39 @@ def _resolve_rating_profile(
         )
         .one_or_none()
     )
+
+
+def _resolve_published_eligibility(
+    card_edition: CardEdition,
+    rating_profile: CardRatingProfile | None,
+) -> str | None:
+    """Lee la decisión materializada que una edición moderna declaró.
+
+    La publicación nunca recalcula evidencia: una policy declarada exige un
+    CardRatingProfile con la misma versión y un estado conocido. ``None`` se
+    reserva exclusivamente para ediciones legacy sin policy de eligibility.
+    """
+    declared_version = card_edition.eligibility_policy_version
+    if declared_version is None:
+        return None
+    if rating_profile is None:
+        raise ValueError(
+            "edición declara eligibility policy pero no existe CardRatingProfile"
+        )
+    metadata = rating_profile.metadata_payload or {}
+    if not isinstance(metadata, dict):
+        raise ValueError("CardRatingProfile con metadata de eligibility inválida")
+    eligibility = metadata.get("eligibility")
+    if not isinstance(eligibility, dict):
+        raise ValueError("CardRatingProfile sin eligibility materializada")
+    if eligibility.get("policy_version") != declared_version:
+        raise ValueError(
+            "eligibility materializada no coincide con la policy de CardEdition"
+        )
+    status = eligibility.get("status")
+    if status not in {ELIGIBLE, PROVISIONAL, INELIGIBLE}:
+        raise ValueError(f"estado de eligibility inválido: {status}")
+    return status
 
 
 def _resolve_published_rarity(

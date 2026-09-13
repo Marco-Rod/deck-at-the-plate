@@ -26,8 +26,14 @@ from app.models import (
     Team,
 )
 from app.models.card import CardRarity
-from app.services.card_editions import ensure_system_base_edition
 from etl.services.card_catalog import publish_card_catalog
+from etl.services.base_eligibility_policy import (
+    BASE_ELIGIBILITY_POLICY_VERSION,
+    ELIGIBLE,
+    INELIGIBLE,
+    PROVISIONAL,
+)
+from etl.services.card_rating_policies import BASE_RATING_POLICY_VERSION
 from etl.services.card_rating_profiles import generate_card_rating_profile
 from etl.services.rarity_policies import RARITY_POLICY_VERSION
 
@@ -114,7 +120,24 @@ def _publication_context(
             db.add(edition)
             db.flush()
     else:
-        edition = ensure_system_base_edition(db, season=2026)
+        # Este fixture cubre la transición de ratings. No declara eligibility:
+        # conserva explícitamente el comportamiento legacy de publicación.
+        edition = db.query(CardEdition).filter_by(
+            code="2026_BASE_RATING_LEGACY", season=2026, version="edition-1.0"
+        ).one_or_none()
+        if edition is None:
+            edition = CardEdition(
+                code="2026_BASE_RATING_LEGACY",
+                name="Base Rating Legacy",
+                edition_type=CardEditionType.BASE,
+                season=2026,
+                version="edition-1.0",
+                source_type=CardEditionSourceType.SYSTEM,
+                rating_policy_version=BASE_RATING_POLICY_VERSION,
+                metadata_payload={},
+            )
+            db.add(edition)
+            db.flush()
     return team, player, player_season, edition
 
 
@@ -638,3 +661,190 @@ def test_edicion_con_rarity_policy_sin_distribucion_falla_publicacion(db):
     assert result.status == "FAILED"
     assert db.query(PlayerCardModel).count() == 0
     assert any("rating_distribution_id" in issue for issue in result.issues)
+
+
+def _eligibility_policy_edition(db, code="2026_BASE_ELIGIBILITY"):
+    edition = CardEdition(
+        code=code,
+        name="Base Eligibility",
+        edition_type=CardEditionType.BASE,
+        season=2026,
+        version="edition-1.0",
+        source_type=CardEditionSourceType.SYSTEM,
+        rating_policy_version=BASE_RATING_POLICY_VERSION,
+        eligibility_policy_version=BASE_ELIGIBILITY_POLICY_VERSION,
+        metadata_payload={},
+    )
+    db.add(edition)
+    db.flush()
+    return edition
+
+
+def _rating_with_eligibility(
+    db,
+    ratings,
+    edition,
+    *,
+    status=PROVISIONAL,
+    policy_version=BASE_ELIGIBILITY_POLICY_VERSION,
+):
+    result = generate_card_rating_profile(
+        db, source_player_ratings_id=ratings.id, card_edition_id=edition.id
+    )
+    rating = db.get(CardRatingProfile, result.card_rating_profile_id)
+    metadata = dict(rating.metadata_payload or {})
+    metadata["eligibility"] = {
+        "policy_version": policy_version,
+        "status": status,
+        "reasons": [],
+    }
+    rating.metadata_payload = metadata
+    db.flush()
+    return rating
+
+
+@pytest.mark.parametrize("status", [PROVISIONAL, ELIGIBLE])
+def test_eligibility_materializada_publica_y_habilita_pack(db, status):
+    edition = _eligibility_policy_edition(db, code=f"2026_BASE_{status}")
+    _team, player, player_season, _edition = _publication_context(
+        db, edition=edition
+    )
+    ratings = _batter_ratings(db, player)
+    _generation_profile(db, player_season, ratings)
+    _rating_with_eligibility(db, ratings, edition, status=status)
+    db.commit()
+
+    result = publish_card_catalog(
+        db, season=2026, card_edition_id=edition.id,
+        rating_model_version="ratings-2.0", data_end_date=END,
+    )
+
+    card = db.query(PlayerCardModel).one()
+    assert result.status == "ACTIVE"
+    assert result.created == 1
+    assert result.skipped_ineligible == 0
+    assert card.is_active is True
+    assert card.is_pack_eligible is True
+
+
+def test_eligibility_ineligible_no_crea_carta_y_cuenta_skip(db):
+    edition = _eligibility_policy_edition(db, code="2026_BASE_INELIGIBLE")
+    _team, player, player_season, _edition = _publication_context(
+        db, edition=edition
+    )
+    ratings = _batter_ratings(db, player)
+    _generation_profile(db, player_season, ratings)
+    _rating_with_eligibility(db, ratings, edition, status=INELIGIBLE)
+    db.commit()
+
+    result = publish_card_catalog(
+        db, season=2026, card_edition_id=edition.id,
+        rating_model_version="ratings-2.0", data_end_date=END,
+    )
+
+    assert result.status == "FAILED"  # no hay candidatos publicables es un gate válido
+    assert result.skipped_ineligible == 1
+    assert db.query(PlayerCardModel).count() == 0
+
+
+@pytest.mark.parametrize(
+    ("metadata", "message"),
+    [
+        ({}, "sin eligibility materializada"),
+        (
+            {
+                "eligibility": {
+                    "policy_version": "base-eligibility-1.0",
+                    "status": PROVISIONAL,
+                }
+            },
+            "no coincide",
+        ),
+        (
+            {
+                "eligibility": {
+                    "policy_version": BASE_ELIGIBILITY_POLICY_VERSION,
+                    "status": "UNKNOWN",
+                }
+            },
+            "estado de eligibility inválido",
+        ),
+    ],
+)
+def test_eligibility_materializada_incompatible_falla_catalogo(db, metadata, message):
+    edition = _eligibility_policy_edition(
+        db, code=f"2026_BASE_FAIL_{message[:4]}"
+    )
+    _team, player, player_season, _edition = _publication_context(
+        db, edition=edition
+    )
+    ratings = _batter_ratings(db, player)
+    _generation_profile(db, player_season, ratings)
+    rating = _rating_with_eligibility(db, ratings, edition)
+    current = dict(rating.metadata_payload or {})
+    current.pop("eligibility", None)
+    current.update(metadata)
+    rating.metadata_payload = current
+    db.commit()
+
+    result = publish_card_catalog(
+        db, season=2026, card_edition_id=edition.id,
+        rating_model_version="ratings-2.0", data_end_date=END,
+    )
+
+    assert result.status == "FAILED"
+    assert db.query(PlayerCardModel).count() == 0
+    assert any(message in issue for issue in result.issues)
+
+
+def test_eligibility_declarada_exige_card_rating_profile(db):
+    edition = _eligibility_policy_edition(db, code="2026_BASE_PROFILE_REQUIRED")
+    _team, player, player_season, _edition = _publication_context(
+        db, edition=edition
+    )
+    ratings = _batter_ratings(db, player)
+    _generation_profile(db, player_season, ratings)
+    db.commit()
+
+    result = publish_card_catalog(
+        db, season=2026, card_edition_id=edition.id,
+        rating_model_version="ratings-2.0", data_end_date=END,
+    )
+
+    assert result.status == "FAILED"
+    assert db.query(PlayerCardModel).count() == 0
+    assert any("no existe CardRatingProfile" in issue for issue in result.issues)
+
+
+def test_eligibility_mezcla_publica_solo_los_tres_validos_e_idempotente(db):
+    edition = _eligibility_policy_edition(db, code="2026_BASE_ELIGIBILITY_MIX")
+    statuses = (PROVISIONAL, PROVISIONAL, PROVISIONAL, INELIGIBLE)
+    for index, status in enumerate(statuses, start=1):
+        _team, player, player_season, _edition = _publication_context(
+            db,
+            edition=edition,
+            mlb_id=660300 + index,
+            name=f"Player {index}",
+            team_key=f"eligibility-team-{index}",
+            source_external_id=100 + index,
+        )
+        ratings = _batter_ratings(db, player)
+        _generation_profile(db, player_season, ratings)
+        _rating_with_eligibility(db, ratings, edition, status=status)
+    db.commit()
+
+    first = publish_card_catalog(
+        db, season=2026, card_edition_id=edition.id,
+        rating_model_version="ratings-2.0", data_end_date=END,
+    )
+    second = publish_card_catalog(
+        db, season=2026, card_edition_id=edition.id,
+        rating_model_version="ratings-2.0", data_end_date=END,
+    )
+
+    assert first.status == second.status == "ACTIVE"
+    assert first.created == 3
+    assert first.skipped_ineligible == 1
+    assert second.created == 3
+    assert db.query(PlayerCardModel).count() == 3
+    assert db.query(PlayerCardModel).filter_by(is_pack_eligible=True).count() == 3
