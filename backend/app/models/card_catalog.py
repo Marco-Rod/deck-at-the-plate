@@ -12,6 +12,7 @@ from sqlalchemy import (
     Column,
     Date,
     DateTime,
+    ForeignKey,
     Index,
     Integer,
     SmallInteger,
@@ -42,6 +43,7 @@ class CardCatalog(Base):
             "edition_type",
             unique=True,
             postgresql_where=text("status = 'ACTIVE'"),
+            sqlite_where=text("status = 'ACTIVE'"),
         ),
     )
 
@@ -56,6 +58,22 @@ class CardCatalog(Base):
     rating_model_version = Column(String(30), nullable=True, index=True)
     # Corte estadístico (PlayerSeason.data_end_date) usado para los ratings.
     data_end_date = Column(Date, nullable=True)
+    # Edición que originó este catálogo: el no-op de publicación es por edición,
+    # no por season+edition_type (lifecycle v1 -> v2 no-op §22).
+    card_edition_id = Column(
+        String(36),
+        ForeignKey("card_editions.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    # Catálogo al que sustituyó al pasar a ACTIVE: cadena reversible (retract
+    # devuelve ACTIVE al predecesor). NULL = catálogo primigenio.
+    supersedes_catalog_id = Column(
+        String(36),
+        ForeignKey("card_catalogs.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
     published_at = Column(DateTime(timezone=True), nullable=True, index=True)
     updated_at = Column(
@@ -63,3 +81,10 @@ class CardCatalog(Base):
     )
 
     cards = relationship("PlayerCardModel", back_populates="catalog")
+    card_edition = relationship("CardEdition")
+    supersedes_catalog = relationship(
+        "CardCatalog",
+        remote_side=[id],
+        foreign_keys=[supersedes_catalog_id],
+        post_update=True,
+    )

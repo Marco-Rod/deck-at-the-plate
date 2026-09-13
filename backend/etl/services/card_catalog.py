@@ -6,14 +6,20 @@ los CardGenerationProfile válidos, con transiciones de estado:
     BUILDING -> VALIDATING -> ACTIVE   (o FAILED/RETIRED)
 
 Reglas:
-    - Inmutabilidad (§22): re-publicar la misma (season, edition_type, version)
-      es un no-op; una version nueva crea una edición nueva (edition_version+1).
+    - Inmutabilidad (§22): re-publicar la misma edición ya ACTIVE es un no-op;
+      el no-op es POR EDICIÓN (card_catalogs.card_edition_id), no por
+      (season, edition_type).
     - Publicación atómica (§23-§24): un solo ACTIVE por (season, edition_type);
-      las cartas solo marcan published_at/catálogo cuando el catálogo sube ACTIVE.
+      las cartas solo marcan published_at/catálogo cuando el catálogo sube
+      ACTIVE.
+    - Lifecycle v1 -> v2 (dos fases): si ya existe un ACTIVE de OTRA edición,
+      publish deja el candidato en VALIDATING (nunca reemplaza un ACTIVE
+      implícitamente). La sustitución es un swap EXPLÍCITO y atómico con
+      promote_card_catalog (gates + retiro del predecesor), y reversible con
+      retract_card_catalog (vuelve ACTIVE al predecesor).
     - Legacy NUNCA entra al pool (§25): solo cartas con game_identity_id y
       catalog_id son pack-eligible.
 """
-
 import logging
 import uuid
 from dataclasses import dataclass, field
@@ -22,6 +28,7 @@ from typing import Iterable
 
 from sqlalchemy.orm import Session
 
+from app.core.time import utcnow
 from app.models import (
     CardCatalog,
     CardEdition,
@@ -133,8 +140,9 @@ def publish_card_catalog(
         raise ValueError("CardEdition no pertenece a la temporada solicitada")
     edition_type = card_edition.edition_type.value
     active = _active_catalog(db, season=season, edition_type=edition_type)
-    if active is not None:
-        # No-op §22: ya publicada esta edición; no se duplica nada.
+    if active is not None and active.card_edition_id == card_edition.id:
+        # No-op §22: esta edición ya está ACTIVE (inmutabilidad por edición,
+        # no por season+edition_type). No se duplica nada.
         existing = (
             db.query(PlayerCardModel)
             .filter(PlayerCardModel.catalog_id == active.id)
@@ -167,8 +175,17 @@ def publish_card_catalog(
             status="BUILDING",
             rating_model_version=rating_model_version,
             data_end_date=data_end_date,
+            card_edition_id=card_edition.id,
         )
         db.add(catalog)
+        db.flush()
+    else:
+        # Rebuild idempotente: un candidato no-ACTIVE se revalida desde cero
+        # bajo la edición solicitada, sin acumular cartas del intento previo.
+        catalog.card_edition_id = card_edition.id
+        db.query(PlayerCardModel).filter(
+            PlayerCardModel.catalog_id == catalog.id
+        ).delete(synchronize_session=False)
         db.flush()
 
     # ------ BUILDING: candidatos = perfiles válidos del corte ----------
@@ -259,10 +276,32 @@ def publish_card_catalog(
     catalog.status = "VALIDATING"
     db.commit()
 
+    # ------ Lifecycle de dos fases -------------------------------------
+    # Candidato validado. Sin ACTIVE previo, publicación fresca: promoción
+    # inmediata (comportamiento histórico). Con un ACTIVE de OTRA edición, el
+    # candidato queda VALIDATING y la sustitución es EXPLÍCITA vía
+    # promote_card_catalog: nunca se reemplaza un ACTIVE implícitamente.
+    if active is not None:
+        logger.info(
+            "candidato VALIDATING season=%s edition=%s version=%s cards=%s "
+            "ineligible=%s (ACTIVE previo; sustituir con promote)",
+            season,
+            edition_type,
+            catalog.version,
+            len(rows_to_insert),
+            skipped_ineligible,
+        )
+        return CatalogRunResult(
+            catalog_id=catalog.id,
+            catalog_version=catalog.version,
+            status="VALIDATING",
+            created=len(rows_to_insert),
+            skipped_unresolved=skipped_unresolved,
+            skipped_ineligible=skipped_ineligible,
+        )
+
     # ------ ACTIVE: publicación atómica --------------------------------
     catalog.status = "ACTIVE"
-    from app.core.time import utcnow
-
     catalog.published_at = utcnow()
     for card in rows_to_insert:
         card.is_active = True
@@ -284,6 +323,179 @@ def publish_card_catalog(
         created=len(rows_to_insert),
         skipped_unresolved=skipped_unresolved,
         skipped_ineligible=skipped_ineligible,
+    )
+
+
+def promote_card_catalog(db: Session, *, catalog_id: str) -> CatalogRunResult:
+    """Sustitución atómica y EXPlícita de un catálogo ACTIVE.
+
+    El candidato debe estar VALIDATING (publicado en dos fases con un ACTIVE
+    previo de otra edición). Re-ejecuta los gates de calidad sobre SUS cartas
+    (quality §52 + pack pool §54 + franquicias §53) y, si pasan, realiza el
+    swap en UNA transacción:
+
+        activo previo -> RETIRED (sus cartas dejan de ser activas/elegibles)
+        candidato     -> ACTIVE  (published_at, cartas activas + pack)
+
+    Orden cuidadoso: se retira el predecesor ANTES de promover al candidato
+    para respetar el índice único de un ACLIVE por (season, edition_type).
+    """
+    candidate = db.get(CardCatalog, catalog_id)
+    if candidate is None:
+        raise ValueError(f"CardCatalog inexistente: {catalog_id}")
+    if candidate.status == "ACTIVE":
+        existing = (
+            db.query(PlayerCardModel)
+            .filter(PlayerCardModel.catalog_id == candidate.id)
+            .count()
+        )
+        result = CatalogRunResult(
+            catalog_id=candidate.id,
+            catalog_version=candidate.version,
+            status="ACTIVE",
+            created=existing,
+        )
+        result.issues.append("catálogo ya ACTIVE (no-op)")
+        return result
+    if candidate.status != "VALIDATING":
+        raise ValueError(
+            f"candidato {catalog_id} está en {candidate.status}; "
+            "solo un VALIDATING es promovible"
+        )
+
+    active = _active_catalog(
+        db, season=candidate.season, edition_type=candidate.edition_type
+    )
+    candidate_cards = (
+        db.query(PlayerCardModel)
+        .filter(PlayerCardModel.catalog_id == candidate.id)
+        .all()
+    )
+
+    issues = _validate_rows(candidate_cards)
+    if not issues:
+        pack = validate_pack_pool(
+            db,
+            season=candidate.season,
+            edition_type=candidate.edition_type,
+            catalog_id=candidate.id,
+            require_pack_eligible=False,
+        )
+        if not pack.ok:
+            issues.extend(pack.detail)
+    if not issues:
+        rosters = validate_cpu_rosters(
+            db,
+            season=candidate.season,
+            edition_type=candidate.edition_type,
+            catalog_id=candidate.id,
+        )
+        if not rosters.ok:
+            issues.extend(rosters.detail)
+
+    if issues:
+        candidate.status = "FAILED"
+        db.commit()
+        logger.warning(
+            "promote rechazado catalog=%s cards=%s issues=%s",
+            catalog_id,
+            len(candidate_cards),
+            issues,
+        )
+        return CatalogRunResult(
+            catalog_id=candidate.id,
+            catalog_version=candidate.version,
+            status="FAILED",
+            created=len(candidate_cards),
+            issues=issues,
+        )
+
+    # Swap atómico: se retira el predecesor ANTES de promover al candidato.
+    if active is not None:
+        active.status = "RETIRED"
+        db.query(PlayerCardModel).filter_by(
+            catalog_id=active.id
+        ).update({"is_active": False, "is_pack_eligible": False})
+        db.flush()
+    candidate.supersedes_catalog_id = active.id if active is not None else None
+    candidate.status = "ACTIVE"
+    candidate.published_at = utcnow()
+    db.query(PlayerCardModel).filter_by(
+        catalog_id=candidate.id
+    ).update({"is_active": True, "is_pack_eligible": True})
+    db.commit()
+
+    logger.info(
+        "catalog promoted ACTIVE id=%s version=%s cards=%s supersedes=%s",
+        candidate.id,
+        candidate.version,
+        len(candidate_cards),
+        active.id if active is not None else None,
+    )
+    return CatalogRunResult(
+        catalog_id=candidate.id,
+        catalog_version=candidate.version,
+        status="ACTIVE",
+        created=len(candidate_cards),
+    )
+
+
+def retract_card_catalog(db: Session, *, catalog_id: str) -> CatalogRunResult:
+    """Reversión: devuelve ACTIVE al predecesor que este catálogo sustituyó.
+
+    Solo retractable el ACTIVE actual y solo si tiene supersedes_catalog_id
+    (cadena reversible). Las cartas del predecesor están intactas (el swap solo
+    alterna flags), así que restaurarlo no re-ejecuta gates: es exactamente el
+    estado válido que ya fue ACTIVE antes de la promoción.
+    """
+    target = db.get(CardCatalog, catalog_id)
+    if target is None:
+        raise ValueError(f"CardCatalog inexistente: {catalog_id}")
+    if target.status != "ACTIVE":
+        raise ValueError(
+            f"solo se retracta el ACTIVE actual; {catalog_id} está en "
+            f"{target.status}"
+        )
+    predecessor_id = target.supersedes_catalog_id
+    if predecessor_id is None:
+        raise ValueError(
+            "catálogo sin predecesor restaurable (supersedes_catalog_id NULL)"
+        )
+    predecessor = db.get(CardCatalog, predecessor_id)
+    if predecessor is None:
+        raise ValueError(f"predecesor inexistente: {predecessor_id}")
+    if predecessor.status == "ACTIVE":
+        raise ValueError("cadena corrupta: el predecesor ya está ACTIVE")
+
+    # Swap atómico inverso: se retira el objetivo antes de reactivar el previo.
+    db.query(PlayerCardModel).filter_by(
+        catalog_id=target.id
+    ).update({"is_active": False, "is_pack_eligible": False})
+    target.status = "RETIRED"
+    db.flush()
+    predecessor.status = "ACTIVE"
+    db.query(PlayerCardModel).filter_by(
+        catalog_id=predecessor.id
+    ).update({"is_active": True, "is_pack_eligible": True})
+    db.commit()
+
+    restored = (
+        db.query(PlayerCardModel)
+        .filter(PlayerCardModel.catalog_id == predecessor.id)
+        .count()
+    )
+    logger.info(
+        "catalog retracted to ACTIVE id=%s version=%s cards=%s (from=%s)",
+        predecessor.id,
+        predecessor.version,
+        restored,
+        target.id,
+    )
+    return CatalogRunResult(
+        catalog_id=predecessor.id,
+        catalog_version=predecessor.version,
+        status="ACTIVE",
+        created=restored,
     )
 
 
@@ -535,33 +747,46 @@ def validate_pack_pool(
     season: int,
     edition_type: str = "BASE",
     required_rarities: Iterable[CardRarity] | None = None,
+    catalog_id: str | None = None,
+    require_pack_eligible: bool = True,
 ) -> ValidationResult:
     """Pack pool: catálogo ACTIVE, cartas elegibles y pool no vacío por rarity.
 
     Ninguna carta legacy/semilla entra al pool: solo las del catálogo ACTIVE
     con is_pack_eligible. Valida además que cada rarity requerida (por defecto
     las cinco de las drop rates activas) tenga al menos una carta elegible.
+
+    Con catalog_id apunta a un catálogo concreto (candidato VALIDATING); con
+    require_pack_eligible=False el gate se evalúa sobre todo el catálogo,
+    ignorando los flags: las cartas del candidato aún no son pack-elegibles y
+    lo serán al promover.
     """
     rarities = tuple(required_rarities) if required_rarities is not None else _POOL_RARITIES
-    active = _active_catalog(db, season=season, edition_type=edition_type)
-    detail = []
-    if active is None:
-        return ValidationResult(ok=False, detail=["sin catálogo ACTIVE"])
+    if catalog_id is not None:
+        catalog = db.get(CardCatalog, catalog_id)
+        if catalog is None:
+            return ValidationResult(ok=False, detail=[f"catálogo inexistente: {catalog_id}"])
+    else:
+        active = _active_catalog(db, season=season, edition_type=edition_type)
+        if active is None:
+            return ValidationResult(ok=False, detail=["sin catálogo ACTIVE"])
+        catalog = active
+    detail = [f"catálogo {catalog.status} {catalog.id} v{catalog.version}"]
     cards = (
         db.query(PlayerCardModel)
-        .filter(PlayerCardModel.catalog_id == active.id)
+        .filter(PlayerCardModel.catalog_id == catalog.id)
         .all()
     )
-    detail.append(f"catálogo ACTIVE {active.id} v{active.version}")
     if not cards:
-        detail.append("catálogo ACTIVE sin cartas")
-        return ValidationResult(ok=False, detail=detail)
-    pack_eligible = [c for c in cards if c.is_pack_eligible]
+        return ValidationResult(ok=False, detail=detail + ["catálogo sin cartas"])
+    if require_pack_eligible:
+        pack_eligible = [c for c in cards if c.is_pack_eligible]
+        ineligible = len(cards) - len(pack_eligible)
+        if ineligible:
+            detail.append(f"{ineligible} cartas del catálogo sin is_pack_eligible")
+    else:
+        pack_eligible = list(cards)
     detail.append(f"cartas={len(cards)} elegibles={len(pack_eligible)}")
-    if len(pack_eligible) != len(cards):
-        detail.append(
-            f"{len(cards) - len(pack_eligible)} cartas del catálogo sin is_pack_eligible"
-        )
     rarity_counts: dict[str, int] = {}
     for rarity in rarities:
         count = sum(1 for c in pack_eligible if c.rarity == rarity)
@@ -577,12 +802,20 @@ def validate_pack_pool(
     )
 
 
-def validate_cpu_rosters(db: Session, *, season: int, edition_type: str = "BASE") -> ValidationResult:
+def validate_cpu_rosters(
+    db: Session, *, season: int, edition_type: str = "BASE", catalog_id: str | None = None
+) -> ValidationResult:
     """Cada franquicia pública con mapa+snapshot debe tener cartas publicadas."""
+    if catalog_id is not None:
+        catalog = db.get(CardCatalog, catalog_id)
+        if catalog is None:
+            return ValidationResult(ok=False, detail=[f"catálogo inexistente: {catalog_id}"])
+    else:
+        active = _active_catalog(db, season=season, edition_type=edition_type)
+        if active is None:
+            return ValidationResult(ok=False, detail=["sin catálogo ACTIVE"])
+        catalog = active
     detail = []
-    active = _active_catalog(db, season=season, edition_type=edition_type)
-    if active is None:
-        return ValidationResult(ok=False, detail=["sin catálogo ACTIVE"])
     rows = (
         db.query(SourceTeamGameTeamMapping.team_id)
         .filter(SourceTeamGameTeamMapping.valid_to.is_(None))
@@ -594,7 +827,7 @@ def validate_cpu_rosters(db: Session, *, season: int, edition_type: str = "BASE"
             db.query(PlayerCardModel)
             .filter(
                 PlayerCardModel.team_id == team_id,
-                PlayerCardModel.catalog_id == active.id,
+                PlayerCardModel.catalog_id == catalog.id,
             )
             .count()
         )

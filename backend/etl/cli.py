@@ -11,9 +11,13 @@ V2.1 — primera carga completa (receta, §47/§82/§92):
     python -m etl.cli validate-game-identities --season 2026
     python -m etl.cli generate-card-profiles --season 2026
     python -m etl.cli validate-card-profiles --season 2026
-    python -m etl.cli publish-card-catalog --season 2026
+python -m etl.cli publish-card-catalog --season 2026
+    python -m etl.cli validate-card-profiles --season 2026
     python -m etl.cli validate-cpu-rosters --season 2026
     python -m etl.cli validate-pack-pool --season 2026
+V2.2 — lifecycle v1 -> v2 (sustitución explícita y reversible):
+    python -m etl.cli promote-card-catalog --catalog-id <candidato VALIDATING>
+    python -m etl.cli retract-card-catalog --catalog-id <ACTIVE con predecesor>
 La identidad pública (display_*) jamás expone el nombre fuente real (§88); el
 reporte QA es administrativo (§81).
 """
@@ -29,7 +33,9 @@ from etl.pipelines.metadata import MetadataPipeline
 from etl.pipelines.statcast import StatcastRawPipeline
 from app.services.card_editions import ensure_system_base_edition
 from etl.services.card_catalog import (
+    promote_card_catalog,
     publish_card_catalog,
+    retract_card_catalog,
     validate_cpu_rosters,
     validate_pack_pool,
 )
@@ -414,6 +420,18 @@ def _build_parser() -> argparse.ArgumentParser:
     vpk = sub.add_parser("validate-pack-pool", help="Valida el pack pool del catálogo ACTIVE (§54)")
     vpk.add_argument("--season", type=int, required=True)
     vpk.add_argument("--edition", default="BASE")
+
+    promote = sub.add_parser(
+        "promote-card-catalog",
+        help="Promueve un candidato VALIDATING sobre el ACTIVE (swap atómico + gates)",
+    )
+    promote.add_argument("--catalog-id", dest="catalog_id", required=True)
+
+    retract = sub.add_parser(
+        "retract-card-catalog",
+        help="Revierte la promoción: devuelve ACTIVE al predecesor",
+    )
+    retract.add_argument("--catalog-id", dest="catalog_id", required=True)
 
     return parser
 
@@ -1131,6 +1149,20 @@ def main(argv=None) -> int:
         elif args.command == "validate-pack-pool":
             result = validate_pack_pool(db, season=args.season, edition_type=args.edition)
             logger.info("validate-pack-pool ok=%s detail=%s", result.ok, result.detail)
+
+        elif args.command == "promote-card-catalog":
+            result = promote_card_catalog(db, catalog_id=args.catalog_id)
+            logger.info(
+                "promote-card-catalog status=%s version=%s cards=%s issues=%s",
+                result.status, result.catalog_version, result.created, result.issues,
+            )
+
+        elif args.command == "retract-card-catalog":
+            result = retract_card_catalog(db, catalog_id=args.catalog_id)
+            logger.info(
+                "retract-card-catalog status=%s version=%s cards=%s",
+                result.status, result.catalog_version, result.created,
+            )
 
         db.close()
         return 0
