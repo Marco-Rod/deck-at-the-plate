@@ -848,3 +848,59 @@ def test_eligibility_mezcla_publica_solo_los_tres_validos_e_idempotente(db):
     assert second.created == 3
     assert db.query(PlayerCardModel).count() == 3
     assert db.query(PlayerCardModel).filter_by(is_pack_eligible=True).count() == 3
+
+
+def test_eligibility_policy_desconocida_falla_aun_con_metadata_coincidente(db):
+    """Versión no registrada en ELIGIBILITY_POLICIES es fail-closed en publicación.
+
+    La generación ya la rechaza, pero publication no debe fiarse de que la
+    metadata y la edición coincidan literalmente: expira un valor que la
+    registry no reconoce y el catálogo debe invalidarse.
+    """
+    edition = _eligibility_policy_edition(db, code="2026_BASE_BANANA")
+    _team, player, player_season, _edition = _publication_context(
+        db, edition=edition
+    )
+    ratings = _batter_ratings(db, player)
+    _generation_profile(db, player_season, ratings)
+    _rating_with_eligibility(db, ratings, edition, status=PROVISIONAL)
+    edition.eligibility_policy_version = "banana-9.0"
+    rating = db.query(CardRatingProfile).one()
+    current = dict(rating.metadata_payload or {})
+    current["eligibility"] = {
+        "policy_version": "banana-9.0",
+        "status": PROVISIONAL,
+        "reasons": [],
+    }
+    rating.metadata_payload = current
+    db.commit()
+
+    result = publish_card_catalog(
+        db, season=2026, card_edition_id=edition.id,
+        rating_model_version="ratings-2.0", data_end_date=END,
+    )
+
+    assert result.status == "FAILED"
+    assert db.query(PlayerCardModel).count() == 0
+    assert any("sin política de elegibilidad" in issue for issue in result.issues)
+
+
+def test_eligibility_policy_incompatible_con_edicion_no_base_falla(db):
+    edition = _eligibility_policy_edition(db, code="2026_MOMENT_ELIGIBILITY")
+    _team, player, player_season, _edition = _publication_context(
+        db, edition=edition
+    )
+    ratings = _batter_ratings(db, player)
+    _generation_profile(db, player_season, ratings)
+    _rating_with_eligibility(db, ratings, edition, status=PROVISIONAL)
+    edition.edition_type = CardEditionType.MOMENT
+    db.commit()
+
+    result = publish_card_catalog(
+        db, season=2026, card_edition_id=edition.id,
+        rating_model_version="ratings-2.0", data_end_date=END,
+    )
+
+    assert result.status == "FAILED"
+    assert db.query(PlayerCardModel).count() == 0
+    assert any("sólo está implementada para edición BASE" in issue for issue in result.issues)

@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session
 from app.models import (
     CardCatalog,
     CardEdition,
+    CardEditionType,
     CardGenerationProfile,
     CardRarity,
     CardRatingProfile,
@@ -45,6 +46,7 @@ from etl.services.base_eligibility_policy import (
     INELIGIBLE,
     PROVISIONAL,
 )
+from etl.services.eligibility_policies import ELIGIBILITY_POLICIES
 
 logger = logging.getLogger("etl.services.card_catalog")
 
@@ -356,10 +358,20 @@ def _resolve_published_eligibility(
     La publicación nunca recalcula evidencia: una policy declarada exige un
     CardRatingProfile con la misma versión y un estado conocido. ``None`` se
     reserva exclusivamente para ediciones legacy sin policy de eligibility.
+
+    Fail-closed: solo reconoce políticas registradas y el contrato BASE-only
+    de eligibility_policies.py. Una versión desconocida, o asignada a un tipo
+    de edición incompatible, es error aunque la metadata coincida literalmente.
     """
     declared_version = card_edition.eligibility_policy_version
     if declared_version is None:
         return None
+    if card_edition.edition_type != CardEditionType.BASE:
+        raise ValueError(
+            "eligibility_policy_version sólo está implementada para edición BASE"
+        )
+    if ELIGIBILITY_POLICIES.get(declared_version) is None:
+        raise ValueError(f"sin política de elegibilidad para {declared_version}")
     if rating_profile is None:
         raise ValueError(
             "edición declara eligibility policy pero no existe CardRatingProfile"
