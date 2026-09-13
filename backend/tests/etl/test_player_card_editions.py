@@ -25,6 +25,7 @@ from app.models import (
 )
 from app.models.card import CardRarity
 from app.services.card_editions import ensure_system_base_edition
+from etl.services.base_eligibility_policy import BASE_ELIGIBILITY_POLICY_VERSION
 from etl.services.card_catalog import publish_card_catalog
 
 
@@ -137,7 +138,28 @@ def test_edicion_base_explicita_es_idempotente(db):
     assert second.id == first.id
     assert second.code == "2026_BASE"
     assert second.version == "edition-1.0"
+    assert second.eligibility_policy_version == BASE_ELIGIBILITY_POLICY_VERSION
     assert db.query(CardEdition).count() == 1
+
+
+def test_edicion_base_legacy_no_recibe_backfill_de_eligibility(db):
+    legacy = CardEdition(
+        code="2025_BASE",
+        name="2025 Base Set",
+        edition_type=CardEditionType.BASE,
+        season=2025,
+        version="edition-1.0",
+        source_type=CardEditionSourceType.SYSTEM,
+        rating_policy_version="base-card-ratings-1.0",
+        metadata_payload={"fixture": "legacy"},
+    )
+    db.add(legacy)
+    db.commit()
+
+    resolved = ensure_system_base_edition(db, season=2025)
+
+    assert resolved.id == legacy.id
+    assert resolved.eligibility_policy_version is None
 
 
 def test_rerun_del_publicador_no_duplica_carta(db):

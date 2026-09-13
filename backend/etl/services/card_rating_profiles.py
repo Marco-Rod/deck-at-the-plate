@@ -16,6 +16,7 @@ from etl.services.card_rating_policies import (
     CardRatingPolicyResult,
     apply_card_rating_policy,
 )
+from etl.services.eligibility_policies import resolve_materialized_eligibility
 
 
 @dataclass(frozen=True)
@@ -63,6 +64,7 @@ def _provenance(
     policy: CardRatingPolicyResult,
     calculation_metadata: Mapping | None,
     evidence_assessment: Mapping | None,
+    eligibility: Mapping | None,
 ) -> dict:
     provenance = {
         "rating_policy_version": policy.policy_version,
@@ -104,6 +106,8 @@ def _provenance(
     }
     if evidence_assessment is not None:
         provenance["evidence_assessment"] = _canonical(evidence_assessment)
+    if eligibility is not None:
+        provenance["eligibility"] = _canonical(eligibility)
     return provenance
 
 
@@ -158,12 +162,17 @@ def generate_card_rating_profile(
         evidence_assessment = assess_base_evidence(
             role=ratings.role, player_ratings=ratings
         ).as_dict()
+    eligibility = resolve_materialized_eligibility(
+        edition,
+        player_ratings=ratings,
+    )
     provenance = _provenance(
         ratings,
         edition,
         policy,
         calculation_metadata,
         evidence_assessment,
+        eligibility,
     )
     input_hash = _input_hash(provenance, values)
     identity = {

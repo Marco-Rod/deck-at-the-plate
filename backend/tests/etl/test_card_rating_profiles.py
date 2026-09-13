@@ -18,6 +18,11 @@ from app.models import (
     PlayerRatings,
 )
 from etl.services.card_rating_profiles import generate_card_rating_profile
+from etl.services.base_eligibility_policy import (
+    BASE_ELIGIBILITY_POLICY_VERSION,
+    INELIGIBLE,
+    PROVISIONAL,
+)
 from app.models.card_rating_profile import RATING_COLUMNS
 
 
@@ -269,6 +274,93 @@ def test_base_evidence_changes_hash_without_changing_ratings(db):
     assert assessment["policy_version"] == "base-evidence-1.0"
     assert assessment["eligibility"] == "UNRESOLVED"
     assert assessment["attributes"]["contact"]["status"] == "PASS"
+
+
+def test_base_declara_y_materializa_eligibilidad_en_provenance(db):
+    player = _player(db)
+    ratings = _batter_ratings(
+        db,
+        player,
+        contact_evidence=Decimal("0.90000"),
+        power_evidence=Decimal("0.90000"),
+        vision_evidence=Decimal("0.90000"),
+    )
+    edition = _edition(db)
+    edition.eligibility_policy_version = BASE_ELIGIBILITY_POLICY_VERSION
+    db.commit()
+
+    created = generate_card_rating_profile(
+        db, source_player_ratings_id=ratings.id, card_edition_id=edition.id
+    )
+    profile = db.get(CardRatingProfile, created.card_rating_profile_id)
+
+    assert profile.metadata_payload["eligibility"] == {
+        "policy_version": BASE_ELIGIBILITY_POLICY_VERSION,
+        "status": PROVISIONAL,
+        "reasons": [{"attribute": "power", "assessment": "VOLATILE"}],
+    }
+    assert created.input_hash == profile.input_hash
+
+
+def test_eligibilidad_materializada_cambia_el_hash_sin_cambiar_ratings(db):
+    player = _player(db)
+    ratings = _batter_ratings(
+        db,
+        player,
+        contact_evidence=Decimal("0.24000"),
+        power_evidence=Decimal("0.90000"),
+        vision_evidence=Decimal("0.90000"),
+    )
+    edition = _edition(db)
+    edition.eligibility_policy_version = BASE_ELIGIBILITY_POLICY_VERSION
+    db.commit()
+
+    created = generate_card_rating_profile(
+        db, source_player_ratings_id=ratings.id, card_edition_id=edition.id
+    )
+    profile = db.get(CardRatingProfile, created.card_rating_profile_id)
+    before = tuple(getattr(profile, column) for column in RATING_COLUMNS)
+    assert profile.metadata_payload["eligibility"]["status"] == INELIGIBLE
+
+    ratings.contact_evidence = Decimal("0.25000")
+    db.commit()
+    updated = generate_card_rating_profile(
+        db, source_player_ratings_id=ratings.id, card_edition_id=edition.id
+    )
+    db.refresh(profile)
+
+    assert updated.status == "UPDATED"
+    assert updated.input_hash != created.input_hash
+    assert tuple(getattr(profile, column) for column in RATING_COLUMNS) == before
+    assert profile.metadata_payload["eligibility"]["status"] == PROVISIONAL
+
+
+def test_legacy_base_no_materializa_eligibilidad(db):
+    player = _player(db)
+    ratings = _batter_ratings(db, player)
+    edition = _edition(db)
+    db.commit()
+
+    result = generate_card_rating_profile(
+        db, source_player_ratings_id=ratings.id, card_edition_id=edition.id
+    )
+    profile = db.get(CardRatingProfile, result.card_rating_profile_id)
+
+    assert edition.eligibility_policy_version is None
+    assert "eligibility" not in profile.metadata_payload
+
+
+def test_rechaza_policy_de_eligibilidad_desconocida(db):
+    player = _player(db)
+    ratings = _batter_ratings(db, player)
+    edition = _edition(db)
+    edition.eligibility_policy_version = "base-eligibility-9.9"
+    db.commit()
+
+    with pytest.raises(ValueError, match="política de elegibilidad"):
+        generate_card_rating_profile(
+            db, source_player_ratings_id=ratings.id, card_edition_id=edition.id
+        )
 
 
 def test_pitcher_conserva_solo_sus_atributos(db):

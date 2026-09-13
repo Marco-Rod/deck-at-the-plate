@@ -97,6 +97,10 @@ class CardEdition(Base):
     # (CardGenerationProfile.calculated_rarity); declarada, la publicación
     # DEBE resolver una rareza o el catálogo falla (sin COMMON silencioso).
     rarity_policy_version = Column(String(40), nullable=True, index=True)
+    # Política de elegibilidad de publicación: NULL conserva el comportamiento
+    # legacy. Una edición moderna declara una versión exacta que se materializa
+    # en CardRatingProfile; publicación no recalcula evidencia.
+    eligibility_policy_version = Column(String(40), nullable=True, index=True)
     is_active = Column(Boolean, nullable=False, default=True, index=True)
     source_type = Column(
         Enum(
