@@ -413,6 +413,32 @@ def _build_parser() -> argparse.ArgumentParser:
         default=RATING_MODEL_VERSION,
     )
 
+    matl = sub.add_parser(
+        "materialize-card-catalog-candidate",
+        help="Persiste edición candidata ratings-2.0 (edition-2.0) + perfiles (806/23, idempotente)",
+    )
+    matl.add_argument("--season", type=int, required=True)
+    matl.add_argument("--data-start-date", dest="data_start_date", type=_parse_date, required=True)
+    matl.add_argument("--data-end-date", dest="data_end_date", type=_parse_date, required=True)
+    matl.add_argument(
+        "--rating-model",
+        dest="rating_model_version",
+        type=str,
+        default="ratings-2.0",
+    )
+    matl.add_argument(
+        "--distribution-version",
+        dest="source_distribution_version",
+        type=str,
+        default="dist-1.0",
+    )
+    matl.add_argument(
+        "--performance-tier-model",
+        dest="performance_tier_model_version",
+        type=str,
+        default="rarity-2.0",
+    )
+
     vcpu = sub.add_parser("validate-cpu-rosters", help="Valida rosters CPU derivados (§53)")
     vcpu.add_argument("--season", type=int, required=True)
     vcpu.add_argument("--edition", default="BASE")
@@ -1162,6 +1188,30 @@ def main(argv=None) -> int:
             logger.info(
                 "retract-card-catalog status=%s version=%s cards=%s",
                 result.status, result.catalog_version, result.created,
+            )
+
+        elif args.command == "materialize-card-catalog-candidate":
+            from etl.services.materialize_card_catalog_candidate import (
+                materialize_card_catalog_candidate as _materialize_candidate,
+            )
+
+            result = _materialize_candidate(
+                db,
+                season=args.season,
+                data_start_date=args.data_start_date,
+                data_end_date=args.data_end_date,
+                rating_model_version=args.rating_model_version,
+                source_distribution_version=args.source_distribution_version,
+                performance_tier_model_version=args.performance_tier_model_version,
+            )
+            db.commit()
+            logger.info(
+                "materialize-card-catalog-candidate edition=%s "
+                "rating_rows=%s generation=%s rating=%s",
+                result.get("candidate_edition", {}).get("code"),
+                result.get("candidate_profiles", {}).get("rating_rows"),
+                result.get("candidate_profiles", {}).get("generation_profiles"),
+                result.get("candidate_profiles", {}).get("rating_profiles"),
             )
 
         db.close()
