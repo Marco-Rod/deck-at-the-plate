@@ -541,6 +541,73 @@ def retract_card_catalog(db: Session, *, catalog_id: str) -> CatalogRunResult:
     )
 
 
+def reopen_card_catalog(db: Session, *, catalog_id: str) -> CatalogRunResult:
+    """Prepara explícitamente un catálogo retirado para promoverlo de nuevo.
+
+    Es la recuperación controlada de un rollback: no reconstruye ratings ni
+    cartas; solo permite ``RETIRED -> VALIDATING`` si el ACTIVE actual es
+    precisamente el predecesor al que el catálogo había sustituido. Promote
+    volverá a correr todos los gates antes de hacer un nuevo swap.
+    """
+    candidate = db.get(CardCatalog, catalog_id)
+    if candidate is None:
+        raise ValueError(f"CardCatalog inexistente: {catalog_id}")
+    _acquire_catalog_lifecycle_lock(
+        db,
+        season=candidate.season,
+        edition_type=candidate.edition_type,
+    )
+    db.expire(candidate)
+    candidate = db.get(CardCatalog, catalog_id)
+    if candidate is None:
+        raise ValueError(f"CardCatalog inexistente tras adquirir lock: {catalog_id}")
+    if candidate.status != "RETIRED":
+        raise ValueError(
+            f"solo un catálogo RETIRED es reabrible; {catalog_id} está en "
+            f"{candidate.status}"
+        )
+
+    active = _active_catalog(
+        db, season=candidate.season, edition_type=candidate.edition_type
+    )
+    if active is None:
+        raise ValueError("no hay catálogo ACTIVE en el scope del candidato")
+    if candidate.supersedes_catalog_id != active.id:
+        raise ValueError(
+            "el ACTIVE actual no es el predecesor del catálogo retirado; "
+            "reopen solo admite recuperación directa de rollback"
+        )
+
+    cards = (
+        db.query(PlayerCardModel)
+        .filter(PlayerCardModel.catalog_id == candidate.id)
+        .all()
+    )
+    if not cards:
+        raise ValueError("catálogo RETIRED sin cartas; no se puede reabrir")
+
+    candidate.status = "VALIDATING"
+    candidate.published_at = None
+    db.query(PlayerCardModel).filter_by(catalog_id=candidate.id).update(
+        {"is_active": False, "is_pack_eligible": False}
+    )
+    db.commit()
+
+    logger.info(
+        "catalog reopened VALIDATING id=%s version=%s cards=%s active=%s",
+        candidate.id,
+        candidate.version,
+        len(cards),
+        active.id,
+    )
+    return CatalogRunResult(
+        catalog_id=candidate.id,
+        catalog_version=candidate.version,
+        status="VALIDATING",
+        created=len(cards),
+    )
+
+
 def _game_team_for_player(db: Session, player_id: str) -> str | None:
     # Stint vigente -> SourceTeam -> mapping activa -> Team público.
     row = (

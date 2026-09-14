@@ -35,6 +35,7 @@ from app.services.card_editions import ensure_system_base_edition
 from etl.services.card_catalog import (
     promote_card_catalog,
     publish_card_catalog,
+    reopen_card_catalog,
     retract_card_catalog,
     validate_cpu_rosters,
     validate_pack_pool,
@@ -458,6 +459,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Revierte la promoción: devuelve ACTIVE al predecesor",
     )
     retract.add_argument("--catalog-id", dest="catalog_id", required=True)
+
+    reopen = sub.add_parser(
+        "reopen-card-catalog",
+        help="Reabre un RETIRED tras rollback como candidato VALIDATING",
+    )
+    reopen.add_argument("--catalog-id", dest="catalog_id", required=True)
 
     return parser
 
@@ -1187,6 +1194,13 @@ def main(argv=None) -> int:
             result = retract_card_catalog(db, catalog_id=args.catalog_id)
             logger.info(
                 "retract-card-catalog status=%s version=%s cards=%s",
+                result.status, result.catalog_version, result.created,
+            )
+
+        elif args.command == "reopen-card-catalog":
+            result = reopen_card_catalog(db, catalog_id=args.catalog_id)
+            logger.info(
+                "reopen-card-catalog status=%s version=%s cards=%s",
                 result.status, result.catalog_version, result.created,
             )
 

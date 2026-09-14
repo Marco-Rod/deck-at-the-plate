@@ -49,6 +49,7 @@ from etl.services.base_eligibility_policy import (
 from etl.services.card_catalog import (
     promote_card_catalog,
     publish_card_catalog,
+    reopen_card_catalog,
     retract_card_catalog,
     validate_cpu_rosters,
     validate_pack_pool,
@@ -468,6 +469,74 @@ def test_retract_devuelve_active_al_predecesor(db):
     pool = validate_pack_pool(db, season=2026)
     assert pool.ok
     assert any(v1.id in line for line in pool.detail)
+
+
+def test_reopen_permite_recuperar_el_mismo_candidato_retirado(db):
+    ed1 = _edition(db, code="2026_LIFECYCLE_E1")
+    ed2 = _edition(db, code="2026_LIFECYCLE_E2")
+    _seed(db, [ed1, ed2], RARITIES)
+    db.commit()
+    v1 = db.get(CardCatalog, _publish(db, ed1).catalog_id)
+    v2 = db.get(CardCatalog, _publish(db, ed2).catalog_id)
+    promote_card_catalog(db, catalog_id=v2.id)
+    retract_card_catalog(db, catalog_id=v2.id)
+
+    reopened = reopen_card_catalog(db, catalog_id=v2.id)
+    v1 = db.get(CardCatalog, v1.id)
+    v2 = db.get(CardCatalog, v2.id)
+    cards_v2 = db.query(PlayerCardModel).filter_by(catalog_id=v2.id).all()
+
+    assert reopened.status == "VALIDATING"
+    assert reopened.catalog_id == v2.id
+    assert reopened.created == 5
+    assert v1.status == "ACTIVE"
+    assert v2.status == "VALIDATING"
+    assert v2.published_at is None
+    assert all(not card.is_active and not card.is_pack_eligible for card in cards_v2)
+
+    recovered = promote_card_catalog(db, catalog_id=v2.id)
+    v1 = db.get(CardCatalog, v1.id)
+    v2 = db.get(CardCatalog, v2.id)
+    assert recovered.status == "ACTIVE"
+    assert v1.status == "RETIRED"
+    assert v2.status == "ACTIVE"
+    assert all(
+        card.is_active and card.is_pack_eligible
+        for card in db.query(PlayerCardModel).filter_by(catalog_id=v2.id).all()
+    )
+
+
+@pytest.mark.parametrize("status", ("ACTIVE", "VALIDATING", "FAILED"))
+def test_reopen_rechaza_estados_distintos_de_retired(db, status):
+    edition = _edition(db, code=f"2026_LIFECYCLE_REOPEN_{status}")
+    catalog = CardCatalog(
+        season=2026,
+        edition_type="BASE",
+        version=1,
+        status=status,
+        card_edition_id=edition.id,
+    )
+    db.add(catalog)
+    db.commit()
+
+    with pytest.raises(ValueError, match="solo un catálogo RETIRED"):
+        reopen_card_catalog(db, catalog_id=catalog.id)
+
+
+def test_reopen_rechaza_retirado_sin_predecesor_active_directo(db):
+    edition = _edition(db, code="2026_LIFECYCLE_REOPEN_NO_CHAIN")
+    retired = CardCatalog(
+        season=2026,
+        edition_type="BASE",
+        version=1,
+        status="RETIRED",
+        card_edition_id=edition.id,
+    )
+    db.add(retired)
+    db.commit()
+
+    with pytest.raises(ValueError, match="no hay catálogo ACTIVE"):
+        reopen_card_catalog(db, catalog_id=retired.id)
 
 
 def test_retract_sin_predecesor_falla(db):
