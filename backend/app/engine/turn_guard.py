@@ -39,5 +39,7 @@ def is_player_turn(game: "GameSession", user_id: str, required_role: str) -> boo
     if expected is None:
         return False
     if expected == "CPU_BOT":
-        return True
+        # La media entrada es de la CPU: solo el motor (user "CPU_BOT") puede
+        # actuar. Un humano no debe poder jugar en el turno del rival.
+        return user_id == expected
     return user_id == expected

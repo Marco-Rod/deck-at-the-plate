@@ -317,6 +317,8 @@ def publishable_player(
     rarity,
     role: str = "BATTER",
     rating_model_version: str = "ratings-2.0",
+    team=None,
+    position=None,
 ):
     """Jugador publicable: perfiles de generación + rating con eligibility.
 
@@ -324,6 +326,9 @@ def publishable_player(
     crea Team, SourceTeam, mapping, roster, identidad pública, PlayerRatings,
     CardGenerationProfile y CardRatingProfile (eligibility auto-materializada)
     para la edición dada. Retorna el Player.
+
+    ``team`` reutiliza un Team existente (p. ej. para rosters CPU con varias
+    cartas por equipo). ``position`` anula la posición por defecto (SP/DH).
     """
     from app.models import (
         CardGenerationProfile,
@@ -340,12 +345,44 @@ def publishable_player(
     from etl.services.card_rating_profiles import generate_card_rating_profile
 
     index = int(index)
-    team = Team(
-        id=f"team-{index}",
-        abbreviation=f"T{index}",
-        name=f"Test Team {index}",
-        city="Test City",
-    )
+    position = position or ("SP" if role == "PITCHER" else "DH")
+    if team is None:
+        team = Team(
+            id=f"team-{index}",
+            abbreviation=f"T{index}",
+            name=f"Test Team {index}",
+            city="Test City",
+        )
+    _PITCHER_REPERTOIRE = [
+        {
+            "pitch_type": "FF",
+            "pitch_name": "4-Seam Fastball",
+            "velocity": 93,
+            "control": 88,
+            "movement": 42,
+        },
+        {
+            "pitch_type": "SL",
+            "pitch_name": "Slider",
+            "velocity": 84,
+            "control": 79,
+            "movement": 48,
+        },
+        {
+            "pitch_type": "CH",
+            "pitch_name": "Changeup",
+            "velocity": 82,
+            "control": 84,
+            "movement": 45,
+        },
+        {
+            "pitch_type": "CU",
+            "pitch_name": "Curveball",
+            "velocity": 78,
+            "control": 81,
+            "movement": 55,
+        },
+    ]
     source_team = SourceTeam(
         source="MLB",
         external_id=100 + index,
@@ -355,7 +392,7 @@ def publishable_player(
     player = Player(
         mlb_id=600000 + index,
         full_name=f"Player {index}",
-        primary_position="SP" if role == "PITCHER" else "DH",
+        primary_position=position,
     )
     db.add_all([team, source_team, player])
     db.flush()
@@ -375,7 +412,7 @@ def publishable_player(
         roster_snapshot_id=snapshot.id,
         player_id=player.id,
         status="ACTIVE",
-        position="SP" if role == "PITCHER" else "DH",
+        position=position,
     ))
     db.add(GamePlayerIdentity(
         player_id=player.id,
@@ -399,10 +436,10 @@ def publishable_player(
         distribution_version="dist-1.0",
         data_start_date=START,
         data_end_date=END,
-        contact_rating=65,
-        power_rating=65,
-        vision_rating=65,
-        clutch_rating=65,
+        contact_rating=(65 if role == "BATTER" else None),
+        power_rating=(65 if role == "BATTER" else None),
+        vision_rating=(65 if role == "BATTER" else None),
+        clutch_rating=(65 if role == "BATTER" else None),
         velocity_rating=(85 if role == "PITCHER" else None),
         control_rating=(80 if role == "PITCHER" else None),
         movement_rating=(82 if role == "PITCHER" else None),
@@ -412,29 +449,26 @@ def publishable_player(
     )
     db.add(ratings)
     db.flush()
+    is_pitcher = role == "PITCHER"
     generation = CardGenerationProfile(
         player_season_id=player_season.id,
         rating_model_version=rating_model_version,
         role=role,
         player_ratings_id=ratings.id,
         input_hash=_fixed_hash("generation", player_season.id),
-        contact_rating=65,
-        power_rating=65,
-        vision_rating=65,
-        clutch_rating=65,
-        velocity_rating=(85 if role == "PITCHER" else None),
-        control_rating=(80 if role == "PITCHER" else None),
-        movement_rating=(82 if role == "PITCHER" else None),
-        stuff_rating=(78 if role == "PITCHER" else None),
+        contact_rating=None if is_pitcher else 65,
+        power_rating=None if is_pitcher else 65,
+        vision_rating=None if is_pitcher else 65,
+        clutch_rating=None if is_pitcher else 65,
+        velocity_rating=85 if is_pitcher else None,
+        control_rating=80 if is_pitcher else None,
+        movement_rating=82 if is_pitcher else None,
+        stuff_rating=78 if is_pitcher else None,
         overall_rating=75,
         calculated_rarity=rarity,
         primary_batter_trait=None,
-        primary_pitcher_trait=None,
-        repertoire_payload=(
-            ["4-SEAM", "SLIDER", "CHANGEUP", "CURVEBALL"]
-            if role == "PITCHER"
-            else None
-        ),
+        primary_pitcher_trait="FASTBALL_COMMAND" if is_pitcher else None,
+        repertoire_payload=_PITCHER_REPERTOIRE if is_pitcher else None,
         calculation_metadata={"adapter_version": "fixture"},
     )
     db.add(generation)
@@ -507,3 +541,101 @@ def seed_catalog(
         .first()
     )
     return catalog, edition, players
+
+
+ROSTER_TEAM_ID = "3f0c1133-6f5f-4a2a-9d2f-0a1b2c3d4e5f"
+
+
+def seed_roster(
+    db: Session,
+    edition,
+    *,
+    team_id: str = ROSTER_TEAM_ID,
+    batters: int = 9,
+    pitchers: int = 2,
+    start: int = 100,
+):
+    """Roster CPU jugable: un equipo con N bateadores y M pitchers publicados.
+
+    Publica todos los jugadores sobre UN MISMO ``Team`` (id UUID de 36 chars
+    compatible con las rutas públicas) y promueve el catálogo a ACTIVE.
+
+    Retorna un dict con:
+        catalog, edition, team, lineup (ids de bateadores, hasta 9+),
+        pitchers (ids de pitchers).
+    """
+    from app.models import Team
+
+    edition = edition or ensure_edition(db)
+    team = Team(
+        id=team_id,
+        abbreviation="ROSTER",
+        name="Test Roster Team",
+        city="Test City",
+    )
+    db.add(team)
+    db.flush()
+
+    signed: list[tuple[object, str]] = []
+    for i in range(batters):
+        signed.append(
+            (
+                publishable_player(
+                    db,
+                    edition,
+                    index=start + i,
+                    rarity="COMMON",
+                    role="BATTER",
+                    team=team,
+                ),
+                "BATTER",
+            )
+        )
+    for j in range(pitchers):
+        signed.append(
+            (
+                publishable_player(
+                    db,
+                    edition,
+                    index=start + batters + j,
+                    rarity="SILVER",
+                    role="PITCHER",
+                    team=team,
+                ),
+                "PITCHER",
+            )
+        )
+
+    from etl.services.card_catalog import publish_card_catalog
+
+    result = publish_card_catalog(
+        db,
+        season=2026,
+        card_edition_id=edition.id,
+        rating_model_version="ratings-2.0",
+        data_end_date=END,
+    )
+    if result.status != "ACTIVE":
+        raise AssertionError(f"roster seed falló: {result.status} {result.issues}")
+
+    from app.models import CardCatalog, PlayerCardModel
+
+    catalog = (
+        db.query(CardCatalog)
+        .filter(CardCatalog.season == 2026, CardCatalog.edition_type == "BASE")
+        .order_by(CardCatalog.version.desc())
+        .first()
+    )
+    player_to_role = {p.id: role for p, role in signed}
+    lineup = []
+    pitchers_ids = []
+    for card in db.query(PlayerCardModel).filter(PlayerCardModel.team_id == team.id):
+        (pitchers_ids if player_to_role.get(card.player_id) == "PITCHER" else lineup).append(card.id)
+    db.commit()
+    return {
+        "catalog": catalog,
+        "edition": edition,
+        "team": team,
+        "lineup": sorted(lineup),
+        "pitchers": sorted(pitchers_ids),
+    }

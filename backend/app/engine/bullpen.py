@@ -66,7 +66,7 @@ def list_rival_available_pitchers(
 
     rival_pitchers = find_pitchers_for_team(
         db,
-        team_id=ref_pitcher.team_id,
+        ref_pitcher.team_id,
         excluded_id=active_pitcher_id,
     )
     return _available_payloads(rival_pitchers, state.get("pitch_counts", {})), ""
