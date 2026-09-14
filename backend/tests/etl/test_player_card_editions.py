@@ -1,6 +1,7 @@
 """Identidad Player + CardEdition y publicación idempotente."""
 
 import datetime as dt
+import hashlib
 
 import pytest
 from sqlalchemy import create_engine, event
@@ -13,9 +14,11 @@ from app.models import (
     CardEditionSourceType,
     CardEditionType,
     CardGenerationProfile,
+    CardRatingProfile,
     GamePlayerIdentity,
     Player,
     PlayerCardModel,
+    PlayerRatings,
     PlayerSeason,
     SourceTeam,
     SourceTeamGameTeamMapping,
@@ -27,6 +30,7 @@ from app.models.card import CardRarity
 from app.services.card_editions import ensure_system_base_edition
 from etl.services.base_eligibility_policy import BASE_ELIGIBILITY_POLICY_VERSION
 from etl.services.card_catalog import publish_card_catalog
+from etl.services.card_rating_profiles import generate_card_rating_profile
 
 
 START = dt.date(2026, 8, 25)
@@ -210,28 +214,64 @@ def test_rerun_del_publicador_no_duplica_carta(db):
     )
     db.add(player_season)
     db.flush()
-    db.add(CardGenerationProfile(
-        player_season_id=player_season.id,
-        rating_model_version="ratings-1.0",
+    ratings = PlayerRatings(
+        player_id=player.id,
+        season=2026,
+        role="BATTER",
+        rating_model_version="ratings-2.0",
+        distribution_version="dist-1.0",
+        data_start_date=START,
+        data_end_date=END,
         contact_rating=70,
         power_rating=70,
         vision_rating=70,
         clutch_rating=70,
-        velocity_rating=0,
-        control_rating=0,
-        movement_rating=0,
+        overall_rating=70,
+        input_hash=hashlib.sha256(f"ratings-{player.id}".encode()).hexdigest(),
+    )
+    db.add(ratings)
+    db.flush()
+    db.add(CardGenerationProfile(
+        player_season_id=player_season.id,
+        rating_model_version="ratings-2.0",
+        role="BATTER",
+        player_ratings_id=ratings.id,
+        input_hash=hashlib.sha256(f"gen-{player_season.id}".encode()).hexdigest(),
+        contact_rating=70,
+        power_rating=70,
+        vision_rating=70,
+        clutch_rating=70,
+        velocity_rating=None,
+        control_rating=None,
+        movement_rating=None,
         overall_rating=70,
         calculated_rarity=CardRarity.COMMON,
-        calculation_metadata={},
+        calculation_metadata={"adapter_version": "fixture"},
     ))
     edition = ensure_system_base_edition(db, season=2026)
+    generate_card_rating_profile(
+        db,
+        source_player_ratings_id=ratings.id,
+        card_edition_id=edition.id,
+        commit=False,
+    )
+    rating = (
+        db.query(CardRatingProfile)
+        .filter_by(player_id=player.id, card_edition_id=edition.id)
+        .one()
+    )
+    rating_metadata = dict(rating.metadata_payload or {})
+    eligibility = dict(rating_metadata.get("eligibility") or {})
+    eligibility["status"] = "PROVISIONAL"
+    rating_metadata["eligibility"] = eligibility
+    rating.metadata_payload = rating_metadata
     db.commit()
 
     first = publish_card_catalog(
         db,
         season=2026,
         card_edition_id=edition.id,
-        rating_model_version="ratings-1.0",
+        rating_model_version="ratings-2.0",
         data_end_date=END,
     )
     card = db.query(PlayerCardModel).one()
@@ -240,7 +280,7 @@ def test_rerun_del_publicador_no_duplica_carta(db):
         db,
         season=2026,
         card_edition_id=edition.id,
-        rating_model_version="ratings-1.0",
+        rating_model_version="ratings-2.0",
         data_end_date=END,
     )
 
