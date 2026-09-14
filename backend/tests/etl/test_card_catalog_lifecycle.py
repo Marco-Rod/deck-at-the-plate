@@ -403,6 +403,31 @@ def test_promote_noop_cuando_ya_activo(db):
     assert db.get(CardCatalog, v1.id).supersedes_catalog_id is None
 
 
+def test_promote_y_retract_serializan_el_mismo_scope(db, monkeypatch):
+    ed1 = _edition(db, code="2026_LIFECYCLE_E1")
+    ed2 = _edition(db, code="2026_LIFECYCLE_E2")
+    _seed(db, [ed1, ed2], RARITIES)
+    db.commit()
+    v1 = db.get(CardCatalog, _publish(db, ed1).catalog_id)
+    v2 = db.get(CardCatalog, _publish(db, ed2).catalog_id)
+    scopes = []
+
+    def _record_lock(_db, *, season, edition_type):
+        scopes.append((season, edition_type))
+
+    monkeypatch.setattr(
+        "etl.services.card_catalog._acquire_catalog_lifecycle_lock",
+        _record_lock,
+    )
+
+    promoted = promote_card_catalog(db, catalog_id=v2.id)
+    retracted = retract_card_catalog(db, catalog_id=v2.id)
+
+    assert promoted.status == "ACTIVE"
+    assert retracted.catalog_id == v1.id
+    assert scopes == [(2026, "BASE"), (2026, "BASE")]
+
+
 def test_promote_requiere_validating(db):
     ed1 = _edition(db, code="2026_LIFECYCLE_E1")
     ed2 = _edition(db, code="2026_LIFECYCLE_E2")

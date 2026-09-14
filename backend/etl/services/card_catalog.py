@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Iterable
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.core.time import utcnow
@@ -122,6 +123,33 @@ def _active_catalog(db: Session, *, season: int, edition_type: str) -> CardCatal
             CardCatalog.status == "ACTIVE",
         )
         .first()
+    )
+
+
+def _acquire_catalog_lifecycle_lock(
+    db: Session,
+    *,
+    season: int,
+    edition_type: str,
+) -> None:
+    """Serializa promote/retract para un scope lógico de catálogo.
+
+    El índice parcial protege el resultado final (un ACTIVE por scope), pero
+    este advisory lock transaccional también serializa las decisiones y gates
+    de lifecycle. SQLite se conserva como entorno unitario sin advisory locks;
+    PostgreSQL toma el lock hasta el commit o rollback de la transacción.
+    """
+    if db.get_bind().dialect.name != "postgresql":
+        return
+    db.execute(
+        text(
+            "SELECT pg_advisory_xact_lock("
+            "hashtext(:namespace), hashtext(:scope))"
+        ),
+        {
+            "namespace": "card_catalog_lifecycle",
+            "scope": f"{season}:{edition_type}",
+        },
     )
 
 
@@ -336,6 +364,17 @@ def promote_card_catalog(db: Session, *, catalog_id: str) -> CatalogRunResult:
     candidate = db.get(CardCatalog, catalog_id)
     if candidate is None:
         raise ValueError(f"CardCatalog inexistente: {catalog_id}")
+    _acquire_catalog_lifecycle_lock(
+        db,
+        season=candidate.season,
+        edition_type=candidate.edition_type,
+    )
+    # El candidate pudo cambiar mientras se esperaba el lock. Expirarlo obliga
+    # a reevaluar el estado real antes de tomar una decisión de lifecycle.
+    db.expire(candidate)
+    candidate = db.get(CardCatalog, catalog_id)
+    if candidate is None:
+        raise ValueError(f"CardCatalog inexistente tras adquirir lock: {catalog_id}")
     if candidate.status == "ACTIVE":
         existing = (
             db.query(PlayerCardModel)
@@ -444,6 +483,16 @@ def retract_card_catalog(db: Session, *, catalog_id: str) -> CatalogRunResult:
     target = db.get(CardCatalog, catalog_id)
     if target is None:
         raise ValueError(f"CardCatalog inexistente: {catalog_id}")
+    _acquire_catalog_lifecycle_lock(
+        db,
+        season=target.season,
+        edition_type=target.edition_type,
+    )
+    # Igual que promote: no decidir sobre un estado leído antes de esperar.
+    db.expire(target)
+    target = db.get(CardCatalog, catalog_id)
+    if target is None:
+        raise ValueError(f"CardCatalog inexistente tras adquirir lock: {catalog_id}")
     if target.status != "ACTIVE":
         raise ValueError(
             f"solo se retracta el ACTIVE actual; {catalog_id} está en "
