@@ -139,54 +139,47 @@ def publish_card_catalog(
     if card_edition.season != season:
         raise ValueError("CardEdition no pertenece a la temporada solicitada")
     edition_type = card_edition.edition_type.value
-    active = _active_catalog(db, season=season, edition_type=edition_type)
-    if active is not None and active.card_edition_id == card_edition.id:
-        # No-op §22: esta edición ya está ACTIVE (inmutabilidad por edición,
-        # no por season+edition_type). No se duplica nada.
+    existing_catalog = (
+        db.query(CardCatalog)
+        .filter(CardCatalog.card_edition_id == card_edition.id)
+        .one_or_none()
+    )
+    if existing_catalog is not None:
         existing = (
             db.query(PlayerCardModel)
-            .filter(PlayerCardModel.catalog_id == active.id)
+            .filter(PlayerCardModel.catalog_id == existing_catalog.id)
             .count()
         )
-        result = CatalogRunResult(
-            catalog_id=active.id,
-            catalog_version=active.version,
-            status="ACTIVE",
-            created=existing,
+        if existing_catalog.status in {"VALIDATING", "ACTIVE"}:
+            # Una misma edición no se reconstruye: VALIDATING conserva el
+            # candidato exactamente auditado y ACTIVE es el no-op histórico.
+            result = CatalogRunResult(
+                catalog_id=existing_catalog.id,
+                catalog_version=existing_catalog.version,
+                status=existing_catalog.status,
+                created=existing,
+            )
+            result.issues.append("catálogo existente para la edición (no-op)")
+            return result
+        raise ValueError(
+            "CardEdition ya tiene un catálogo en estado no reutilizable: "
+            f"{existing_catalog.status} ({existing_catalog.id})"
         )
-        result.issues.append("catálogo ya publicado (no-op)")
-        return result
 
+    active = _active_catalog(db, season=season, edition_type=edition_type)
     latest = _latest_catalog(db, season=season, edition_type=edition_type)
     next_version = (latest.version + 1) if latest else 1
-
-    proposal = db.query(CardCatalog).filter(
-        CardCatalog.season == season,
-        CardCatalog.edition_type == edition_type,
-        CardCatalog.version == next_version,
-        CardCatalog.status != "ACTIVE",
-    ).one_or_none()
-    catalog = proposal
-    if catalog is None:
-        catalog = CardCatalog(
-            season=season,
-            edition_type=edition_type,
-            version=next_version,
-            status="BUILDING",
-            rating_model_version=rating_model_version,
-            data_end_date=data_end_date,
-            card_edition_id=card_edition.id,
-        )
-        db.add(catalog)
-        db.flush()
-    else:
-        # Rebuild idempotente: un candidato no-ACTIVE se revalida desde cero
-        # bajo la edición solicitada, sin acumular cartas del intento previo.
-        catalog.card_edition_id = card_edition.id
-        db.query(PlayerCardModel).filter(
-            PlayerCardModel.catalog_id == catalog.id
-        ).delete(synchronize_session=False)
-        db.flush()
+    catalog = CardCatalog(
+        season=season,
+        edition_type=edition_type,
+        version=next_version,
+        status="BUILDING",
+        rating_model_version=rating_model_version,
+        data_end_date=data_end_date,
+        card_edition_id=card_edition.id,
+    )
+    db.add(catalog)
+    db.flush()
 
     # ------ BUILDING: candidatos = perfiles válidos del corte ----------
     profile_query = (

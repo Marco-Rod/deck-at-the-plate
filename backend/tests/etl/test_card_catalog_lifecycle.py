@@ -18,6 +18,7 @@ import datetime as dt
 
 import pytest
 from sqlalchemy import create_engine, event
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
 from app.database import Base
@@ -268,6 +269,68 @@ def test_publica_otra_edicion_deja_candidato_validating(db):
     assert not any("no-op" in issue for issue in second.issues)
     assert _actives(db) == {v1.id}
     assert db.query(PlayerCardModel).filter_by(is_active=True).count() == 5
+
+
+def test_republicar_candidato_validating_retorna_el_mismo_catalogo(db):
+    ed1 = _edition(db, code="2026_LIFECYCLE_E1")
+    ed2 = _edition(db, code="2026_LIFECYCLE_E2")
+    _seed(db, [ed1, ed2], RARITIES)
+    db.commit()
+
+    _publish(db, ed1)
+    first = _publish(db, ed2)
+    second = _publish(db, ed2)
+
+    assert first.status == second.status == "VALIDATING"
+    assert first.catalog_id == second.catalog_id
+    assert first.created == second.created == 5
+    assert db.query(CardCatalog).count() == 2
+    assert db.query(PlayerCardModel).filter_by(catalog_id=first.catalog_id).count() == 5
+    assert any("no-op" in issue for issue in second.issues)
+
+
+@pytest.mark.parametrize("status", ("FAILED", "BUILDING", "RETIRED"))
+def test_republicar_edicion_con_catalogo_no_reutilizable_falla(db, status):
+    edition = _edition(db, code=f"2026_LIFECYCLE_{status}")
+    catalog = CardCatalog(
+        season=2026,
+        edition_type="BASE",
+        version=1,
+        status=status,
+        card_edition_id=edition.id,
+    )
+    db.add(catalog)
+    db.commit()
+
+    with pytest.raises(ValueError, match="estado no reutilizable"):
+        _publish(db, edition)
+
+    assert db.query(CardCatalog).filter_by(card_edition_id=edition.id).count() == 1
+
+
+def test_db_impide_dos_catalogos_para_la_misma_edicion(db):
+    edition = _edition(db, code="2026_LIFECYCLE_UNIQUE_EDITION")
+    first = CardCatalog(
+        season=2026,
+        edition_type="BASE",
+        version=1,
+        status="BUILDING",
+        card_edition_id=edition.id,
+    )
+    duplicate = CardCatalog(
+        season=2026,
+        edition_type="BASE",
+        version=2,
+        status="BUILDING",
+        card_edition_id=edition.id,
+    )
+    db.add(first)
+    db.flush()
+    db.add(duplicate)
+
+    with pytest.raises(IntegrityError):
+        db.flush()
+    db.rollback()
 
 
 def test_promote_swap_atomico_v2_active_v1_retired(db):

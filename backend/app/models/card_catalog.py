@@ -45,6 +45,15 @@ class CardCatalog(Base):
             postgresql_where=text("status = 'ACTIVE'"),
             sqlite_where=text("status = 'ACTIVE'"),
         ),
+        # Una edición materializada representa como máximo un catálogo. Los
+        # catálogos históricos sin edición conservan NULL y compatibilidad.
+        Index(
+            "uq_card_catalogs_card_edition_id",
+            "card_edition_id",
+            unique=True,
+            postgresql_where=text("card_edition_id IS NOT NULL"),
+            sqlite_where=text("card_edition_id IS NOT NULL"),
+        ),
     )
 
     # Estados: BUILDING / VALIDATING / ACTIVE / RETIRED / FAILED
@@ -64,7 +73,6 @@ class CardCatalog(Base):
         String(36),
         ForeignKey("card_editions.id", ondelete="RESTRICT"),
         nullable=True,
-        index=True,
     )
     # Catálogo al que sustituyó al pasar a ACTIVE: cadena reversible (retract
     # devuelve ACTIVE al predecesor). NULL = catálogo primigenio.
