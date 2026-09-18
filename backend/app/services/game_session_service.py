@@ -20,9 +20,12 @@ from app.models import GameSession
 from app.schemas import CreateGameRequest
 from app.engine.deck_manager import initialize_tactics_state
 from app.repositories import (
-    find_all_cards,
     find_cards_by_team,
+    find_inventory_entry,
+    find_user_inventory_pitchers,
+    get_active_catalog,
     get_active_lineup,
+    get_card_by_id,
     get_team_by_id,
 )
 
@@ -30,6 +33,66 @@ logger = logging.getLogger(__name__)
 
 # Mazos de tacticas predeterminados por defecto
 DEFAULT_TACTICS_DECK = ["t1", "t2", "t3", "t4", "t1"]
+
+
+def _validate_human_roster(
+    db: Session,
+    *,
+    user_id: str,
+    lineup_ids: list[str],
+    pitcher_id: str | None,
+) -> None:
+    """Valida estructura y ownership del roster humano resuelto."""
+    if len(lineup_ids) != 9:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El lineup debe contener exactamente 9 bateadores",
+        )
+    if len(set(lineup_ids)) != 9:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El lineup no puede contener cartas duplicadas",
+        )
+
+    for card_id in lineup_ids:
+        if find_inventory_entry(db, user_id, card_id) is None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="El lineup contiene una carta que no pertenece al usuario",
+            )
+        card = get_card_by_id(db, card_id)
+        if card is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="El lineup contiene una carta inexistente",
+            )
+        if not card.is_batter:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="El lineup contiene una carta que no es bateador",
+            )
+
+    if pitcher_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Se requiere un pitcher inicial",
+        )
+    if find_inventory_entry(db, user_id, pitcher_id) is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="El pitcher inicial no pertenece al usuario",
+        )
+    pitcher = get_card_by_id(db, pitcher_id)
+    if pitcher is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El pitcher inicial no existe",
+        )
+    if not pitcher.is_pitcher:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="La carta seleccionada como pitcher inicial no es pitcher",
+        )
 
 
 class GameSessionService:
@@ -115,27 +178,76 @@ class GameSessionService:
                     away_lineup_ids = lineup_cards
                     away_pitcher_id = pitcher_card
 
+        if human_is_home:
+            human_lineup_ids = home_lineup_ids
+            human_pitcher_id = home_pitcher_id
+        else:
+            human_lineup_ids = away_lineup_ids
+            human_pitcher_id = away_pitcher_id
+        _validate_human_roster(
+            db,
+            user_id=human_user_id,
+            lineup_ids=human_lineup_ids,
+            pitcher_id=human_pitcher_id,
+        )
+        human_bullpen = [
+            pitcher.id
+            for pitcher in find_user_inventory_pitchers(
+                db,
+                user_id=human_user_id,
+                excluded_id=human_pitcher_id,
+            )
+        ]
+
         # 2. Obtener datos de CPU (equipo rival)
-        cpu_cards = find_cards_by_team(db, rival_team_id)
+        active_catalog = get_active_catalog(
+            db,
+            season=2026,
+            edition_type="BASE",
+        )
+        if active_catalog is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No hay un catálogo activo disponible para la partida",
+            )
+        cpu_cards = find_cards_by_team(
+            db,
+            rival_team_id,
+            catalog_id=active_catalog.id,
+        )
 
         # Cargar nombre completo del equipo rival desde la tabla Team
         rival_team_obj = get_team_by_id(db, rival_team_id)
         rival_team_name = rival_team_obj.name if rival_team_obj else rival_team_id
 
-        # FALLBACK: Si no hay cartas del equipo rival, usar cartas de cualquier equipo
-        if not cpu_cards:
-            logger.warning("No hay cartas para equipo %s; usando cartas de cualquier equipo.", rival_team_id)
-            cpu_cards = find_all_cards(db)
-
+        # El rival elegido define su roster: nunca se mezcla silenciosamente
+        # con cartas globales de otro equipo.
         if not cpu_cards:
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="No hay cartas disponibles en la base de datos. Ejecuta el seed primero."
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="El equipo CPU seleccionado no tiene cartas disponibles",
             )
 
         # La regla "es pitcher" vive en PlayerCardModel.is_pitcher / core.PITCHER_POSITIONS
-        pitchers = [c for c in cpu_cards if c.is_pitcher]
-        batters = [c for c in cpu_cards if c.is_batter]
+        pitchers = sorted(
+            (card for card in cpu_cards if card.is_pitcher),
+            key=lambda card: (-card.overall, card.id),
+        )
+        batters = sorted(
+            (card for card in cpu_cards if card.is_batter),
+            key=lambda card: (-card.overall, card.id),
+        )
+        if len(batters) < 9:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="El equipo CPU seleccionado no tiene suficientes bateadores",
+            )
+        if not pitchers:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="El equipo CPU seleccionado no tiene lanzadores disponibles",
+            )
+        cpu_bullpen = [pitcher.id for pitcher in pitchers[1:]]
 
         # Asignar cartas CPU según su posición
         if human_is_home:
@@ -144,16 +256,16 @@ class GameSessionService:
                 away_pitcher_id = pitchers[0].id
             if (not away_lineup_ids or len(away_lineup_ids) < 9) and batters:
                 away_lineup_ids = [c.id for c in batters[:9]]
-                while len(away_lineup_ids) < 9 and cpu_cards:
-                    away_lineup_ids.append(cpu_cards[0].id)
+            home_bullpen = human_bullpen
+            away_bullpen = cpu_bullpen
         else:
             # CPU es local (home)
             if not home_pitcher_id and pitchers:
                 home_pitcher_id = pitchers[0].id
             if (not home_lineup_ids or len(home_lineup_ids) < 9) and batters:
                 home_lineup_ids = [c.id for c in batters[:9]]
-                while len(home_lineup_ids) < 9 and cpu_cards:
-                    home_lineup_ids.append(cpu_cards[0].id)
+            home_bullpen = cpu_bullpen
+            away_bullpen = human_bullpen
 
         # Validaciones de seguridad
         if not home_pitcher_id or not away_pitcher_id:
@@ -179,6 +291,8 @@ class GameSessionService:
                 "total_innings": total_innings,
                 "home_lineup": home_lineup_ids,
                 "away_lineup": away_lineup_ids,
+                "home_bullpen": home_bullpen,
+                "away_bullpen": away_bullpen,
                 "home_batter_index": 0,
                 "away_batter_index": 0,
                 "tactics": tactics_state,

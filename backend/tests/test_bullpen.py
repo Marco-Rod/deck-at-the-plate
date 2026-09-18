@@ -10,6 +10,8 @@ def make_state(**overrides):
         "active_pitcher": "pitcher_actual",
         "home_pitcher_id": "pitcher_actual",
         "away_pitcher_id": "pitcher_rival",
+        "home_bullpen": ["pitcher_usado", "pitcher_nuevo"],
+        "away_bullpen": [],
         "pitch_counts": {"pitcher_actual": 5},
     }
     state.update(overrides)
@@ -75,13 +77,17 @@ def test_human_change_uses_owned_unused_pitcher(monkeypatch):
     assert state["pitch_counts"]["pitcher_nuevo"] == 0
 
 
-def test_list_user_pitchers_delegates_inventory_and_marks_used(monkeypatch):
-    cards = [SimpleNamespace(id="pitcher_usado"), SimpleNamespace(id="pitcher_nuevo")]
-    calls = []
+def test_list_user_pitchers_reads_snapshot_and_marks_used(monkeypatch):
+    cards = [
+        SimpleNamespace(id="pitcher_usado", is_pitcher=True),
+        SimpleNamespace(id="pitcher_nuevo", is_pitcher=True),
+    ]
     monkeypatch.setattr(
         bullpen,
-        "find_user_inventory_pitchers",
-        lambda _db, user_id, excluded_id: calls.append((user_id, excluded_id)) or cards,
+        "get_card_by_id",
+        lambda _db, pitcher_id: next(
+            card for card in cards if card.id == pitcher_id
+        ),
     )
     monkeypatch.setattr(
         bullpen,
@@ -91,11 +97,14 @@ def test_list_user_pitchers_delegates_inventory_and_marks_used(monkeypatch):
 
     result = bullpen.list_user_available_pitchers(
         object(),
-        {"active_pitcher": "pitcher_actual", "pitch_counts": {"pitcher_usado": 4}},
-        "user_1",
+        {
+            "active_pitcher": "pitcher_actual",
+            "home_bullpen": ["pitcher_usado", "pitcher_nuevo"],
+            "pitch_counts": {"pitcher_usado": 4},
+        },
+        is_home_user=True,
     )
 
-    assert calls == [("user_1", "pitcher_actual")]
     assert result == [
         {"id": "pitcher_usado", "already_used": True},
         {"id": "pitcher_nuevo", "already_used": False},
@@ -103,13 +112,11 @@ def test_list_user_pitchers_delegates_inventory_and_marks_used(monkeypatch):
 
 
 def test_list_rival_pitchers_uses_requesting_player_side(monkeypatch):
-    reference_pitcher = SimpleNamespace(team_id="RIV")
-    reliever = SimpleNamespace(id="reliever_1")
-    monkeypatch.setattr(bullpen, "get_card_by_id", lambda *_: reference_pitcher)
+    reliever = SimpleNamespace(id="reliever_1", is_pitcher=True)
     monkeypatch.setattr(
         bullpen,
-        "find_pitchers_for_team",
-        lambda _db, team_id, excluded_id: [reliever],
+        "get_card_by_id",
+        lambda _db, pitcher_id: reliever if pitcher_id == reliever.id else None,
     )
     monkeypatch.setattr(
         bullpen,
@@ -122,6 +129,7 @@ def test_list_rival_pitchers_uses_requesting_player_side(monkeypatch):
         {
             "home_pitcher_id": "home_pitcher",
             "away_pitcher_id": "away_pitcher",
+            "away_bullpen": ["reliever_1"],
             "active_pitcher": "home_pitcher",
             "pitch_counts": {},
         },

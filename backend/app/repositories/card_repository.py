@@ -182,18 +182,16 @@ def find_any_card(db) -> "PlayerCardModel | None":
     return db.query(PlayerCardModel).first()
 
 
-def get_active_pack_catalog(
+def get_active_catalog(
     db,
     *,
     season: int | None = None,
     edition_type: str = "BASE",
 ) -> "CardCatalog | None":
-    """Catálogo ACTIVE que define el pool de packs del juego.
+    """Retorna el catálogo ACTIVE aplicable de forma determinista.
 
-    Determinista siempre: si hay más de un ACTIVE para la temporada, elige la
-    versión más reciente (version desc) — jamás query.first() sin orden. El
-    servicio de packs lo resuelve UNA vez y lo fija via catalog_id para nunca
-    mezclar temporadas ni ediciones.
+    Si se especifica temporada, elige la versión más reciente; si no, prioriza
+    la temporada más reciente y después la versión.
     """
     query = (
         db.query(CardCatalog)
@@ -201,11 +199,28 @@ def get_active_pack_catalog(
             CardCatalog.edition_type == edition_type,
             CardCatalog.status == "ACTIVE",
         )
-        .order_by(CardCatalog.version.desc())
     )
     if season is not None:
-        query = query.filter(CardCatalog.season == season)
-        return query.first()
+        return (
+            query
+            .filter(CardCatalog.season == season)
+            .order_by(CardCatalog.version.desc())
+            .first()
+        )
     return (
         query.order_by(CardCatalog.season.desc(), CardCatalog.version.desc()).first()
+    )
+
+
+def get_active_pack_catalog(
+    db,
+    *,
+    season: int | None = None,
+    edition_type: str = "BASE",
+) -> "CardCatalog | None":
+    """Catálogo ACTIVE que define el pool de packs del juego."""
+    return get_active_catalog(
+        db,
+        season=season,
+        edition_type=edition_type,
     )

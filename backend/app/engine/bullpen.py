@@ -15,9 +15,7 @@ from typing import List, Tuple
 
 from app.engine.game_rules import MIN_PITCHES_TO_CHANGE
 from app.repositories import (
-    find_pitchers_for_team,
     find_inventory_entry,
-    find_user_inventory_pitchers,
     get_card_by_id,
 )
 from app.services.card_presenter import build_pitcher_payload
@@ -31,44 +29,48 @@ def _available_payloads(cards, pitch_counts: dict) -> List[dict]:
     ]
 
 
-def list_user_available_pitchers(db, state: dict, user_id: str) -> List[dict]:
+def list_user_available_pitchers(
+    db,
+    state: dict,
+    *,
+    is_home_user: bool,
+) -> List[dict]:
     """
-    Relevistas del inventario del usuario, excluyendo el pitcher activo.
+    Relevistas registrados en el snapshot de la partida, excluyendo el activo.
     """
     active_pitcher_id = state.get("active_pitcher")
-    inventory_pitchers = find_user_inventory_pitchers(
-        db,
-        user_id=user_id,
-        excluded_id=active_pitcher_id,
+    bullpen_ids = state.get("home_bullpen", []) if is_home_user else state.get(
+        "away_bullpen", []
     )
-    return _available_payloads(inventory_pitchers, state.get("pitch_counts", {}))
+    pitchers = [
+        pitcher
+        for pitcher_id in bullpen_ids
+        if pitcher_id != active_pitcher_id
+        if (pitcher := get_card_by_id(db, pitcher_id)) is not None and pitcher.is_pitcher
+    ]
+    return _available_payloads(pitchers, state.get("pitch_counts", {}))
 
 
 def list_rival_available_pitchers(
     db, state: dict, *, user_is_home: bool
 ) -> Tuple[List[dict], str]:
     """
-    Relevistas del equipo rival (su team_id se deriva de su pitcher de referencia),
-    excluyendo el pitcher activo.
+    Relevistas registrados en el snapshot del rival, excluyendo el activo.
 
     Returns:
         (available_pitchers, error_message). ``error_message`` no vacío indica
-        que no se pudo determinar el equipo rival (payload de error, no excepción).
+        reservado para errores de resolución del snapshot.
     """
     active_pitcher_id = state.get("active_pitcher")
-    rival_pitcher_id = (
-        state.get("away_pitcher_id") if user_is_home else state.get("home_pitcher_id")
+    bullpen_ids = state.get("away_bullpen", []) if user_is_home else state.get(
+        "home_bullpen", []
     )
-
-    ref_pitcher = get_card_by_id(db, rival_pitcher_id)
-    if not ref_pitcher or not ref_pitcher.team_id:
-        return [], "No se pudo determinar el equipo rival"
-
-    rival_pitchers = find_pitchers_for_team(
-        db,
-        ref_pitcher.team_id,
-        excluded_id=active_pitcher_id,
-    )
+    rival_pitchers = [
+        pitcher
+        for pitcher_id in bullpen_ids
+        if pitcher_id != active_pitcher_id
+        if (pitcher := get_card_by_id(db, pitcher_id)) is not None and pitcher.is_pitcher
+    ]
     return _available_payloads(rival_pitchers, state.get("pitch_counts", {})), ""
 
 
@@ -104,6 +106,12 @@ def apply_human_pitcher_change(
     # del catálogo o del rival.
     if not find_inventory_entry(db, user_id, new_pitcher_id):
         return None, "No puedes usar un lanzador que no está en tu inventario."
+
+    bullpen_ids = state.get("home_bullpen", []) if is_home_user else state.get(
+        "away_bullpen", []
+    )
+    if new_pitcher_id not in bullpen_ids:
+        return None, "El pitcher no pertenece al roster de esta partida"
 
     new_pitcher = get_card_by_id(db, new_pitcher_id)
     if not new_pitcher or not new_pitcher.is_pitcher:

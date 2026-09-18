@@ -47,7 +47,6 @@ from app.engine.websocket_manager import manager
 from app.engine.fog_of_war import sanitize_state_for_player
 from app.models import GameSession
 from app.repositories import (
-    find_pitchers_for_team,
     get_card_by_id,
     get_game_box_score,
     get_tactic_card_by_id,
@@ -351,12 +350,11 @@ async def execute_cpu_pitcher_change(
     game: GameSession, state: dict, db, game_id: str, difficulty: str
 ) -> bool:
     """
-    Ejecuta un cambio de pitcher para la CPU si hay relevistas disponibles.
-    
-    Busca el pitcher del CPU (HOME o AWAY) en el inventario global,
-    selecciona uno que no haya sido usado aún, y lo asigna como active_pitcher.
-    
-    Retorna: True si se ejecutó el cambio, False si no hay pitchers disponibles.
+    Ejecuta un cambio de pitcher CPU desde el bullpen congelado de la partida.
+
+    Solo considera pitchers registrados en el snapshot HOME/AWAY y excluye el
+    pitcher activo y los que ya participaron. Retorna True si se ejecutó el
+    cambio, False si no hay relevistas disponibles.
     """
     cpu_is_home = game.home_user_id == "CPU_BOT"
     cpu_is_away = game.away_user_id == "CPU_BOT"
@@ -368,37 +366,16 @@ async def execute_cpu_pitcher_change(
     pitch_counts: dict = state.get("pitch_counts", {})
     used_pitcher_ids = set(pitch_counts.keys())
     
-    # Pitcher del CPU según su rol
-    cpu_pitcher_field = "home_pitcher_id" if cpu_is_home else "away_pitcher_id"
-    cpu_user_id = game.home_user_id if cpu_is_home else game.away_user_id
-    
-    # Obtener el team_id del pitcher del CPU de referencia
-    ref_pitcher_id = state.get(cpu_pitcher_field)
-    if not ref_pitcher_id:
-        logger.warning("CPU pitcher change: pitcher de referencia no encontrado (field=%s)", cpu_pitcher_field)
-        return False
-    
-    ref_pitcher = get_card_by_id(db, ref_pitcher_id)
-    if not ref_pitcher:
-        logger.warning("CPU pitcher change: pitcher de referencia no encontrado en DB: %s", ref_pitcher_id)
-        return False
-    
-    cpu_team_id = ref_pitcher.team_id
-    
-    logger.debug(
-        "CPU pitcher change: iniciando; posicion=%s team_id=%s team=%s pitcher_actual=%s (%s) usados=%s",
-        "HOME" if cpu_is_home else "AWAY", cpu_team_id,
-        ref_pitcher.team.name if ref_pitcher.team else "UNKNOWN",
-        ref_pitcher.name, active_pitcher_id, used_pitcher_ids,
-    )
-    
-    # Buscar pitchers disponibles en el equipo de la CPU (no usados, no el activo)
-    available = find_pitchers_for_team(
-        db,
-        team_id=cpu_team_id,
-        exclude_ids=used_pitcher_ids,
-        excluded_id=active_pitcher_id,
-    )
+    bullpen_field = "home_bullpen" if cpu_is_home else "away_bullpen"
+    bullpen_ids = state.get(bullpen_field, [])
+    available = []
+    for pitcher_id in bullpen_ids:
+        if pitcher_id == active_pitcher_id or pitcher_id in used_pitcher_ids:
+            continue
+        pitcher = get_card_by_id(db, pitcher_id)
+        if pitcher is None or not pitcher.is_pitcher:
+            continue
+        available.append(pitcher)
     
     logger.debug("CPU pitcher change: %s disponibles", len(available))
     for pitcher in available:
@@ -413,8 +390,11 @@ async def execute_cpu_pitcher_change(
         logger.warning("CPU pitcher change: no hay relevistas disponibles para el CPU")
         return False
     
-    # Seleccionar al relevista con mayor OVR (mejor preparado)
-    new_pitcher = max(available, key=lambda p: p.overall)
+    # Selección determinista: mejor OVR y desempate estable por id.
+    new_pitcher = sorted(
+        available,
+        key=lambda pitcher: (-pitcher.overall, pitcher.id),
+    )[0]
     logger.debug(
         "CPU pitcher change: seleccionado %s (OVR %s) | Team: %s (%s) | Pos: %s | Rarity: %s",
         new_pitcher.name, new_pitcher.overall,

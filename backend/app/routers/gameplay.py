@@ -530,7 +530,11 @@ def get_available_pitchers(
         raise HTTPException(status_code=400, detail="El CPU no puede cambiar pitcher manualmente.")
 
     state = dict(game.state_data or {})
-    available_pitchers = list_user_available_pitchers(db, state, current_user_id)
+    available_pitchers = list_user_available_pitchers(
+        db,
+        state,
+        is_home_user=current_user_id == game.home_user_id,
+    )
 
     return {
         "status": "ok",

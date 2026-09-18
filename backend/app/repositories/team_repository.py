@@ -54,15 +54,20 @@ def find_cards_by_team(
     db: "Session",
     team_ref: str | None,
     order_by_overall_desc: bool = False,
+    *,
+    catalog_id: str | None = None,
 ) -> Sequence["PlayerCardModel"]:
     """
     Retorna las cartas de un equipo (por abreviatura pública o UUID),
-    opcionalmente ordenadas por overall desc.
+    opcionalmente ordenadas por overall desc. ``catalog_id`` permite fijar
+    una generación concreta; sin él conserva la consulta histórica completa.
     """
     team_id = resolve_team_to_uuid(db, team_ref)
     if team_id is None:
         return []
     query = db.query(PlayerCardModel).filter(PlayerCardModel.team_id == team_id)
+    if catalog_id is not None:
+        query = query.filter(PlayerCardModel.catalog_id == catalog_id)
     if order_by_overall_desc:
         query = query.order_by(PlayerCardModel.overall.desc())
     return query.all()

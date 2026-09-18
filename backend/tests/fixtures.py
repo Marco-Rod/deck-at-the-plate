@@ -304,6 +304,33 @@ def ensure_edition(db: Session, *, season: int = 2026):
     return ensure_system_base_edition(db, season=season)
 
 
+def make_base_edition(
+    db: Session,
+    *,
+    code: str,
+    season: int = 2026,
+):
+    """Crea una CardEdition BASE independiente para tests multiversión."""
+    from app.models import CardEdition, CardEditionSourceType, CardEditionType
+    from etl.services.base_eligibility_policy import BASE_ELIGIBILITY_POLICY_VERSION
+    from etl.services.card_rating_policies import BASE_RATING_POLICY_VERSION
+
+    edition = CardEdition(
+        code=code,
+        name=f"Base {code}",
+        edition_type=CardEditionType.BASE,
+        season=season,
+        version="edition-1.0",
+        source_type=CardEditionSourceType.SYSTEM,
+        rating_policy_version=BASE_RATING_POLICY_VERSION,
+        eligibility_policy_version=BASE_ELIGIBILITY_POLICY_VERSION,
+        metadata_payload={},
+    )
+    db.add(edition)
+    db.flush()
+    return edition
+
+
 def _fixed_hash(*parts) -> str:
     """Hash determinista de 64 chars (CHECK ck_*_input_hash exige length=64)."""
     return hashlib.sha256("|".join(str(p) for p in parts).encode("utf-8")).hexdigest()
@@ -638,4 +665,238 @@ def seed_roster(
         "team": team,
         "lineup": sorted(lineup),
         "pitchers": sorted(pitchers_ids),
+    }
+
+
+def seed_versioned_cpu_roster(
+    db: Session,
+    *,
+    team_id: str = "4f0c1133-6f5f-4a2a-9d2f-0a1b2c3d4e6f",
+):
+    """Dos generaciones completas del mismo equipo: v1 RETIRED y v2 ACTIVE."""
+    from app.models import CardCatalog, PlayerCardModel, Team
+    from app.models.card import CardRarity
+    from etl.services.card_catalog import promote_card_catalog, publish_card_catalog
+
+    team = Team(
+        id=team_id,
+        abbreviation="VERSIONED",
+        name="Versioned CPU Team",
+        city="Test City",
+    )
+    db.add(team)
+    db.flush()
+    ed1 = make_base_edition(db, code="2026_GAMEPLAY_CPU_V1")
+    ed2 = make_base_edition(db, code="2026_GAMEPLAY_CPU_V2")
+    batter_rarities = (
+        CardRarity.COMMON,
+        CardRarity.BRONZE,
+        CardRarity.SILVER,
+        CardRarity.GOLD,
+        CardRarity.DIAMOND,
+        CardRarity.COMMON,
+        CardRarity.COMMON,
+        CardRarity.COMMON,
+        CardRarity.COMMON,
+    )
+
+    for index, rarity in enumerate(batter_rarities):
+        publishable_player(
+            db,
+            ed1,
+            index=1000 + index,
+            rarity=rarity,
+            role="BATTER",
+            rating_model_version="ratings-1.0",
+            team=team,
+        )
+    for index in range(2):
+        publishable_player(
+            db,
+            ed1,
+            index=1100 + index,
+            rarity=CardRarity.SILVER,
+            role="PITCHER",
+            rating_model_version="ratings-1.0",
+            team=team,
+        )
+    db.commit()
+
+    first = publish_card_catalog(
+        db,
+        season=2026,
+        card_edition_id=ed1.id,
+        rating_model_version="ratings-1.0",
+        data_end_date=END,
+    )
+    v1 = db.get(CardCatalog, first.catalog_id)
+    if first.status != "ACTIVE":
+        raise AssertionError(f"v1 seed falló: {first.status} {first.issues}")
+
+    for index, rarity in enumerate(batter_rarities):
+        publishable_player(
+            db,
+            ed2,
+            index=2000 + index,
+            rarity=rarity,
+            role="BATTER",
+            rating_model_version="ratings-2.0",
+            team=team,
+        )
+    for index in range(2):
+        publishable_player(
+            db,
+            ed2,
+            index=2100 + index,
+            rarity=CardRarity.SILVER,
+            role="PITCHER",
+            rating_model_version="ratings-2.0",
+            team=team,
+        )
+    db.commit()
+
+    second = publish_card_catalog(
+        db,
+        season=2026,
+        card_edition_id=ed2.id,
+        rating_model_version="ratings-2.0",
+        data_end_date=END,
+    )
+    if second.status != "VALIDATING":
+        raise AssertionError(f"v2 seed falló: {second.status} {second.issues}")
+    v2 = db.get(CardCatalog, second.catalog_id)
+    promoted = promote_card_catalog(db, catalog_id=v2.id)
+    if promoted.status != "ACTIVE":
+        raise AssertionError(f"v2 promote falló: {promoted.status} {promoted.issues}")
+
+    db.refresh(v1)
+    db.refresh(v2)
+    retired_cards = (
+        db.query(PlayerCardModel)
+        .filter(PlayerCardModel.catalog_id == v1.id)
+        .all()
+    )
+    active_cards = (
+        db.query(PlayerCardModel)
+        .filter(PlayerCardModel.catalog_id == v2.id)
+        .all()
+    )
+    if v1.status != "RETIRED" or v2.status != "ACTIVE":
+        raise AssertionError("lifecycle v1/v2 no quedó en RETIRED/ACTIVE")
+    if v2.supersedes_catalog_id != v1.id:
+        raise AssertionError("v2 no conserva el predecesor v1")
+    if len(retired_cards) != 11 or len(active_cards) != 11:
+        raise AssertionError("cada generación debe contener 9 bateadores + 2 pitchers")
+    return {
+        "team": team,
+        "retired_catalog": v1,
+        "active_catalog": v2,
+        "retired_cards": retired_cards,
+        "active_cards": active_cards,
+    }
+
+
+def seed_incomplete_cpu_roster(
+    db: Session,
+    *,
+    human_team_id: str = "6f0c1133-6f5f-4a2a-9d2f-0a1b2c3d4e8f",
+    cpu_team_id: str = "7f0c1133-6f5f-4a2a-9d2f-0a1b2c3d4e9f",
+    human_batters: int = 9,
+    human_pitchers: int = 1,
+    cpu_batters: int = 8,
+    cpu_pitchers: int = 2,
+):
+    """Catálogo ACTIVE con humano válido y CPU con solo ocho bateadores."""
+    from app.models import CardCatalog, PlayerCardModel, Team
+    from etl.services.card_catalog import publish_card_catalog
+
+    edition = make_base_edition(db, code="2026_GAMEPLAY_CPU_INCOMPLETE")
+    human_team = Team(
+        id=human_team_id,
+        abbreviation="HUMAN",
+        name="Human Test Team",
+        city="Test City",
+    )
+    cpu_team = Team(
+        id=cpu_team_id,
+        abbreviation="CPU8",
+        name="Incomplete CPU Team",
+        city="Test City",
+    )
+    db.add_all([human_team, cpu_team])
+    db.flush()
+
+    for index in range(human_batters):
+        publishable_player(
+            db,
+            edition,
+            index=3000 + index,
+            rarity="COMMON",
+            role="BATTER",
+            team=human_team,
+        )
+    for index in range(human_pitchers):
+        publishable_player(
+            db,
+            edition,
+            index=3100 + index,
+            rarity="SILVER",
+            role="PITCHER",
+            team=human_team,
+        )
+    for index in range(cpu_batters):
+        publishable_player(
+            db,
+            edition,
+            index=4000 + index,
+            rarity="COMMON",
+            role="BATTER",
+            team=cpu_team,
+        )
+    for index in range(cpu_pitchers):
+        publishable_player(
+            db,
+            edition,
+            index=4100 + index,
+            rarity="SILVER",
+            role="PITCHER",
+            team=cpu_team,
+        )
+    db.commit()
+
+    result = publish_card_catalog(
+        db,
+        season=2026,
+        card_edition_id=edition.id,
+        rating_model_version="ratings-2.0",
+        data_end_date=END,
+    )
+    if result.status != "ACTIVE":
+        raise AssertionError(
+            f"incomplete CPU seed falló: {result.status} {result.issues}"
+        )
+    catalog = db.get(CardCatalog, result.catalog_id)
+    human_cards = (
+        db.query(PlayerCardModel)
+        .filter(
+            PlayerCardModel.team_id == human_team.id,
+            PlayerCardModel.catalog_id == catalog.id,
+        )
+        .all()
+    )
+    cpu_cards = (
+        db.query(PlayerCardModel)
+        .filter(
+            PlayerCardModel.team_id == cpu_team.id,
+            PlayerCardModel.catalog_id == catalog.id,
+        )
+        .all()
+    )
+    return {
+        "catalog": catalog,
+        "edition": edition,
+        "human_team": human_team,
+        "cpu_team": cpu_team,
+        "human_cards": human_cards,
+        "cpu_cards": cpu_cards,
     }

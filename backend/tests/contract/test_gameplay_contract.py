@@ -208,15 +208,9 @@ def _active_pitcher_id(game_id, seed_session):
 
 
 def test_change_pitcher_feliz(client, game_factory, mutate_game, seed_session, broadcasts):
-    ctx = game_factory()
+    ctx = game_factory(extra_human_pitchers=1)
     reliever = ctx["roster"]["pitchers"][1]
     active = _active_pitcher_id(ctx["game_id"], seed_session)
-
-    from app.models import UserCardInventory
-
-    seed_session.add(
-        UserCardInventory(user_id=ctx["me"]["user_id"], card_id=reliever)
-    )
     mutate_game(
         ctx["game_id"],
         state={"pitch_counts": {active: MIN_PITCHES_TO_CHANGE}},
@@ -296,20 +290,208 @@ def test_bullpen_usuario_y_rival(client, game_factory):
     assert resp_rival.json()["count"] >= 1
 
 
-def test_bullpen_usuario_con_inventario_lo_enumera(client, game_factory, seed_session):
+def test_bullpen_rival_no_enumera_pitcher_fuera_del_snapshot(
+    client,
+    register_user,
+    seed_session,
+):
+    from app.models import UserCardInventory
+    from tests.fixtures import seed_versioned_cpu_roster
+
+    cpu = seed_versioned_cpu_roster(seed_session)
+    me = register_user("ct_cpu_bullpen_snapshot")
+    active_cards = cpu["active_cards"]
+    human_lineup = [card.id for card in active_cards if card.is_batter][:9]
+    # El CPU usa esta misma política para elegir su starter. Así el pitcher
+    # activo inicial no colisiona con el relevista que queda en away_bullpen.
+    human_pitcher = sorted(
+        (card for card in active_cards if card.is_pitcher),
+        key=lambda card: (-card.overall, card.id),
+    )[0].id
+
+    for card_id in [*human_lineup, human_pitcher]:
+        seed_session.add(
+            UserCardInventory(user_id=me["user_id"], card_id=card_id)
+        )
+    seed_session.commit()
+
+    created = client.post(
+        "/api/v1/games/create",
+        json={
+            "home_user_id": me["user_id"],
+            "away_user_id": cpu["team"].id,
+            "game_mode": "PVE",
+            "difficulty": "MEDIUM",
+            "total_innings": 9,
+            "player_position": "HOME",
+            "home_pitcher_id": human_pitcher,
+            "home_lineup": human_lineup,
+            "home_tactics_deck": ["t1"],
+            "away_tactics_deck": ["t1"],
+        },
+        headers={"Authorization": f"Bearer {me['token']}"},
+    )
+    assert created.status_code == 201
+
+    game = created.json()
+    cpu_bullpen = game["state_data"]["away_bullpen"]
+    retired_pitcher = next(
+        card.id for card in cpu["retired_cards"] if card.is_pitcher
+    )
+    assert retired_pitcher not in cpu_bullpen
+
+    resp = client.get(
+        f"/api/v1/games/{game['id']}/rival-available-pitchers",
+        headers={"Authorization": f"Bearer {me['token']}"},
+    )
+
+    assert resp.status_code == 200
+    rival_ids = {
+        pitcher["id"]
+        for pitcher in resp.json()["available_pitchers"]
+    }
+    assert rival_ids == set(cpu_bullpen)
+    assert retired_pitcher not in rival_ids
+
+
+def test_cambio_cpu_no_selecciona_pitcher_fuera_del_snapshot(
+    client,
+    register_user,
+    seed_session,
+    broadcasts,
+):
+    import asyncio
+
+    from app.engine.game_actions import execute_cpu_pitcher_change
+    from app.models import GameSession, UserCardInventory
+    from tests.fixtures import seed_versioned_cpu_roster
+
+    cpu = seed_versioned_cpu_roster(seed_session)
+    me = register_user("ct_cpu_change_snapshot")
+    active_cards = cpu["active_cards"]
+    human_lineup = [card.id for card in active_cards if card.is_batter][:9]
+    human_pitcher = sorted(
+        (card for card in active_cards if card.is_pitcher),
+        key=lambda card: (-card.overall, card.id),
+    )[0].id
+
+    for card_id in [*human_lineup, human_pitcher]:
+        seed_session.add(
+            UserCardInventory(user_id=me["user_id"], card_id=card_id)
+        )
+    seed_session.commit()
+
+    created = client.post(
+        "/api/v1/games/create",
+        json={
+            "home_user_id": me["user_id"],
+            "away_user_id": cpu["team"].id,
+            "game_mode": "PVE",
+            "difficulty": "MEDIUM",
+            "total_innings": 9,
+            "player_position": "HOME",
+            "home_pitcher_id": human_pitcher,
+            "home_lineup": human_lineup,
+            "home_tactics_deck": ["t1"],
+            "away_tactics_deck": ["t1"],
+        },
+        headers={"Authorization": f"Bearer {me['token']}"},
+    )
+    assert created.status_code == 201
+
+    game = seed_session.get(GameSession, created.json()["id"])
+    state = dict(game.state_data or {})
+    cpu_bullpen = set(state["away_bullpen"])
+    retired_pitcher = next(
+        card for card in cpu["retired_cards"] if card.is_pitcher
+    )
+    assert retired_pitcher.id not in cpu_bullpen
+
+    # Si el motor consulta el equipo global, este pitcher histórico gana por OVR.
+    retired_pitcher.overall = 99
+    seed_session.commit()
+
+    changed = asyncio.run(
+        execute_cpu_pitcher_change(
+            game,
+            state,
+            seed_session,
+            game.id,
+            "MEDIUM",
+        )
+    )
+
+    assert changed is True
+    assert state["away_pitcher_id"] in cpu_bullpen
+    assert state["away_pitcher_id"] != retired_pitcher.id
+
+
+def test_bullpen_usuario_no_enumera_pitcher_adquirido_despues_de_crear_partida(
+    client,
+    game_factory,
+    seed_session,
+):
     ctx = game_factory()
-    reliever = ctx["roster"]["pitchers"][1]
+    late_pitcher = ctx["roster"]["pitchers"][1]
+
     from app.models import UserCardInventory
 
-    seed_session.add(UserCardInventory(user_id=ctx["me"]["user_id"], card_id=reliever))
+    # T1: adquirido después de crear la partida.
+    seed_session.add(
+        UserCardInventory(
+            user_id=ctx["me"]["user_id"],
+            card_id=late_pitcher,
+        )
+    )
     seed_session.commit()
+
     resp = client.get(
         f"/api/v1/games/{ctx['game_id']}/available-pitchers",
         headers=ctx["headers"],
     )
+
     assert resp.status_code == 200
-    ids = {p["id"] for p in resp.json()["available_pitchers"]}
-    assert reliever in ids
+    available_ids = {
+        pitcher["id"]
+        for pitcher in resp.json()["available_pitchers"]
+    }
+
+    assert late_pitcher not in available_ids
+
+
+def test_cambio_pitcher_usuario_rechaza_pitcher_adquirido_despues_de_crear_partida(
+    client,
+    game_factory,
+    mutate_game,
+    seed_session,
+):
+    ctx = game_factory()
+    late_pitcher = ctx["roster"]["pitchers"][1]
+    active_pitcher = _active_pitcher_id(ctx["game_id"], seed_session)
+
+    from app.models import UserCardInventory
+
+    # T1: adquirido después de crear la partida.
+    seed_session.add(
+        UserCardInventory(
+            user_id=ctx["me"]["user_id"],
+            card_id=late_pitcher,
+        )
+    )
+    mutate_game(
+        ctx["game_id"],
+        state={"pitch_counts": {active_pitcher: MIN_PITCHES_TO_CHANGE}},
+    )
+    seed_session.commit()
+
+    resp = _change_pitcher(
+        client,
+        ctx["game_id"],
+        ctx["headers"],
+        late_pitcher,
+    )
+
+    assert resp.status_code == 400
 
 
 def test_bullpen_ajena_403(client, game_factory, register_user):

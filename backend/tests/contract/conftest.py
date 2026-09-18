@@ -143,14 +143,26 @@ def roster_factory(seed_session):
 
 
 @pytest.fixture
-def game_factory(client, register_user, roster_factory):
+def game_factory(client, register_user, roster_factory, seed_session):
     """Crea una sesión 1v1 PvE (humano=HOME) por API y devuelve contexto."""
 
-    def _game(username: str | None = None):
-        from tests import fixtures
+    def _game(
+        username: str | None = None,
+        *,
+        extra_human_pitchers: int = 0,
+    ):
+        from app.models import UserCardInventory
 
         roster = roster_factory()
         me = register_user(username or f"home_{uuid.uuid4().hex[:6]}")
+        human_lineup = roster["lineup"][:9]
+        human_pitcher = roster["pitchers"][0]
+        human_bullpen = roster["pitchers"][1:1 + extra_human_pitchers]
+        for card_id in [*human_lineup, human_pitcher, *human_bullpen]:
+            seed_session.add(
+                UserCardInventory(user_id=me["user_id"], card_id=card_id)
+            )
+        seed_session.commit()
         payload = {
             "home_user_id": me["user_id"],
             "away_user_id": roster["team"].id,
@@ -158,8 +170,8 @@ def game_factory(client, register_user, roster_factory):
             "difficulty": "MEDIUM",
             "total_innings": 9,
             "player_position": "HOME",
-            "home_pitcher_id": roster["pitchers"][0],
-            "home_lineup": roster["lineup"][:9],
+            "home_pitcher_id": human_pitcher,
+            "home_lineup": human_lineup,
             "home_tactics_deck": ["t1", "t2", "t3", "t4", "t1"],
             "away_tactics_deck": ["t1", "t2", "t3", "t4", "t1"],
         }
