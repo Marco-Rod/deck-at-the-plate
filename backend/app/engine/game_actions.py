@@ -212,6 +212,19 @@ def build_play_resolved_payload(game: GameSession, event: str, description: str,
     return payload
 
 
+def _fatigue_factor(base_attr: int, fatigued_attr: int) -> float:
+    """Factor de degradación (0..1) de un atributo provocado por la fatiga.
+
+    El factor es ``fatigado / base``: la identidad del lanzamiento (repertorio)
+    se multiplica por este factor para obtener su valor efectivo. Cuando el
+    atributo base es 0/negativo (dominio degenerado) el factor es identidad,
+    evitando división por cero sin cambiar el resultado del juego.
+    """
+    if base_attr <= 0:
+        return 1.0
+    return fatigued_attr / base_attr
+
+
 def apply_tactic_modifiers(active_tactics: dict, db) -> dict:
     """
     Lee las cartas tácticas activas desde la DB y acumula sus modificadores.
@@ -286,10 +299,35 @@ async def resolve_swing(
 
 
     if pitch_specific_stats:
-        # Enriquecemos current_pitch con los datos reales del repertorio para calculator.py
-        current_pitch["velocity"] = pitch_specific_stats.get("velocity", pitcher_attrs["velocidad"])
-        current_pitch["control"] = pitch_specific_stats.get("control", pitcher_attrs["control"])
-        current_pitch["movement"] = pitch_specific_stats.get("movement", pitcher_attrs["movimiento"])
+        # La fatiga fue calculada sobre los atributos globales; derivamos el
+        # factor de degradación para aplicarlo al atributo específico del
+        # lanzamiento sin perder la identidad del repertorio:
+        #     identity del lanzamiento × estado físico del pitcher
+        velocity_factor = _fatigue_factor(
+            raw_pitcher_attrs["velocidad"], pitcher_attrs["velocidad"]
+        )
+        control_factor = _fatigue_factor(
+            raw_pitcher_attrs["control"], pitcher_attrs["control"]
+        )
+        movement_factor = _fatigue_factor(
+            raw_pitcher_attrs["movimiento"], pitcher_attrs["movimiento"]
+        )
+
+        # Enriquecemos current_pitch con los datos reales del repertorio para
+        # calculator.py, degradados por fatiga. Redondeo int, igual criterio
+        # que apply_pitcher_fatigue (el calculator opera con enteros).
+        current_pitch["velocity"] = int(
+            pitch_specific_stats.get("velocity", raw_pitcher_attrs["velocidad"])
+            * velocity_factor
+        )
+        current_pitch["control"] = int(
+            pitch_specific_stats.get("control", raw_pitcher_attrs["control"])
+            * control_factor
+        )
+        current_pitch["movement"] = int(
+            pitch_specific_stats.get("movement", raw_pitcher_attrs["movimiento"])
+            * movement_factor
+        )
     active_tactics = state.get("active_tactics", {})
 
     # --- 3. Procesamiento especial de BUNT ---
