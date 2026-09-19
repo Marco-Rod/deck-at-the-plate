@@ -3,7 +3,9 @@
 Estado: **001C (threshold calibration) CERRADA** y **Fatigue Policy v2
 implementada en producción** (001C-6). Curva **SMOOTH-0.55-F35** + threshold
 escalado `round(100 × innings / 9)` → 3/6/9 = 33/67/100. Deuda abierta:
-**GAMEPLAY-FATIGUE-CPU-001** (semántica de `fatigue_level` en UI/CPU).
+**GAMEPLAY-FATIGUE-CPU-001** (semántica de `fatigue_level` en UI/CPU). `001D-1`
+la caracterizó: la CPU actual dispara el cambio a w≈1.05–1.11 (factor
+≈0.97–0.99), es decir con el pitcher **casi sano** según el engine real.
 
 ```
 001A    Fatigue propagation             CLOSED ✓
@@ -21,6 +23,14 @@ escalado `round(100 × innings / 9)` → 3/6/9 = 33/67/100. Deuda abierta:
 001C-4  Matchup robustness              CLOSED ✓ (SMOOTH-100 robusta STRONG/MID/WEAK)
 001C-5  3/6/9 inning scaling            CLOSED ✓ ({33,67,100} ≈ 2/3 natural, validado)
 001C-6  Production implementation       CLOSED ✓ (Fatigue Policy v2 en producción)
+
+GAMEPLAY-FATIGUE-CPU-001 — UI / CPU STRATEGY SEMANTICS
+001D-1  Characterize current CPU change  CLOSED ✓ (dispara a w≈1.05–1.11, factor ≈0.97–0.99)
+001D-2  Define fatigue signal semantics  CLOSED ✓ (workload canónico; bandas HEALTHY..SEVERE)
+001D-3  Simulate CPU change strategies   CLOSED ✓ (AGGRESSIVE/BALANCED/TOLERANT × STRONG/MID/WEAK)
+001D-4  Select EASY/MEDIUM/HARD policies OPEN
+001D-5  UI fatigue representation        OPEN
+001D-6  Production implementation        OPEN
 
 GAMEPLAY-ENGINE-002 — DISCIPLINE / COUNT MODEL
 002A    PA/count characterization       CLOSED / PASS
@@ -551,6 +561,150 @@ compute_fatigue_level conserva la fórmula legacy (+10%/extra, cap 100).
 Follow-up: recalibrar/reemplazar la semántica de fatigue_level (UI/CPU)
 después de 001C-6. No mezclar con el commit de política física.
 ```
+
+## 001D-1 · Characterize current CPU behavior under Policy v2
+
+Primer paso de **GAMEPLAY-FATIGUE-CPU-001** (deuda registrada en 001C-6). **Sin
+tocar código productivo**: sólo se leen `compute_fatigue_level` y
+`get_cpu_pitcher_change_decision` tal como están hoy, sobre outings SMOOTH v2
+(`threshold=100`, 9 innings). `--mode d1`.
+
+Método (10,000 outings por matchup; MID/WEAK/STRONG): se camina PA a PA y se
+registra, por salida, el **primer PA en que la CPU es elegible** para cambiar
+(`compute_fatigue_level() >= umbral de dificultad`, que es cuando el engine
+evalúa la decisión — `game_actions.py:586-601`), más el primer cambio
+**efectivo** (con `_CPU_CHANGE_PROBABILITY`). En ese instante se guardan inning,
+`pitch_count`, workload (`pc/100`) y el **factor SMOOTH real** del engine
+(`get_fatigue_factor`). Es la evidencia que justifica con qué reemplazar
+`fatigue_level`.
+
+### Trigger nominal analítico
+
+`level = 10·(pc − 100)`; primer entero con `level >= umbral`:
+
+```text
+   Dif  level umbral |   pc      w   factor SMOOTH
+  HARD         40.0 |  104   1.04          0.9966
+MEDIUM         65.0 |  107   1.07          0.9896
+  EASY         95.0 |  110   1.10          0.9789
+```
+
+### Elegibilidad determinística (primer PA elegible)
+
+```text
+MID        inn p50/p90   pc p50/p90   w p50/p90    factor p50/p90   %outings
+  HARD          7 / 8     105 / 108   1.05 / 1.08  0.9947 / 0.9966     99.6%
+MEDIUM          7 / 8     108 / 111   1.08 / 1.11  0.9864 / 0.9896     99.1%
+  EASY          7 / 9     111 / 114   1.11 / 1.14  0.9745 / 0.9789     98.5%
+
+WEAK
+  HARD          7 / 8     105 / 108   1.05 / 1.08  0.9947 / 0.9966     99.9%
+MEDIUM          7 / 8     108 / 111   1.08 / 1.11  0.9864 / 0.9896     99.7%
+  EASY          7 / 8     111 / 114   1.11 / 1.14  0.9745 / 0.9789     99.5%
+
+STRONG
+  HARD          7 / 9     105 / 108   1.05 / 1.08  0.9947 / 0.9966     99.1%
+MEDIUM          8 / 9     108 / 111   1.08 / 1.11  0.9864 / 0.9896     98.3%
+  EASY          8 / 9     111 / 114   1.11 / 1.14  0.9745 / 0.9789     97.0%
+```
+
+Cambio efectivo (con probabilidad) en MID: HARD inn 7/8 · MEDIUM inn 7/8 ·
+EASY inn 8/9; el `%outings` baja a 96–99%.
+
+### Veredicto 001D-1
+
+- **Confirma la hipótesis.** Las tres dificultades disparan el cambio en la
+  franja `w ≈ 1.05–1.11`, donde el factor SMOOTH está en **0.97–0.99**: el
+  pitcher está **casi completamente sano según el engine real**.
+- **Las dificultades apenas se diferencian**: sólo ~5–6 lanzamientos y ~2
+  centésimas de factor separan HARD de EASY; las tres cambian prácticamente en
+  el mismo inning (7–8).
+- Consecuencia de diseño: `fatigue_level` legacy **no debe seguir siendo el
+  input estratégico de la CPU**. Hay que reconstruir la decisión sobre el
+  gradiente real ya validado (`w≈1.00` sano → `1.10` primera señal → `1.25`
+  riesgo → `1.50` deterioro), para que HARD sea anticipatoria, MEDIUM
+  equilibrada y EASY tolere más deterioro.
+
+Reproducibilidad: `scripts/compare_fatigue_curves.py` ahora **congela la misma
+política legacy** que `simulate_fatigue_impact.py` (definición duplicada y
+documentada) y ya no importa helpers de producción; de lo contrario su
+etiqueta `CURRENT` habría pasado a mostrar v2 tras 001C-6.
+
+## 001D-2 · Fatigue signal semantics (contrato)
+
+Decisión: **la señal estratégica canónica de la CPU es `workload`**, no
+`fatigue_level` (legacy) ni `fatigue_factor`.
+
+```text
+workload       = pitch_count / get_pitch_threshold(total_innings)   → señal estratégica CPU
+fatigue_factor = get_fatigue_factor(pitch_count, threshold)          → degradación física del outcome engine
+fatigue_level  = compute_fatigue_level(...)                          → abstracción legacy; YA NO autoritativa para CPU
+```
+
+`workload` describe **en qué zona de utilización está el pitcher** y es
+independiente de la duración (3 inn → 33, 6 → 67, 9 → 100; la CPU no necesita
+saber si son 40, 80 o 120 pitches). `fatigue_factor` describe cuánto han caído
+los atributos.
+
+Bandas (derivadas de los puntos ya usados en 001B/001C, **no** constantes
+nuevas). Implementadas como `WORKLOAD_BANDS` / `workload_band()` en el harness:
+
+```text
+HEALTHY        w <= 1.00            factor 1.000   sano
+EARLY_FATIGUE  1.00 < w <= 1.10     factor ~0.98   primeras señales
+MANAGEABLE     1.10 < w <= 1.25     factor ~0.88   riesgo manejable
+HIGH_RISK      1.25 < w <= 1.50     factor ~0.63   deterioro importante
+SEVERE         w > 1.50             factor → 0.35  piso
+```
+
+**No** se fijan aquí los thresholds de dificultad (eso es 001D-3/001D-4).
+
+## 001D-3 · CPU change strategies (workload-based) × matchup
+
+Comparación de tres políticas LAB (`--mode d3`, 10,000 outings/matchup). No son
+todavía EASY/MEDIUM/HARD: primero se caracteriza su comportamiento. La CPU
+considera el cambio al alcanzar el workload, respetando `MIN_PITCHES_TO_CHANGE`
+y el requisito de cambio legal. Outing completo de 9 innings como stream
+compartido; cada política corta en su primer PA elegible.
+
+```text
+AGGRESSIVE → w >= 1.10     (≈110 pitches a 9 inn)
+BALANCED   → w >= 1.25     (≈125 pitches)
+TOLERANT   → w >= 1.50     (≈150 pitches)
+```
+
+### Resultados (mediana)
+
+```text
+AGGRESSIVE   removed 96.8–99.5%  factor@removal ~0.975  (<6 inn: STRONG 9.6% / MID 18.1% / WEAK 35.9%)
+             PA: HEALTHY 92%  EARLY 8%   (nunca MANAGEABLE+)
+BALANCED     removed 79.7–95.3%  factor@removal ~0.87   (<6 inn: STRONG 1.7% / MID 4.5% / WEAK 13.8%)
+             PA: HEALTHY 82%  EARLY 8%  MANAGEABLE 11%   (nunca HIGH_RISK+)
+TOLERANT     removed 30.5–67.6%  factor@removal ~0.63   never: STRONG 69.5% / MID 54.6% / WEAK 32.4%
+             PA: HEALTHY 69–74%  EARLY 7%  MANAGEABLE 10%  HIGH_RISK 10–14%
+```
+
+### Veredicto 001D-3
+
+- **Las tres políticas producen regímenes físicos claramente distintos**, no
+  comprimidos como el legacy (001D-1): AGGRESSIVE retira casi sano (factor ~0.97),
+  BALANCED roza el riesgo manejable (~0.87), TOLERANT atraviesa deterioro
+  importante (~0.63).
+- **Preservan la diferenciación por matchup** (propiedad de 001C-4): STRONG
+  trabaja menos → se retira más tarde / completa más; WEAK trabaja más → se
+  retira antes. Orden `STRONG > MID > WEAK` en "nunca removido" y en inning de
+  retiro. El threshold de decisión **no** destruye la diferenciación.
+- El `pitch@removal` es casi idéntico entre matchups (~112/126/152) por
+  construcción (workload relativo): la diferenciación vive en **cuándo** dentro
+  del juego, no en el count absoluto.
+- Ninguna política llega a SEVERE (>1.50) en el percentil mediano; TOLERANT es
+  la única con exposición material a HIGH_RISK.
+
+Siguiente (001D-4): mapear estas políticas (o combinaciones contextuales) a
+EASY/MEDIUM/HARD. No asumir automáticamente `HARD=AGGRESSIVE`; una dificultad
+mayor no implica sacar antes al pitcher. v1 = heurística por workload; futuro =
+workload + marcador/leverage + inning + calidad del bullpen + matchup +
+rendimiento reciente. UI (001D-5) queda aparte.
 
 ## 002A · Plate discipline / count diagnostics
 

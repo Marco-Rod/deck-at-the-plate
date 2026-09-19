@@ -33,7 +33,18 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.core.enums import Event, PitchType, SwingType
 from app.engine.calculator import calculate_play_outcome
-from app.engine.cpu_ai import get_cpu_pitch_action, get_cpu_swing_action
+from app.engine.cpu_ai import (
+    get_cpu_pitch_action,
+    get_cpu_swing_action,
+    get_cpu_pitcher_change_decision,
+    _CPU_CHANGE_FATIGUE_THRESHOLD,
+)
+from app.engine.fatigue_manager import (
+    compute_fatigue_level,
+    get_fatigue_factor,
+    get_pitch_threshold,
+)
+from app.engine.game_rules import MIN_PITCHES_TO_CHANGE
 
 INNINGS = 9
 
@@ -2225,6 +2236,272 @@ def run_scale_345(reps: int) -> None:
     print('-' * 130)
 
 
+# ---------------------------------------------------------------------------
+# 001D-1 · Caracterización de la decisión CPU de cambio de pitcher bajo Policy v2
+# ---------------------------------------------------------------------------
+# NO toca producción: solo lee compute_fatigue_level / get_cpu_pitcher_change_decision
+# tal como están hoy, sobre outings SMOOTH v2 (threshold=100, 9 innings).
+# Registra, para cada salida, el PRIMER PA en que la CPU es elegible para cambiar
+# (fatigue_level >= umbral de dificultad) y el PRIMER PA en que efectivamente
+# cambia (con la probabilidad real). Guarda inning, pitch_count, workload y el
+# factor SMOOTH real del engine en ese momento.
+CPU_DIFFICULTIES = ["HARD", "MEDIUM", "EASY"]
+_CPU_DIFFICULTY_SEED = {"HARD": 1, "MEDIUM": 2, "EASY": 3}
+
+
+def _outing_pa_observations(pitcher_raw: dict, threshold, seed: int, innings: int = 9):
+    """Camina PAs y registra (inning_1based, pitch_count al inicio) de cada PA."""
+    rng = random.Random(seed)
+    pitch_count = 0
+    obs = []
+    for inn_idx in range(innings):
+        outs = 0
+        inning_p = 0
+        while outs < 3 and inning_p < MAX_INNING_PITCHES:
+            obs.append((inn_idx + 1, pitch_count))
+            outcome, p = _simulate_pa_fatigued(pitcher_raw, pitch_count, threshold, rng.getrandbits(63))
+            pitch_count += p
+            inning_p += p
+            if outcome in _OUT_EVENTS_1C1:
+                outs += 1
+    return obs
+
+
+def run_cpu_change_characterization(reps: int) -> None:
+    """001D-1 · ¿Cuándo cambiaría la CPU hoy, con Policy v2 ya activa?"""
+    threshold = get_pitch_threshold(9)
+    print('=' * 130)
+    print('001D-1 · Decisión CPU de cambio bajo Fatigue Policy v2 (sin tocar producción)')
+    print(f'Outings SMOOTH de 9 innings, threshold={threshold} | {reps:,} outings por matchup')
+    print('Elegible = primer PA con compute_fatigue_level() >= umbral de dificultad (onset v2, magnitud legacy).')
+    print('Factor = SMOOTH real del engine (get_fatigue_factor) en ese pitch_count.')
+    print('=' * 130)
+
+    print()
+    print('-- Trigger nominal analítico (9 inn; onset=100; level = 10·(pc-100)) --')
+    print(f"{'Dif':>6} {'level umbral':>12} | {'pc':>4} {'w':>6} {'factor SMOOTH':>13}")
+    print('-' * 46)
+    for diff in CPU_DIFFICULTIES:
+        level_thr = _CPU_CHANGE_FATIGUE_THRESHOLD.get(diff, 65.0)
+        pc = threshold + math.ceil(level_thr / 10.0)
+        print(f"{diff:>6} {level_thr:>12.1f} | {pc:>4} {pc / threshold:>6.2f} "
+              f"{get_fatigue_factor(pc, threshold):>13.4f}")
+    print('-' * 46)
+
+    for mname in ('MID', 'WEAK', 'STRONG'):
+        pitcher = MATCHUPS_1C1[mname]
+        data = [_outing_pa_observations(pitcher, threshold, 4_100_000 + i) for i in range(reps)]
+
+        eligible = {d: [] for d in CPU_DIFFICULTIES}
+        actual = {d: [] for d in CPU_DIFFICULTIES}
+        for idx, obs in enumerate(data):
+            for diff in CPU_DIFFICULTIES:
+                level_thr = _CPU_CHANGE_FATIGUE_THRESHOLD.get(diff, 65.0)
+                for inning, pc in obs:
+                    if compute_fatigue_level(pc, 9) >= level_thr:
+                        eligible[diff].append((inning, pc))
+                        break
+                random.seed(4_100_000 + idx + _CPU_DIFFICULTY_SEED[diff])
+                for inning, pc in obs:
+                    if get_cpu_pitcher_change_decision(pc, compute_fatigue_level(pc, 9), diff):
+                        actual[diff].append((inning, pc))
+                        break
+
+        print()
+        print(f'-- {mname} {pitcher} --')
+        print(f"{'Dif':>6} | {'elegible inn p50/p90':>21} {'pc p50/p90':>11} {'w p50/p90':>12} "
+              f"{'factor p50/p90':>16} {'%outings':>9}")
+        print('-' * 100)
+        for diff in CPU_DIFFICULTIES:
+            recs = eligible[diff]
+            if not recs:
+                print(f"{diff:>6} | (nunca elegible en 9 inn)")
+                continue
+            inns = [r[0] for r in recs]
+            pcs = [r[1] for r in recs]
+            ws = [pc / threshold for pc in pcs]
+            fs = [get_fatigue_factor(pc, threshold) for pc in pcs]
+            print(f"{diff:>6} | {_pctl(inns, 50):>9} / {_pctl(inns, 90):<9} "
+                  f"{_pctl(pcs, 50):>5} / {_pctl(pcs, 90):<5} "
+                  f"{_pctl(ws, 50):>5.2f} / {_pctl(ws, 90):<5.2f} "
+                  f"{_pctl(fs, 50):>7.4f} / {_pctl(fs, 90):<7.4f} {len(recs) / reps * 100:>8.1f}%")
+        print('-' * 100)
+        for diff in CPU_DIFFICULTIES:
+            recs = actual[diff]
+            if not recs:
+                print(f"  {diff:>6} real (con prob): nunca cambia en 9 inn")
+                continue
+            inns = [r[0] for r in recs]
+            pcs = [r[1] for r in recs]
+            fs = [get_fatigue_factor(pc, threshold) for pc in pcs]
+            print(f"  {diff:>6} real (con prob): inn {_pctl(inns, 50)}/{_pctl(inns, 90)} | "
+                  f"pc {_pctl(pcs, 50)}/{_pctl(pcs, 90)} | factor {_pctl(fs, 50):.4f}/{_pctl(fs, 90):.4f} | "
+                  f"{len(recs) / reps * 100:.1f}%")
+    print('=' * 130)
+
+
+# ---------------------------------------------------------------------------
+# 001D-2 · Fatigue signal semantics — workload es la señal estratégica canónica
+# ---------------------------------------------------------------------------
+# Bandas derivadas de los puntos ya usados durante 001B/001C para interpretar
+# las simulaciones (NO son constantes nuevas). La CPU razona sobre workload
+# (en qué zona de utilización está el pitcher), no sobre el nivel de fatiga
+# legacy; fatigue_factor es la degradación física que consume el outcome engine.
+WORKLOAD_BANDS = [
+    (float('-inf'), 1.00, 'HEALTHY'),
+    (1.00, 1.10, 'EARLY_FATIGUE'),
+    (1.10, 1.25, 'MANAGEABLE'),
+    (1.25, 1.50, 'HIGH_RISK'),
+    (1.50, float('inf'), 'SEVERE'),
+]
+
+
+def workload_band(w: float) -> str:
+    for lo, hi, name in WORKLOAD_BANDS:
+        if lo < w <= hi:
+            return name
+    return 'SEVERE'
+
+
+# ---------------------------------------------------------------------------
+# 001D-3 · Estrategias CPU de cambio (workload-based) × matchup
+# ---------------------------------------------------------------------------
+# Políticas LAB (no mapear aún a EASY/MEDIUM/HARD): la CPU "considera el cambio"
+# al alcanzar el workload. Mismos requisitos reales (MIN_PITCHES_TO_CHANGE, etc.).
+CPU_STRATEGY_THRESHOLDS = [
+    ('AGGRESSIVE', 1.10),
+    ('BALANCED', 1.25),
+    ('TOLERANT', 1.50),
+]
+
+
+def _simulate_full_outing_records(pitcher_raw: dict, threshold, seed: int, innings: int = 9):
+    """Outing completo de 9 innings como lista de (inning, pc_start, outcome, pitches).
+
+    Es la secuencia compartida: cada política se deriva del mismo stream,
+    cortando en el primer PA en que considera el cambio.
+    """
+    rng = random.Random(seed)
+    pc = 0
+    recs = []
+    for inn_idx in range(innings):
+        outs = 0
+        inning_p = 0
+        while outs < 3 and inning_p < MAX_INNING_PITCHES:
+            outcome, p = _simulate_pa_fatigued(pitcher_raw, pc, threshold, rng.getrandbits(63))
+            recs.append((inn_idx + 1, pc, outcome, p))
+            pc += p
+            inning_p += p
+            if outcome in _OUT_EVENTS_1C1:
+                outs += 1
+    return recs
+
+
+def _strategy_from_records(recs, threshold, w_threshold):
+    """Aplica una política a un outing: corta en el primer PA elegible."""
+    outcomes = Counter()
+    band_pas = Counter()
+    for idx, (inning, pc_start, outcome, _p) in enumerate(recs):
+        w = pc_start / threshold
+        if pc_start >= MIN_PITCHES_TO_CHANGE and w >= w_threshold:
+            return {
+                'removed': True,
+                'inning': inning,
+                'pc': pc_start,
+                'w': w,
+                'factor': get_fatigue_factor(pc_start, threshold),
+                'pas': idx,
+                'outcomes': outcomes,
+                'band_pas': band_pas,
+                'total_pitches': pc_start,
+            }
+        band_pas[workload_band(w)] += 1
+        outcomes[outcome] += 1
+    total_pitches = recs[-1][1] + recs[-1][3] if recs else 0
+    return {
+        'removed': False,
+        'inning': None,
+        'pc': total_pitches,
+        'w': total_pitches / threshold,
+        'factor': get_fatigue_factor(total_pitches, threshold),
+        'pas': len(recs),
+        'outcomes': outcomes,
+        'band_pas': band_pas,
+        'total_pitches': total_pitches,
+    }
+
+
+def _strategy_block(name, w_threshold, per_matchup, reps):
+    print()
+    print(f'== {name} (considera el cambio a w >= {w_threshold:.2f}) ==')
+    for mname, rows in per_matchup.items():
+        removed = [r for r in rows if r['removed']]
+        rm = len(removed) / reps * 100
+        inn_counts = Counter(r['inning'] for r in removed)
+        inn_le6 = sum(c for i, c in inn_counts.items() if i <= 6) / reps * 100
+        inn7 = inn_counts.get(7, 0) / reps * 100
+        inn8 = inn_counts.get(8, 0) / reps * 100
+        inn9 = inn_counts.get(9, 0) / reps * 100
+        never = (reps - len(removed)) / reps * 100
+        pcs = [r['pc'] for r in removed]
+        ws = [r['w'] for r in removed]
+        fs = [r['factor'] for r in removed]
+        pas = [r['pas'] for r in rows]
+        tot_out = Counter()
+        tot_band = Counter()
+        for r in rows:
+            tot_out.update(r['outcomes'])
+            tot_band.update(r['band_pas'])
+        total_pas = sum(tot_out.values()) or 1
+        bip = sum(tot_out[k] for k in ('OUT', '1B', '2B', '3B', 'HR'))
+        reach = sum(tot_out[k] for k in ('BB', '1B', '2B', '3B', 'HR'))
+        bands = tot_band
+        band_total = sum(bands.values()) or 1
+        print(f"  -- {mname} --")
+        print(f"    removed {rm:5.1f}%  |  <=6 {inn_le6:5.1f}%  7 {inn7:5.1f}%  8 {inn8:5.1f}%  "
+              f"9 {inn9:5.1f}%  never {never:5.1f}%")
+        if removed:
+            print(f"    pit@removal {_pctl(pcs, 50):>4}/{_pctl(pcs, 90):<4} | "
+                  f"w@removal {_pctl(ws, 50):>5.2f}/{_pctl(ws, 90):<5.2f} | "
+                  f"factor@removal {_pctl(fs, 50):>7.4f}/{_pctl(fs, 90):<7.4f}")
+        else:
+            print("    pit@removal  n/a (nunca removido)")
+        print(f"    starter PA p50 {_pctl(pas, 50):>4} mean {sum(pas) / len(pas):>5.1f} | "
+              f"K {tot_out['K'] / total_pas * 100:5.2f}%  BB {tot_out['BB'] / total_pas * 100:5.2f}%  "
+              f"BIP {bip / total_pas * 100:5.2f}%  Reach {reach / total_pas * 100:5.2f}%")
+        band_str = '  '.join(
+            f"{name_b[:4]} {bands.get(name_b, 0) / band_total * 100:5.1f}%"
+            for _lo, _hi, name_b in WORKLOAD_BANDS)
+        print(f"    PA por banda: {band_str}")
+
+
+def run_cpu_strategy_comparison(reps: int) -> None:
+    """001D-3 · Compara políticas de cambio workload-based por matchup."""
+    threshold = get_pitch_threshold(9)
+    print('=' * 130)
+    print('001D-3 · Estrategias CPU de cambio de pitcher (workload-based, Policy v2)')
+    print(f'Outings de 9 innings, threshold={threshold} | {reps:,} outings por matchup')
+    print(f'Requisitos reales: MIN_PITCHES_TO_CHANGE={MIN_PITCHES_TO_CHANGE}; corte en el primer PA elegible.')
+    print('Señal estratégica (001D-2): workload = pitch_count / threshold. Bandas: '
+          'HEALTHY/ EARLY_FATIGUE/ MANAGEABLE/ HIGH_RISK/ SEVERE.')
+    print('=' * 130)
+
+    for name, w_thr in CPU_STRATEGY_THRESHOLDS:
+        per_matchup = {}
+        for mname in ('STRONG', 'MID', 'WEAK'):
+            pitcher = MATCHUPS_1C1[mname]
+            rows = []
+            for i in range(reps):
+                recs = _simulate_full_outing_records(pitcher, threshold, 4_200_000 + i)
+                rows.append(_strategy_from_records(recs, threshold, w_thr))
+            per_matchup[mname] = rows
+        _strategy_block(name, w_thr, per_matchup, reps)
+    print('=' * 130)
+    print('Lectura: STRONG trabaja menos -> alcanza cada w más tarde; WEAK trabaja más -> antes.')
+    print('Si una política no preserva esa diferenciación, no sirve como dificultad.')
+    print('=' * 130)
+
+
 def run_pa_level(reps: int) -> None:
     print("=" * 130)
     print("001B-4 · Full PA Monte Carlo · fatiga dinámica dentro del PA")
@@ -2267,7 +2544,7 @@ def run_pa_level(reps: int) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Monte Carlo de fatiga (GAMEPLAY-ENGINE-001B)")
-    parser.add_argument("--mode", choices=["pa", "pitch", "discipline", "cv", "take", "foul", "bc", "d2", "cv2", "f5", "c1", "c3", "c4", "c5"], default="pa",
+    parser.add_argument("--mode", choices=["pa", "pitch", "discipline", "cv", "take", "foul", "bc", "d2", "cv2", "f5", "c1", "c3", "c4", "c5", "d1", "d3"], default="pa",
                         help="pa = PA completo (001B-4); pitch = pitch suelto (001B-3); "
                              "discipline = diagnóstico de count/disciplina sin fatiga (002A); "
                              "cv = factorial Control×Vision (002B); "
@@ -2280,7 +2557,9 @@ def main() -> None:
                              "c1 = distribución natural de workload, fatiga neutralizada (001C-1); "
                              "c3 = threshold × outing completo, SMOOTH (001C-3); "
                              "c4 = robustez por matchup, SMOOTH-100 (001C-4); "
-                             "c5 = escala del threshold 3/6/9 innings (001C-5)")
+                             "c5 = escala del threshold 3/6/9 innings (001C-5); "
+                             "d1 = caracterización de la decisión CPU de cambio bajo Policy v2 (001D-1); "
+                             "d3 = comparación de estrategias CPU workload-based por matchup (001D-3)")
     parser.add_argument("--reps", type=int, default=REPS, help="réplicas por escenario")
     args = parser.parse_args()
 
@@ -2310,6 +2589,10 @@ def main() -> None:
         run_matchup_robustness(args.reps)
     elif args.mode == "c5":
         run_scale_345(args.reps)
+    elif args.mode == "d1":
+        run_cpu_change_characterization(args.reps)
+    elif args.mode == "d3":
+        run_cpu_strategy_comparison(args.reps)
     else:
         run_pa_level(args.reps)
 
