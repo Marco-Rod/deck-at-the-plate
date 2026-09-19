@@ -1,46 +1,96 @@
 import logging
+import math
 from typing import Dict
 
 logger = logging.getLogger(__name__)
 
-# ⭐ MEJORADO: Umbrales más bajos para fatiga MÁS AGRESIVA
-# Estos son los puntos donde comienza la fatiga (threshold)
-FATIGUE_THRESHOLDS = {
-    3: 6,    # 3 innings: fatiga comienza a los 6 pitches (fin del 1er inning típico)
-    6: 15,   # 6 innings: fatiga comienza a los 15 pitches (mitad del 3er inning)
-    9: 25,   # 9 innings: fatiga comienza a los 25 pitches (mitad del 5to inning)
-}
+# ---------------------------------------------------------------------------
+# Fatigue Policy v2 (GAMEPLAY-ENGINE-001C) — calibrada por Monte Carlo.
+#
+# Evidencia:
+#   001C-1  workload natural ≈ 150 pitches / 9 innings
+#   001C-3  BALANCED=100 seleccionada (ventana de decisión progresiva)
+#   001C-4  robusta en matchups STRONG/MID/WEAK
+#   001C-5  escala proporcional 3/6/9 → 33/67/100
+#
+# Principio: la fatiga depende del trabajo acumulado respecto al outing, no del
+# número de inning. El threshold es ~2/3 del workload natural esperado.
+# ---------------------------------------------------------------------------
+STANDARD_GAME_INNINGS = 9
+STANDARD_PITCH_THRESHOLD = 100  # Juego estándar de 9 innings
 
-# ⭐ MEJORADO: Degradación MUCHO MÁS AGRESIVA
-# Cada lanzamiento extra = -2% (antes era normalizado, ahora es fijo y severo)
-FATIGUE_PENALTY_STEP = 1  # Cada lanzamiento extra después del threshold
+# SMOOTH-0.55-F35:
+#   w = pitch_count / threshold
+#   factor = 1.0                                      si w <= 1
+#   factor = FATIGUE_FLOOR + (1 - FATIGUE_FLOOR) * exp(-((w - 1) / FATIGUE_SIGMA) ** 2)
+FATIGUE_FLOOR = 0.35
+FATIGUE_SIGMA = 0.55
 
-def get_pitch_threshold(total_innings: int = 9) -> int:
+
+def get_pitch_threshold(total_innings: int = STANDARD_GAME_INNINGS) -> int:
     """
-    Calcula el umbral de fatiga proporcional al número de innings.
-    
-    Lógica:
-    - 3 innings: 18 pitches antes de fatiga (20% del tiempo)
-    - 6 innings: 40 pitches antes de fatiga (66% del tiempo)
-    - 9 innings: 60 pitches antes de fatiga (100% del tiempo)
-    
-    Para otros valores, interpola proporcionalmente.
+    Umbral de fatiga proporcional a la duración del juego.
+
+    Un juego estándar de 9 innings usa un threshold de 100 lanzamientos
+    (~2/3 del workload natural). El resto de duraciones escala desde esa base:
+
+        3 innings -> 33
+        6 innings -> 67
+        9 innings -> 100
+
+    Pitcher fatigue threshold scales proportionally with game length.
     """
-    if total_innings in FATIGUE_THRESHOLDS:
-        return FATIGUE_THRESHOLDS[total_innings]
-    
-    # Interpolación: threshold = (60 / 9) * total_innings
-    return max(6, int((60.0 / 9.0) * total_innings))
+    if total_innings <= 0:
+        raise ValueError("total_innings must be positive")
+
+    return max(
+        1,
+        round(
+            STANDARD_PITCH_THRESHOLD
+            * total_innings
+            / STANDARD_GAME_INNINGS
+        ),
+    )
 
 
-def compute_fatigue_level(pitch_count: int, total_innings: int = 9) -> float:
+def get_fatigue_factor(pitch_count: int, threshold: int) -> float:
     """
-    Nivel de fatiga (0-100%) de un pitcher según su conteo de lanzamientos.
+    Factor de degradación SMOOTH-0.55-F35 para un workload dado.
 
-    Fórmula (idéntica a la usada en gameplay.py y payloads):
+    Args:
+        pitch_count: lanzamientos acumulados del pitcher.
+        threshold:   umbral de fatiga (ver ``get_pitch_threshold``).
+
+    Returns:
+        1.0 mientras ``pitch_count <= threshold``; después decae asintóticamente
+        hacia ``FATIGUE_FLOOR`` (0.35). Nunca baja del floor.
+    """
+    if threshold <= 0:
+        raise ValueError("threshold must be positive")
+
+    workload = pitch_count / threshold
+
+    if workload <= 1.0:
+        return 1.0
+
+    return FATIGUE_FLOOR + (1.0 - FATIGUE_FLOOR) * math.exp(
+        -((workload - 1.0) / FATIGUE_SIGMA) ** 2
+    )
+
+
+def compute_fatigue_level(pitch_count: int, total_innings: int = STANDARD_GAME_INNINGS) -> float:
+    """
+    Nivel de fatiga (0-100%) reportado a UI y usado por la decisión de la CPU.
+
+    Fórmula (LEGACY/APPROX):
         extra = pitch_count - threshold
         penalty_factor = 1.0 - (0.10 * extra)
         fatigue = (1.0 - penalty_factor) * 100   (cap 0-100)
+
+    Desde Fatigue Policy v2 comparte el onset con el motor de resultado
+    (``get_pitch_threshold``), pero su magnitud NO es el factor SMOOTH que se
+    aplica a los atributos. Deuda registrada: GAMEPLAY-FATIGUE-CPU-001
+    (calibrar/reemplazar la semántica de UI/CPU tras 001C-6).
 
     Args:
         pitch_count:   Número de lanzamientos realizados.
@@ -60,71 +110,48 @@ def compute_fatigue_level(pitch_count: int, total_innings: int = 9) -> float:
 
 
 def apply_pitcher_fatigue(
-    pitcher_attrs: Dict[str, int], 
+    pitcher_attrs: Dict[str, int],
     pitch_count: int,
-    total_innings: int = 9
+    total_innings: int = STANDARD_GAME_INNINGS
 ) -> Dict[str, int]:
     """
-    Aplica penalizaciones AGRESIVAS a Velocidad, Control y Movimiento.
-    
-    DISEÑO ESTRATÉGICO - Los lanzadores se cansan RÁPIDO:
-    
-    3 INNINGS:
-      - 6 pitches (threshold):   0% fatiga
-      - 9 pitches (3 extra):    30% fatiga
-      - 12 pitches (6 extra):   60% fatiga 🟠 TIRED
-      - 16 pitches (10 extra):  100% fatiga (completely exhausted)
-    
-    6 INNINGS:
-      - 15 pitches (threshold): 0% fatiga
-      - 18 pitches (3 extra):   30% fatiga
-      - 25 pitches (10 extra):  100% fatiga
-    
-    9 INNINGS:
-      - 25 pitches (threshold): 0% fatiga
-      - 30 pitches (5 extra):   50% fatiga
-      - 35 pitches (10 extra):  100% fatiga
-    
-    Fórmula: penalty_factor = 1.0 - (0.10 * extra_pitches)
-             Sin cap en penalty_factor, pero estadísticas tienen mínimo de 1
-    
+    Aplica la degradación SMOOTH-0.55-F35 a Velocidad, Control y Movimiento.
+
+    Pipeline (Fatigue Policy v2):
+        pitch_count
+          ↓
+        get_pitch_threshold(total_innings)
+          ↓
+        get_fatigue_factor(pitch_count, threshold)
+          ↓
+        attr = max(1, int(attr * factor))
+
+    La fatiga emerge del trabajo acumulado, no del inning. El factor nunca baja
+    de ``FATIGUE_FLOOR`` (0.35) y cada atributo conserva un mínimo de 1.
+
     Args:
-        pitcher_attrs: Diccionario con velocidad, control, movimiento
-        pitch_count: Número de lanzamientos realizados
-        total_innings: Total de innings en la partida (3, 6, o 9)
-    
+        pitcher_attrs: Diccionario con velocidad, control, movimiento.
+        pitch_count:   Número de lanzamientos realizados.
+        total_innings: Total de innings en la partida (3, 6 o 9).
+
     Returns:
-        Diccionario con atributos modificados por fatiga
+        Diccionario con atributos modificados por fatiga.
     """
     modified_attrs = pitcher_attrs.copy()
-    
-    # Obtener umbral dinámico basado en innings
+
     pitch_threshold = get_pitch_threshold(total_innings)
-    
-    # ⭐ DEBUG: Log de aplicación de fatiga
+    factor = get_fatigue_factor(pitch_count, pitch_threshold)
+
     logger.debug(
-        "Aplicando fatiga: pitch_count=%s innings=%s threshold=%s excede=%s",
-        pitch_count, total_innings, pitch_threshold, pitch_count > pitch_threshold,
+        "Aplicando fatiga: pitch_count=%s innings=%s threshold=%s factor=%.3f",
+        pitch_count, total_innings, pitch_threshold, factor,
     )
 
-    if pitch_count > pitch_threshold:
-        extra_pitches = pitch_count - pitch_threshold
-        
-        # ⭐ AGRESIVO: -10% por cada lanzamiento extra
-        # Sin cap en penalty_factor, permite llegar a fatiga 100%
-        penalty_factor = 1.0 - (0.10 * extra_pitches)
-        
-        logger.debug(
-            "Fatiga: extra_pitches=%s penalty_factor=%.2f degradacion=%.1f%% stats_orig=(VEL=%s CTR=%s MOV=%s)",
-            extra_pitches, penalty_factor, max(0, (1.0 - penalty_factor) * 100.0),
-            pitcher_attrs.get("velocidad"), pitcher_attrs.get("control"), pitcher_attrs.get("movimiento"),
-        )
+    if factor < 1.0:
+        modified_attrs["velocidad"] = max(1, int(modified_attrs.get("velocidad", 50) * factor))
+        modified_attrs["control"] = max(1, int(modified_attrs.get("control", 50) * factor))
+        modified_attrs["movimiento"] = max(1, int(modified_attrs.get("movimiento", 50) * factor))
 
-        # Aplicar penalización pero asegurar mínimo de 1 en cada stat
-        modified_attrs["velocidad"] = max(1, int(modified_attrs.get("velocidad", 50) * penalty_factor))
-        modified_attrs["control"] = max(1, int(modified_attrs.get("control", 50) * penalty_factor))
-        modified_attrs["movimiento"] = max(1, int(modified_attrs.get("movimiento", 50) * penalty_factor))
-        
         logger.debug(
             "Fatiga aplicada: VEL=%s CTR=%s MOV=%s",
             modified_attrs["velocidad"], modified_attrs["control"], modified_attrs["movimiento"],

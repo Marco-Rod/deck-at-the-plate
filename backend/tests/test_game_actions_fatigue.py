@@ -120,8 +120,8 @@ def test_resolve_swing_entrega_repertorio_degradado_por_fatiga(monkeypatch):
     """Con fatiga, el calculator recibe velocidad/control/movimiento específicos degradados."""
     captured, fresh_ff, pitcher = _capture_resolve_swing(
         monkeypatch,
-        # 30 -> current_count 31 -> 6 extras sobre threshold 25 (9 innings) -> factor 0.4.
-        pitch_counts={"P1": 30},
+        # 130 -> current_count 131 -> sobre threshold 100 (Fatigue Policy v2, 9 inn).
+        pitch_counts={"P1": 130},
     )
 
     selected = captured["pitch_selected"]
