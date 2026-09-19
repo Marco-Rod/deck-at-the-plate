@@ -28,7 +28,7 @@ GAMEPLAY-FATIGUE-CPU-001 — UI / CPU STRATEGY SEMANTICS
 001D-1  Characterize current CPU change  CLOSED ✓ (dispara a w≈1.05–1.11, factor ≈0.97–0.99)
 001D-2  Define fatigue signal semantics  CLOSED ✓ (workload canónico; bandas HEALTHY..SEVERE)
 001D-3  Simulate CPU change strategies   CLOSED ✓ (AGGRESSIVE/BALANCED/TOLERANT × STRONG/MID/WEAK)
-001D-4  Select EASY/MEDIUM/HARD policies OPEN
+001D-4  Select EASY/MEDIUM/HARD policies  CLOSED ✓ (recomendado HARD 1.20 / MEDIUM 1.35 / EASY 1.50)
 001D-5  UI fatigue representation        OPEN
 001D-6  Production implementation        OPEN
 
@@ -705,6 +705,96 @@ EASY/MEDIUM/HARD. No asumir automáticamente `HARD=AGGRESSIVE`; una dificultad
 mayor no implica sacar antes al pitcher. v1 = heurística por workload; futuro =
 workload + marcador/leverage + inning + calidad del bullpen + matchup +
 rendimiento reciente. UI (001D-5) queda aparte.
+
+## 001D-4 · Precio estratégico de esperar + mapeo a dificultad
+
+`--mode d4`, 10,000 outings/matchup. **4A** amplía el barrido a
+`1.10/1.20/1.25/1.35/1.50`; **4B** mide el coste marginal de esperar (outcomes
+por ventana de workload sobre el stream completo, sin retiro); **4C** propone el
+mapeo a EASY/MEDIUM/HARD. Sigue **sin tocar `cpu_ai.py`**.
+
+### 4A · Retiro por política (mediana; % outings)
+
+```text
+thr    STRONG removed/never inn factor | MID removed/never inn factor | WEAK removed/never inn factor
+1.10    97.0 / 3.0  8  0.9745  |  98.6 / 1.4   7  0.9745  |  99.7 / 0.3   7  0.9745
+1.20    87.1 / 12.9 8  0.9118  |  93.2 / 6.8   8  0.9118  |  97.8 / 2.2   7  0.9118
+1.25    79.7 / 20.3 8  0.8698  |  88.0 / 12.0  8  0.8698  |  95.9 / 4.1   8  0.8698
+1.35    60.6 / 39.4 9  0.7735  |  73.5 / 26.5  8  0.7735  |  88.2 / 11.8  8  0.7735
+1.50    31.1 / 68.9 9  0.6251  |  46.3 / 53.7  9  0.6251  |  68.0 / 32.0  8  0.6251
+```
+
+### 4B · Coste marginal de esperar (Δ vs banda sana w<=1.00; MID)
+
+```text
+ventana     PA/out    K%     BB%    Reach%   ΔReach    ΔK
+sano        27.88   36.07   8.68   33.65    +0.00   +0.00
+1.00-1.10    2.70   34.84   9.11   34.32    +0.66   -1.23   prácticamente gratis
+1.10-1.20    2.63   32.91   9.24   34.71    +1.06   -3.16   casi gratis
+1.20-1.25    1.24   30.51  10.17   37.17    +3.52   -5.56   coste empieza
+1.25-1.35    2.25   27.27  10.48   38.94    +5.28   -8.80   coste claro
+1.35-1.50    2.53   21.82  11.88   41.56    +7.91  -14.25   coste fuerte
+>1.50        2.51   15.32  12.86   44.98   +11.32  -20.75   severo
+```
+
+El mismo patrón (convexo) en STRONG y WEAK; WEAK es más plano (ya arranca
+tocado). Dato clave: **hasta ~1.20 esperar no cuesta nada** (`ΔReach +1.06`,
+`ΔK −3.16`); el coste se acelera a partir de 1.20–1.25 y es fuerte en 1.35–1.50.
+
+### 4C · Mapeo recomendado (data-driven)
+
+Cada dificultad corta **al inicio del siguiente régimen de coste**, no en un
+número arbitrario. Esto evita el problema del legacy `40/65/95`: no se cambia un
+pitcher casi sano sólo por cruzar una regla.
+
+```text
+HARD   → w >= 1.20   (factor ~0.91)  evita el régimen de coste moderado; a 1.10 no gana nada
+MEDIUM → w >= 1.35   (factor ~0.77)  tolera la ventana moderada; corta antes del coste fuerte
+EASY   → w >= 1.50   (factor ~0.63)  tolera claramente más deterioro; corta antes del severo
+```
+
+Propiedades: `% removed / never` monótono HARD > MEDIUM > EASY; STRONG trabaja
+menos y llega más tarde. `HARD = AGGRESSIVE (1.10)` se descarta por artificial.
+
+**v1 = heurística por workload.** No es diseño permanente: el futuro añade
+marcador/leverage, inning, calidad del bullpen, matchup y rendimiento reciente.
+Un HARD no debe implicar "sacar siempre antes", sino "evitar exposición costosa".
+
+### Cierre 001D-4
+
+```text
+GAMEPLAY-FATIGUE-CPU-001D-4 — CLOSED / PASS
+
+CPU bullpen heuristic v1 candidates:
+
+HARD   → workload >= 1.20
+MEDIUM → workload >= 1.35
+EASY   → workload >= 1.50
+
+Rationale:
+HARD
+  acts when waiting begins to have measurable cost
+  factor ≈ 0.91
+
+MEDIUM
+  tolerates clear but moderate deterioration
+  factor ≈ 0.77
+
+EASY
+  tolerates substantial deterioration
+  factor ≈ 0.63
+
+Not a permanent strategic model.
+Future CPU strategy may additionally consider:
+score leverage, inning, matchup, bullpen quality,
+recent performance and game context.
+```
+
+No se afinan decimales (`1.25/1.30/1.40`): el sweep entregó **regímenes de
+coste**, no un óptimo. Lo que valida el mapeo es la frontera
+`≤1.10 gratis · 1.10–1.20 barato · 1.20–1.25 empieza · 1.25–1.35 claro ·
+1.35–1.50 fuerte · >1.50 severo`; HARD=1.20 = "empezar a protegerse justo
+cuando esperar deja de ser barato".
 
 ## 002A · Plate discipline / count diagnostics
 

@@ -2502,6 +2502,102 @@ def run_cpu_strategy_comparison(reps: int) -> None:
     print('=' * 130)
 
 
+# ---------------------------------------------------------------------------
+# 001D-4 · Precio estratégico de esperar (marginal cost) + barrido ampliado
+# ---------------------------------------------------------------------------
+# 001D-4A: añade w=1.20 y w=1.35 a los regímenes ya caracterizados en 001D-3.
+# 001D-4B: outcomes por ventana de workload sobre el stream completo, para medir
+#          qué cuesta dejar al pitcher más allá de cada threshold (Δ vs sano).
+# 001D-4C: el mapeo a EASY/MEDIUM/HARD es una decisión posterior (001D-4C/001D-4).
+CPU_PRICING_THRESHOLDS = [
+    ('w1.10', 1.10),
+    ('w1.20', 1.20),
+    ('w1.25', 1.25),
+    ('w1.35', 1.35),
+    ('w1.50', 1.50),
+]
+PRICING_WINDOWS = [
+    (0.00, 1.00, 'sano'),
+    (1.00, 1.10, '1.00-1.10'),
+    (1.10, 1.20, '1.10-1.20'),
+    (1.20, 1.25, '1.20-1.25'),
+    (1.25, 1.35, '1.25-1.35'),
+    (1.35, 1.50, '1.35-1.50'),
+    (1.50, float('inf'), '>1.50'),
+]
+
+
+def run_cpu_strategy_pricing(reps: int) -> None:
+    """001D-4A/B · Barrido ampliado + coste marginal de esperar."""
+    threshold = get_pitch_threshold(9)
+    print('=' * 130)
+    print('001D-4 · Precio estratégico de esperar al cambiar de pitcher (Policy v2)')
+    print(f'Outings de 9 innings, threshold={threshold} | {reps:,} outings por matchup')
+    print('A: barrido 1.10/1.20/1.25/1.35/1.50 · B: outcomes por ventana (stream completo, sin retiro).')
+    print('=' * 130)
+
+    streams = {}
+    for mname in ('STRONG', 'MID', 'WEAK'):
+        pitcher = MATCHUPS_1C1[mname]
+        streams[mname] = [
+            _simulate_full_outing_records(pitcher, threshold, 4_300_000 + i)
+            for i in range(reps)
+        ]
+
+    print()
+    print('-- A · Retiro por política (mediana sobre salidas; % de outings) --')
+    print(f"{'thr':>5} |" + ''.join(f" {m:>34}" for m in ('STRONG', 'MID', 'WEAK')))
+    print(f"{'':>5} |" + ''.join(f" {'removed':>8}{'never':>8}{'inn':>6}{'factor':>8}" for _ in range(3)))
+    print('-' * 118)
+    for label, w_thr in CPU_PRICING_THRESHOLDS:
+        cells = []
+        for mname in ('STRONG', 'MID', 'WEAK'):
+            rows = [_strategy_from_records(recs, threshold, w_thr) for recs in streams[mname]]
+            removed = [r for r in rows if r['removed']]
+            rm = len(removed) / reps * 100
+            inn = _pctl([r['inning'] for r in removed], 50) if removed else 0
+            fac = _pctl([r['factor'] for r in removed], 50) if removed else 0.0
+            cells.append(f" {rm:>7.1f}%{100 - rm:>7.1f}%{inn:>6}{fac:>8.4f}")
+        print(f"{label:>5} |" + ''.join(cells))
+    print('-' * 118)
+
+    print()
+    print('-- B · Outcomes por ventana de workload (todo PA del starter, sin retiro) --')
+    print('   ΔReach / ΔK = puntos porcentuales vs la banda sana (w<=1.00).')
+    for mname in ('STRONG', 'MID', 'WEAK'):
+        bucket = {name: Counter() for _lo, _hi, name in PRICING_WINDOWS}
+        for recs in streams[mname]:
+            for _inning, pc_start, outcome, _p in recs:
+                w = pc_start / threshold
+                for lo, hi, name in PRICING_WINDOWS:
+                    if lo < w <= hi or (lo == 0.0 and w <= hi):
+                        bucket[name][outcome] += 1
+                        break
+        base = bucket['sano']
+        base_n = sum(base.values()) or 1
+        base_reach = sum(base[k] for k in ('BB', '1B', '2B', '3B', 'HR')) / base_n * 100
+        base_k = base['K'] / base_n * 100
+        print(f"  -- {mname} --")
+        print(f"    {'ventana':>10} {'PA/out':>7} {'K%':>6} {'BB%':>6} {'BIP%':>6} {'Reach%':>7} "
+              f"{'ΔReach':>7} {'ΔK':>7}")
+        for _lo, _hi, name in PRICING_WINDOWS:
+            c = bucket[name]
+            n = sum(c.values())
+            if n == 0:
+                print(f"    {name:>10} {0.0:>7.2f}       -      -      -       -       -")
+                continue
+            k = c['K'] / n * 100
+            bb = c['BB'] / n * 100
+            bip = sum(c[x] for x in ('OUT', '1B', '2B', '3B', 'HR')) / n * 100
+            reach = sum(c[x] for x in ('BB', '1B', '2B', '3B', 'HR')) / n * 100
+            print(f"    {name:>10} {n / reps:>7.2f} {k:>6.2f} {bb:>6.2f} {bip:>6.2f} {reach:>7.2f} "
+                  f"{reach - base_reach:>+7.2f} {k - base_k:>+7.2f}")
+    print('=' * 130)
+    print('Lectura: si una ventana no empeora K/BB/Reach vs sano, esperar hasta ella no cuesta nada;')
+    print('si 1.25-1.50 empeora claramente, ahí vive la diferencia útil para una dificultad tolerante.')
+    print('=' * 130)
+
+
 def run_pa_level(reps: int) -> None:
     print("=" * 130)
     print("001B-4 · Full PA Monte Carlo · fatiga dinámica dentro del PA")
@@ -2544,7 +2640,7 @@ def run_pa_level(reps: int) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Monte Carlo de fatiga (GAMEPLAY-ENGINE-001B)")
-    parser.add_argument("--mode", choices=["pa", "pitch", "discipline", "cv", "take", "foul", "bc", "d2", "cv2", "f5", "c1", "c3", "c4", "c5", "d1", "d3"], default="pa",
+    parser.add_argument("--mode", choices=["pa", "pitch", "discipline", "cv", "take", "foul", "bc", "d2", "cv2", "f5", "c1", "c3", "c4", "c5", "d1", "d3", "d4"], default="pa",
                         help="pa = PA completo (001B-4); pitch = pitch suelto (001B-3); "
                              "discipline = diagnóstico de count/disciplina sin fatiga (002A); "
                              "cv = factorial Control×Vision (002B); "
@@ -2559,7 +2655,8 @@ def main() -> None:
                              "c4 = robustez por matchup, SMOOTH-100 (001C-4); "
                              "c5 = escala del threshold 3/6/9 innings (001C-5); "
                              "d1 = caracterización de la decisión CPU de cambio bajo Policy v2 (001D-1); "
-                             "d3 = comparación de estrategias CPU workload-based por matchup (001D-3)")
+                             "d3 = comparación de estrategias CPU workload-based por matchup (001D-3); "
+                             "d4 = barrido ampliado + coste marginal de esperar (001D-4A/B)")
     parser.add_argument("--reps", type=int, default=REPS, help="réplicas por escenario")
     args = parser.parse_args()
 
@@ -2593,6 +2690,8 @@ def main() -> None:
         run_cpu_change_characterization(args.reps)
     elif args.mode == "d3":
         run_cpu_strategy_comparison(args.reps)
+    elif args.mode == "d4":
+        run_cpu_strategy_pricing(args.reps)
     else:
         run_pa_level(args.reps)
 
