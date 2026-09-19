@@ -7,6 +7,11 @@ from app.database import SessionLocal
 from app.repositories import get_game_by_id
 from app.engine.websocket_manager import manager
 from app.engine.fog_of_war import sanitize_state_for_player
+from app.engine.game_actions import (
+    PendingBroadcast,
+    publish_pending_broadcasts,
+    trigger_cpu_response,
+)
 from app.auth import authenticate_ws_token
 
 router = APIRouter(tags=["WebSockets"])
@@ -78,23 +83,30 @@ async def websocket_endpoint(
             # ⭐ ARREGLADO: Ejecutar trigger_cpu_response si es necesario
             # En caso de que la CPU deba actuar en el primer turn (ej. usuario es AWAY en TOP)
             logger.debug("WS verificando si CPU debe actuar al conectar...")
-            from app.engine.game_actions import trigger_cpu_response
             state = dict(game.state_data or {})
             logger.debug(
                 "WS state before trigger: current_pitch=%s, is_top=%s, mode=%s",
                 state.get("current_pitch"), game.is_top_inning, state.get("mode"),
             )
+            pending_broadcasts: list[PendingBroadcast] = []
             try:
-                await trigger_cpu_response(game, state, db, game_id)
+                await trigger_cpu_response(
+                    game,
+                    state,
+                    db,
+                    game_id,
+                    pending_broadcasts=pending_broadcasts,
+                )
                 logger.debug("WS trigger_cpu_response completed successfully")
-            except Exception as e:
-                logger.error("WS error en trigger_cpu_response: %s", e)
-                import traceback
-                traceback.print_exc()
-            
-            # La CPU pudo actuar sin commitear (Unit of Work del router): persistir
-            # antes de recargar desde BD para no perder los cambios en memoria.
-            db.commit()
+                # La acción CPU y sus eventos forman una única unidad transaccional.
+                db.commit()
+            except Exception:
+                db.rollback()
+                logger.exception("WS error al ejecutar la respuesta CPU")
+                raise
+            else:
+                await publish_pending_broadcasts(pending_broadcasts)
+
             # Recargar game desde DB para sincronizar
             db.refresh(game)
             logger.debug(

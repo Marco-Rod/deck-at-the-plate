@@ -40,7 +40,12 @@ from app.engine.game_rules import EXTRA_INNINGS_MIN_INNING
 from app.engine.turn_guard import expected_actor, is_player_turn
 from app.engine.cpu_ai import is_cpu_turn
 from app.engine.attribute_mapper import map_card_to_pitcher_attrs
-from app.engine.game_actions import resolve_swing, trigger_cpu_response
+from app.engine.game_actions import (
+    PendingBroadcast,
+    publish_pending_broadcasts,
+    resolve_swing,
+    trigger_cpu_response,
+)
 from app.engine.bullpen import (
     acknowledge_pending_pitcher_change,
     apply_human_pitcher_change,
@@ -249,9 +254,22 @@ async def select_pitch(
     # En PvE: si la CPU es la bateadora en este momento, ejecuta su swing ahora.
     state = dict(game.state_data or {})
     if not state.get("is_game_over"):
-        await trigger_cpu_response(game, state, db, game_id)
-        # La CPU pudo batear/pichear sin commitear: persistir la transacción completa.
-        db.commit()
+        pending_broadcasts: list[PendingBroadcast] = []
+        try:
+            await trigger_cpu_response(
+                game,
+                state,
+                db,
+                game_id,
+                pending_broadcasts=pending_broadcasts,
+            )
+            # La respuesta CPU es una segunda unidad transaccional.
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+
+        await publish_pending_broadcasts(pending_broadcasts)
 
     return {"status": "ok", "message": "Picheo registrado exitosamente."}
 
@@ -312,9 +330,22 @@ async def execute_swing(
         
         if is_cpu_turn(game, state, "PITCHER"):
             logger.debug("CPU deberia haber lanzado! Ejecutando trigger ahora...")
-            await trigger_cpu_response(game, state, db, game_id)
-            # La CPU pudo pichear/cambiar pitcher sin commitear: persistir antes de recargar.
-            db.commit()
+            recovery_broadcasts: list[PendingBroadcast] = []
+            try:
+                await trigger_cpu_response(
+                    game,
+                    state,
+                    db,
+                    game_id,
+                    pending_broadcasts=recovery_broadcasts,
+                )
+                # El recovery CPU es una unidad transaccional independiente.
+                db.commit()
+            except Exception:
+                db.rollback()
+                raise
+
+            await publish_pending_broadcasts(recovery_broadcasts)
             # Recargar state después de que CPU lance
             db.expunge_all()
             game = get_game_by_id(db, game_id)
@@ -331,26 +362,40 @@ async def execute_swing(
         )
         raise HTTPException(status_code=400, detail="El lanzador aún no ha realizado su picheo para este turno.")
 
-    logger.debug("Swing valido, resolviendo jugada...")
-    event, description, inning_ended = await resolve_swing(
-        game=game,
-        state=state,
-        swing_type=payload.swing_type,
-        guessed_zone=payload.guessed_zone,
-        guessed_pitch=payload.guessed_pitch,
-        db=db,
-        game_id=game_id,
-        user_id=current_user_id,  # ⭐ NUEVO: pasar user_id
-    )
+    pending_broadcasts: list[PendingBroadcast] = []
+    try:
+        logger.debug("Swing valido, resolviendo jugada...")
+        event, description, inning_ended = await resolve_swing(
+            game=game,
+            state=state,
+            swing_type=payload.swing_type,
+            guessed_zone=payload.guessed_zone,
+            guessed_pitch=payload.guessed_pitch,
+            db=db,
+            game_id=game_id,
+            user_id=current_user_id,
+            pending_broadcasts=pending_broadcasts,
+        )
 
-    # En PvE: si la CPU debe pichear en la siguiente media entrada, lo hace ahora.
-    state = dict(game.state_data or {})
-    if not state.get("is_game_over"):
-        await trigger_cpu_response(game, state, db, game_id)
+        # En PvE: si la CPU debe pichear en la siguiente media entrada, lo hace ahora.
+        state = dict(game.state_data or {})
+        if not state.get("is_game_over"):
+            await trigger_cpu_response(
+                game,
+                state,
+                db,
+                game_id,
+                pending_broadcasts=pending_broadcasts,
+            )
 
-    # Persistir la transacción completa (swing humano + picheo/cambio de la CPU).
-    db.commit()
-    db.refresh(game)
+        # La unidad completa debe ser durable antes de cualquier efecto WS.
+        db.commit()
+        db.refresh(game)
+    except Exception:
+        db.rollback()
+        raise
+
+    await publish_pending_broadcasts(pending_broadcasts)
 
     return _build_play_result_response(game, event, description)
 

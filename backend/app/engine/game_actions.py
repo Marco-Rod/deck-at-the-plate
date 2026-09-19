@@ -19,6 +19,8 @@ Beneficios SOLID:
 """
 
 import logging
+from dataclasses import dataclass
+from typing import Callable, Literal
 
 from app.engine.attribute_mapper import (
     map_card_to_batter_attrs,
@@ -55,6 +57,34 @@ from app.repositories import (
 from app.services.card_presenter import build_batter_payload, build_pitcher_payload
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class PendingBroadcast:
+    """Efecto WebSocket diferido hasta que la unidad de trabajo sea durable."""
+
+    channel: Literal["to_game", "to_game_view"]
+    game_id: str
+    payload: dict | Callable[[str], dict | None]
+
+
+async def publish_pending_broadcasts(events: list[PendingBroadcast]) -> None:
+    """Publica eventos diferidos en el mismo orden en que fueron generados."""
+    for event in events:
+        if event.channel == "to_game":
+            await manager.broadcast_to_game(event.game_id, event.payload)
+        else:
+            await manager.broadcast_to_game_view(event.game_id, event.payload)
+
+
+async def _publish_or_defer(
+    event: PendingBroadcast,
+    pending_broadcasts: list[PendingBroadcast] | None,
+) -> None:
+    if pending_broadcasts is None:
+        await publish_pending_broadcasts([event])
+    else:
+        pending_broadcasts.append(event)
 
 
 def build_play_resolved_payload(game: GameSession, event: str, description: str, inning_completed: bool = False, user_id: str = None, db=None) -> dict:
@@ -211,12 +241,13 @@ async def resolve_swing(
     db,
     game_id: str,
     user_id: str = None,  # ⭐ NUEVO: para incluir user_role en el payload
+    pending_broadcasts: list[PendingBroadcast] | None = None,
 ) -> tuple[str, str, bool]:
     """
     Núcleo compartido entre execute_swing (humano) y la CPU en PvE.
 
-    Ejecuta los pasos 1-7 del at-bat: fatiga, tácticas, cálculo, transición,
-    estadísticas, persistencia y broadcast WS. Retorna (event, description, inning_ended).
+    Ejecuta los pasos del at-bat y difiere el broadcast cuando recibe una cola
+    transaccional. Retorna (event, description, inning_ended).
 
     Args:
         game:          Instancia de GameSession (será mutada).
@@ -317,15 +348,13 @@ async def resolve_swing(
             rbi=rbi,
         )
 
-    # --- 8. Preparar state final y broadcast ---
+    # --- 8. Preparar state final y evento WS diferido ---
     state["current_pitch"] = None
     state["last_event"] = event
     game.state_data = state
 
-    # La persistencia (commit) es responsabilidad del router que inició la acción
-    # (Unit of Work); build_play_resolved_payload y el broadcast usan el estado en memoria.
-
-    # Asegurar que los strikeouts están frescos de la BD antes de enviar por WebSocket
+    # La persistencia pertenece al router; el evento queda en cola hasta que su
+    # unidad de trabajo confirme.
     base_payload = build_play_resolved_payload(game, event, description, inning_completed=inning_ended, user_id=user_id, db=db)
 
     def _play_resolved_for(recipient_user_id: str) -> dict:
@@ -342,12 +371,21 @@ async def resolve_swing(
         payload["state_data"] = player_state
         return payload
 
-    await manager.broadcast_to_game_view(game_id, _play_resolved_for)
+    await _publish_or_defer(
+        PendingBroadcast("to_game_view", game_id, _play_resolved_for),
+        pending_broadcasts,
+    )
     return event, description, inning_ended
 
 
 async def execute_cpu_pitcher_change(
-    game: GameSession, state: dict, db, game_id: str, difficulty: str
+    game: GameSession,
+    state: dict,
+    db,
+    game_id: str,
+    difficulty: str,
+    *,
+    pending_broadcasts: list[PendingBroadcast] | None = None,
 ) -> bool:
     """
     Ejecuta un cambio de pitcher CPU desde el bullpen congelado de la partida.
@@ -434,26 +472,40 @@ async def execute_cpu_pitcher_change(
     )
     
     # Broadcast del cambio vía WebSocket (state_data sanitizado por destinatario)
-    await manager.broadcast_to_game_view(game_id, lambda u: {
-        "type": "PITCHER_CHANGED",
-        "message": f"🔄 La CPU ha hecho un cambio de pitcher. Entra: {new_pitcher.name}",
-        "old_pitcher_id": old_pitcher_id,
-        "old_pitcher_data": old_pitcher_data,
-        "new_pitcher_id": new_pitcher.id,
-        "new_pitcher": new_pitcher_data,
-        "state_data": sanitize_state_for_player(
-            state_data=game.state_data,
-            requesting_user_id=u,
-            home_user_id=game.home_user_id,
-            away_user_id=game.away_user_id,
-            is_top_inning=game.is_top_inning,
+    await _publish_or_defer(
+        PendingBroadcast(
+            "to_game_view",
+            game_id,
+            lambda u: {
+                "type": "PITCHER_CHANGED",
+                "message": f"🔄 La CPU ha hecho un cambio de pitcher. Entra: {new_pitcher.name}",
+                "old_pitcher_id": old_pitcher_id,
+                "old_pitcher_data": old_pitcher_data,
+                "new_pitcher_id": new_pitcher.id,
+                "new_pitcher": new_pitcher_data,
+                "state_data": sanitize_state_for_player(
+                    state_data=game.state_data,
+                    requesting_user_id=u,
+                    home_user_id=game.home_user_id,
+                    away_user_id=game.away_user_id,
+                    is_top_inning=game.is_top_inning,
+                ),
+            },
         ),
-    })
+        pending_broadcasts,
+    )
 
     return True
 
 
-async def trigger_cpu_response(game: GameSession, state: dict, db, game_id: str) -> None:
+async def trigger_cpu_response(
+    game: GameSession,
+    state: dict,
+    db,
+    game_id: str,
+    *,
+    pending_broadcasts: list[PendingBroadcast] | None = None,
+) -> None:
     """
     En partidas PvE, evalúa si le toca actuar a la CPU y ejecuta su acción.
 
@@ -485,6 +537,7 @@ async def trigger_cpu_response(game: GameSession, state: dict, db, game_id: str)
             db=db,
             game_id=game_id,
             user_id=None,  # CPU swing, sin user_id específico
+            pending_broadcasts=pending_broadcasts,
         )
         # Tras el swing de la CPU puede haber cambiado la media entrada.
         state = dict(game.state_data or {})
@@ -510,7 +563,14 @@ async def trigger_cpu_response(game: GameSession, state: dict, db, game_id: str)
                 )
 
                 if should_change:
-                    changed = await execute_cpu_pitcher_change(game, state, db, game_id, difficulty)
+                    changed = await execute_cpu_pitcher_change(
+                        game,
+                        state,
+                        db,
+                        game_id,
+                        difficulty,
+                        pending_broadcasts=pending_broadcasts,
+                    )
                     if changed:
                         # Recargar state después del cambio
                         state = dict(game.state_data or {})
@@ -527,8 +587,15 @@ async def trigger_cpu_response(game: GameSession, state: dict, db, game_id: str)
         state["current_pitch"] = cpu_pitch
         game.state_data = state
 
-        await manager.broadcast_to_game(game_id, {
-            "type": "PITCH_COMMITTED",
-            "message": "La CPU ha seleccionado su picheo. Es tu turno de batear.",
-            "has_pitched": True,
-        })
+        await _publish_or_defer(
+            PendingBroadcast(
+                "to_game",
+                game_id,
+                {
+                    "type": "PITCH_COMMITTED",
+                    "message": "La CPU ha seleccionado su picheo. Es tu turno de batear.",
+                    "has_pitched": True,
+                },
+            ),
+            pending_broadcasts,
+        )

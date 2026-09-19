@@ -59,6 +59,38 @@ def test_pitch_feliz_top_y_cpu_responde(client, game_factory, broadcasts):
     assert committed["message"]["has_pitched"] is True
 
 
+def test_pitch_no_broadcast_cpu_si_commit_falla(
+    client,
+    game_factory,
+    broadcasts,
+    monkeypatch,
+    seed_session,
+):
+    from sqlalchemy.exc import SQLAlchemyError
+
+    ctx = game_factory()
+    original_commit = type(seed_session).commit
+    commit_count = 0
+
+    def fail_second_commit(session):
+        nonlocal commit_count
+        commit_count += 1
+        if commit_count == 2:
+            raise SQLAlchemyError("forced commit failure")
+        return original_commit(session)
+
+    # El primer commit actual persiste el pitch humano; el segundo intenta
+    # confirmar la respuesta CPU generada por trigger_cpu_response().
+    monkeypatch.setattr(type(seed_session), "commit", fail_second_commit)
+
+    with pytest.raises(SQLAlchemyError, match="forced commit failure"):
+        _pitch(client, ctx["game_id"], ctx["headers"])
+
+    messages = broadcasts.get(ctx["game_id"], [])
+    message_types = [item["message"]["type"] for item in messages]
+    assert message_types == ["PITCH_COMMITTED"]
+
+
 def test_pitch_fuera_de_turno_403(client, game_factory, mutate_game):
     ctx = game_factory()
     mutate_game(ctx["game_id"], columns={"is_top_inning": False}, state=_bottom_state(ctx))
@@ -117,8 +149,153 @@ def test_swing_feliz_resuelve_y_cpu_pichea(client, game_factory, mutate_game, br
     types = [m["message"]["type"] for m in captured]
     assert "PLAY_RESOLVED" in types
     assert "PITCH_COMMITTED" in types
+    play_index = types.index("PLAY_RESOLVED")
+    assert types[play_index + 1] == "PITCH_COMMITTED"
     play = next(m for m in captured if m["message"]["type"] == "PLAY_RESOLVED")
     assert play["channel"] == "to_game_view"
+
+
+def test_swing_no_broadcast_si_commit_falla(
+    client,
+    game_factory,
+    mutate_game,
+    broadcasts,
+    monkeypatch,
+    seed_session,
+):
+    from sqlalchemy.exc import SQLAlchemyError
+
+    ctx = game_factory()
+    state = _bottom_state(ctx)
+    # Evita el commit previo que prepara un pitch de CPU: este test inyecta el
+    # fallo exclusivamente en el commit final posterior a resolve_swing().
+    state["current_pitch"] = {"pitch_type": "FF", "zone": 5}
+    mutate_game(
+        ctx["game_id"],
+        columns={"is_top_inning": False},
+        state=state,
+    )
+
+    def fail_commit(_session):
+        raise SQLAlchemyError("forced commit failure")
+
+    monkeypatch.setattr(type(seed_session), "commit", fail_commit)
+
+    with pytest.raises(SQLAlchemyError, match="forced commit failure"):
+        _swing(client, ctx["game_id"], ctx["headers"])
+
+    assert ctx["game_id"] not in broadcasts
+
+
+def test_swing_recovery_no_broadcast_si_commit_cpu_falla(
+    client,
+    game_factory,
+    mutate_game,
+    broadcasts,
+    monkeypatch,
+    seed_session,
+):
+    from sqlalchemy.exc import SQLAlchemyError
+
+    ctx = game_factory()
+    # En la baja el CPU es pitcher. Sin current_pitch, execute_swing debe
+    # recuperar su acción antes de procesar el swing solicitado.
+    mutate_game(
+        ctx["game_id"],
+        columns={"is_top_inning": False},
+        state=_bottom_state(ctx),
+    )
+
+    def fail_commit(_session):
+        raise SQLAlchemyError("forced recovery commit failure")
+
+    monkeypatch.setattr(type(seed_session), "commit", fail_commit)
+
+    with pytest.raises(SQLAlchemyError, match="forced recovery commit failure"):
+        _swing(client, ctx["game_id"], ctx["headers"])
+
+    assert ctx["game_id"] not in broadcasts
+
+
+def test_ws_cpu_no_broadcast_si_commit_falla(
+    client,
+    game_factory,
+    mutate_game,
+    broadcasts,
+    monkeypatch,
+    seed_session,
+    session_factory,
+):
+    from sqlalchemy.exc import SQLAlchemyError
+    import app.routers.ws as ws_module
+
+    ctx = game_factory()
+    # En la baja el CPU es pitcher y debe reaccionar al conectar el socket.
+    mutate_game(
+        ctx["game_id"],
+        columns={"is_top_inning": False},
+        state=_bottom_state(ctx),
+    )
+
+    # El endpoint WS crea su propia sesión, fuera del override HTTP de get_db.
+    monkeypatch.setattr(ws_module, "SessionLocal", session_factory)
+
+    def fail_commit(_session):
+        raise SQLAlchemyError("forced websocket commit failure")
+
+    monkeypatch.setattr(type(seed_session), "commit", fail_commit)
+
+    with client.websocket_connect(
+        f"/ws/games/{ctx['game_id']}?token={ctx['me']['token']}"
+    ):
+        pass
+
+    assert ctx["game_id"] not in broadcasts
+
+
+def test_ws_cpu_rollback_y_no_commit_si_trigger_falla(
+    client,
+    game_factory,
+    mutate_game,
+    broadcasts,
+    monkeypatch,
+    seed_session,
+    session_factory,
+):
+    import app.routers.ws as ws_module
+
+    ctx = game_factory()
+    mutate_game(
+        ctx["game_id"],
+        columns={"is_top_inning": False},
+        state=_bottom_state(ctx),
+    )
+
+    monkeypatch.setattr(ws_module, "SessionLocal", session_factory)
+    calls = {"commit": 0, "rollback": 0}
+    original_rollback = type(seed_session).rollback
+
+    async def fail_trigger(*_args, **_kwargs):
+        raise RuntimeError("forced cpu response failure")
+
+    def track_commit(_session):
+        calls["commit"] += 1
+
+    def track_rollback(session):
+        calls["rollback"] += 1
+        return original_rollback(session)
+
+    monkeypatch.setattr(ws_module, "trigger_cpu_response", fail_trigger)
+    monkeypatch.setattr(type(seed_session), "commit", track_commit)
+    monkeypatch.setattr(type(seed_session), "rollback", track_rollback)
+
+    with client.websocket_connect(
+        f"/ws/games/{ctx['game_id']}?token={ctx['me']['token']}"
+    ):
+        pass
+
+    assert calls == {"commit": 0, "rollback": 1}
+    assert ctx["game_id"] not in broadcasts
 
 
 def test_swing_fuera_de_turno_top_403(client, game_factory):
