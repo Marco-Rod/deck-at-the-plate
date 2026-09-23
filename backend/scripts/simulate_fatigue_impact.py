@@ -323,7 +323,8 @@ DISCIPLINE_POLICIES = {
 def _simulate_pa_diag(take_probs: dict, seed: int,
                       control: int = None, vision: int = None,
                       take_bias: float = None,
-                      foul_chance: float = None) -> dict:
+                      foul_chance: float = None,
+                      batter_attrs: dict = None) -> dict:
     """PA 0-0 → K/BB/BIP con diagnóstico de count y de disciplinas, SIN fatiga.
 
     Args:
@@ -335,6 +336,10 @@ def _simulate_pa_diag(take_probs: dict, seed: int,
                     None → 0.65 (producción).
         foul_chance: override del % de FOUL sobre contactos (002C-C);
                     None → 35.0 (producción).
+        batter_attrs: override COMPLETO del perfil ofensivo del batter
+                    (002E-2 · matchup WEAK/MID/STRONG sobre CTL fijo del
+                    pitcher; la Vision del PA sigue controlada por `vision`).
+                    None → BATTER (70/70/70).
     """
     random.seed(seed)
     balls = 0
@@ -342,10 +347,11 @@ def _simulate_pa_diag(take_probs: dict, seed: int,
     pitches = 0
     pitch_count = int(DISCIPLINE_WORKLOAD * THRESHOLD)  # congelado → factor 1.0
 
-    # Overrides 002B (factorial Control × Vision); resto MID fijo.
+    # Overrides 002B (factorial Control × Vision) + 002E-2 (perfil ofensivo
+    # del batter); resto MID fijo.
     pitcher_raw = dict(PITCHER_RAW)
     pitch_raw = dict(PITCH_RAW)
-    batter_attrs = dict(BATTER)
+    batter_attrs = dict(BATTER if batter_attrs is None else batter_attrs)
     if control is not None:
         pitcher_raw["control"] = control
         pitch_raw["control"] = control
@@ -1082,6 +1088,248 @@ def run_prod_vs_b3c1(reps: int) -> None:
     print("Watch CLAMP-001: en CTL LOW del brazo B3-C1 el piso 0.25 es binding "
           "(CalledS/tk V70≈V95, ver 002C-CV); PROD no lo pisa → el delta de "
           "sensibilidad en esa fila es evidencia de la deuda, no del contraste.")
+
+
+# ---------------------------------------------------------------------------
+# 002E-2 · ROBUSTEZ B3-C1 por matchup · perfil OFENSIVO del bateador × CTL
+# ---------------------------------------------------------------------------
+# 002E-1 ya cerró la dimensión Control×Vision del PITCHER (9 celdas, head-to-
+# head). Aquí se cierra la dimensión que faltaba del MATCHUP: el perfil
+# OFENSIVO del bateador (WEAK/MID/STRONG) contra CTL del pitcher, con el
+# candidato B3-C1 ya PROMOTED como baseline LAB. Un solo brazo (B3-C1):
+# el contraste PROD/PROMOTE ya está cerrado.
+BATTER_PROFILES = {
+    "WEAK": {"contacto": 55, "poder": 40, "vision": 70},
+    "MID": {"contacto": 70, "poder": 70, "vision": 70},   # = BATTER (producción)
+    "STRONG": {"contacto": 88, "poder": 90, "vision": 70},
+}
+
+
+def run_e2_cell(control: int, profile: dict, take_bias: float, foul_chance: float,
+                reps: int) -> dict:
+    """Celda 002E-2: PA diagnóstico para un perfil ofensivo del bateador (002E-1)."""
+    agg = {
+        "outcome": Counter(),
+        "pitches": 0,
+        "lengths": [],
+        "reached_2strikes": 0,
+        "reached_3balls": 0,
+        "reached_full": 0,
+        "take_attempts": 0,
+        "balls_on_take": 0,
+        "called_strikes_on_take": 0,
+        "take_at_2s": 0,
+        "pitches_at_2s": 0,
+        "swing_attempts": 0,
+        "whiffs": 0,
+        "fouls": 0,
+        "bips": 0,
+        "ge4": Counter(),
+        "outcome_at_2s": Counter(),
+    }
+    for rep in range(reps):
+        seed = int(DISCIPLINE_WORKLOAD * 1000) * 10**6 + rep  # mismas seeds entre celdas
+        d = _simulate_pa_diag(E1_POLICY, seed, control=control,
+                              batter_attrs=profile,
+                              take_bias=take_bias, foul_chance=foul_chance)
+        for key in ("reached_2strikes", "reached_3balls", "reached_full",
+                    "take_attempts", "balls_on_take", "called_strikes_on_take",
+                    "take_at_2s", "pitches_at_2s", "swing_attempts", "whiffs",
+                    "fouls", "bips"):
+            agg[key] += d[key]
+        agg["outcome"][d["outcome"]] += 1
+        agg["pitches"] += d["pitches"]
+        agg["lengths"].append(d["pitches"])
+        if d["pitches"] >= 4:
+            agg["ge4"]["n"] += 1
+            if d["outcome"] == "K":
+                agg["ge4"]["K"] += 1
+            elif d["outcome"] == "BB":
+                agg["ge4"]["BB"] += 1
+            else:
+                agg["ge4"]["BIP"] += 1
+        if d["reached_2strikes"]:
+            agg["outcome_at_2s"]["n"] += 1
+            if d["outcome"] == "K":
+                agg["outcome_at_2s"]["K"] += 1
+            elif d["outcome"] == "BB":
+                agg["outcome_at_2s"]["BB"] += 1
+            else:
+                agg["outcome_at_2s"]["BIP"] += 1
+    lengths = sorted(agg["lengths"])
+    agg["p95"] = lengths[int(len(lengths) * 0.95) - 1]
+    agg["max"] = lengths[-1]
+    return agg
+
+
+def run_matchup_robustness_e2(reps: int) -> None:
+    """002E-2 · B3-C1 sobre grid CTL × perfil OFENSIVO del bateador (muchup).
+
+    Cierra la dimensión que 002E-1 no tocó: matchup fuerte vs débil del OFF
+    del bateador (contacto/poder) contra el CTL del pitcher. Un solo brazo
+    (B3-C1, ya PROMOTED); sin contraste PROD. Contratos H5–H8 fijados antes.
+    """
+    ctl_levels = {"LOW": 45, "MID": 70, "HIGH": 95}
+    cells = {}
+    for ctl_name in ("LOW", "MID", "HIGH"):
+        for prof_name in ("WEAK", "MID", "STRONG"):
+            ctl = ctl_levels[ctl_name]
+            prof = BATTER_PROFILES[prof_name]
+            cells[(ctl_name, prof_name)] = run_e2_cell(
+                ctl, prof, E1_FIX["take_bias"], E1_FIX["foul_chance"], reps,
+            )
+
+    def pct(x, n):
+        return x / n * 100 if n else 0.0
+
+    print("=" * 130)
+    print("002E-2 · ROBUSTEZ B3-C1 por matchup (perfil OFENSIVO del bateador)")
+    print(f"B3-C1 (0.30/45) fijo | agente LAB 65/50/30 | fatiga OFF (factor 1.0) | "
+          f"Vision de bateria representativa 70 | {reps:,} PA/celda | "
+          f"grid CTL 3 × perfil WEAK/MID/STRONG 3 = 9 celdas → {9 * reps:,} PA")
+    print("Contratos H5–H8 fijados ANTES de correr (ver ADR 002E-2). "
+          "Watch: K%, BIP%, HR%, Whiff/Swing — reportar, sin target MLB.")
+    print("=" * 130)
+
+    # Capa 1 · INPUT/MECANISMO
+    print()
+    print("-- CAPA 1 · INPUT / MECANISMO (disciplina de TAKE por matchup) --")
+    print(f"{'Celda':<14} | {'CalledS/tk':>10} {'Ball/tk':>8} | "
+          f"{'Foul/Cnt':>8} {'BIP/Cnt':>7} | {'Whiff/Swing':>11} {'P(TAKE)':>7}")
+    print("-" * 130)
+    for ctl_name in ("LOW", "MID", "HIGH"):
+        for prof_name in ("WEAK", "MID", "STRONG"):
+            a = cells[(ctl_name, prof_name)]
+            tk = max(1, a["take_attempts"])
+            ct = max(1, a["fouls"] + a["bips"])
+            sw = max(1, a["swing_attempts"])
+            print(
+                f"{ctl_name}-{prof_name:<7} | "
+                f"{pct(a['called_strikes_on_take'], tk):>10.2f} "
+                f"{pct(a['balls_on_take'], tk):>8.2f} | "
+                f"{pct(a['fouls'], ct):>8.2f} {pct(a['bips'], ct):>7.2f} | "
+                f"{pct(a['whiffs'], sw):>11.2f} "
+                f"{pct(a['take_attempts'], reps):>7.2f}"
+            )
+    print("-" * 130)
+
+    # Capa 2 · COUNT (estructura del PA)
+    print()
+    print("-- CAPA 2 · COUNT / ESTRUCTURA DE PA --")
+    print(f"{'Celda':<14} | {'BB%':>6} {'K%':>6} {'BIP%':>6} | "
+          f"{'P(3bol)':>7} {'P(full)':>7} {'Pit/PA':>6} {'p95':>4} {'max':>4} "
+          f"{'P(≥4)':>6} {'P(≥6)':>6}")
+    print("-" * 130)
+    for ctl_name in ("LOW", "MID", "HIGH"):
+        for prof_name in ("WEAK", "MID", "STRONG"):
+            a = cells[(ctl_name, prof_name)]
+            out = a["outcome"]
+            n = reps
+            bip = out["1B"] + out["2B"] + out["3B"] + out["HR"] + out["OUT"]
+            ge4n = a["ge4"]["n"]
+            ge6 = sum(1 for L in a["lengths"] if L >= 6)
+            print(
+                f"{ctl_name}-{prof_name:<7} | "
+                f"{pct(out['BB'], n):>6.2f} {pct(out['K'], n):>6.2f} "
+                f"{pct(bip, n):>6.2f} | "
+                f"{pct(a['reached_3balls'], n):>7.2f} {pct(a['reached_full'], n):>7.2f} "
+                f"{a['pitches'] / n:>6.2f} {a['p95']:>4} {a['max']:>4} "
+                f"{pct(ge4n, n):>6.2f} {pct(ge6, n):>6.2f}"
+            )
+    print("-" * 130)
+
+    # Capa 3 · OUTCOME
+    print()
+    print("-- CAPA 3 · OUTCOME (terminación del PA) --")
+    print(f"{'Celda':<14} | {'K%':>6} {'BB%':>6} {'1B%':>5} {'2B%':>5} "
+          f"{'HR%':>5} {'Reach%':>7} {'OUT%':>7}")
+    print("-" * 130)
+    for ctl_name in ("LOW", "MID", "HIGH"):
+        for prof_name in ("WEAK", "MID", "STRONG"):
+            out = cells[(ctl_name, prof_name)]["outcome"]
+            n = reps
+            reach = out["BB"] + out["1B"] + out["2B"] + out["3B"] + out["HR"]
+            print(
+                f"{ctl_name}-{prof_name:<7} | "
+                f"{pct(out['K'], n):>6.2f} {pct(out['BB'], n):>6.2f} "
+                f"{pct(out['1B'], n):>5.2f} {pct(out['2B'], n):>5.2f} "
+                f"{pct(out['HR'], n):>5.2f} {pct(reach, n):>7.2f} "
+                f"{pct(out['OUT'], n):>7.2f}"
+            )
+    print("-" * 130)
+
+    # Contratos H5–H8 (fijados antes de correr)
+    print()
+    print("-- CONTRATOS 002E-2 (fijados ANTES de correr) --")
+    h5_ok = h6_ok = h7_ok = h8_ok = True
+    print(f"{'Celda':<14} | {'H5 CTL ord':>10} {'H6 profile ord':>12} | "
+          f"{'H7 BB viva':>10} | {'H8 PA acot':>9} | {'PASS?':>6}")
+    print("-" * 130)
+    seqs = {}
+    for ctl_name in ("LOW", "MID", "HIGH"):
+        seqs[ctl_name] = {}
+        for prof_name in ("WEAK", "MID", "STRONG"):
+            seqs[ctl_name][prof_name] = cells[(ctl_name, prof_name)]
+    # H5 · CTL↑ → CalledS/tk↑ (perfil fijo): llamada de strike mecánica crece
+    cst_by_ctl = {}
+    for prof_name in ("WEAK", "MID", "STRONG"):
+        cst_by_ctl[prof_name] = [
+            pct(cells[(c, prof_name)]["called_strikes_on_take"],
+                max(1, cells[(c, prof_name)]["take_attempts"]))
+            for c in ("LOW", "MID", "HIGH")
+        ]
+        if not (cst_by_ctl[prof_name][0] < cst_by_ctl[prof_name][1] <
+                cst_by_ctl[prof_name][2]):
+            h5_ok = False
+    # H6 · perfil WEAK→MID→STRONG → Reach%↑ (por CTL fijo)
+    reach_by_prof = {}
+    for ctl_name in ("LOW", "MID", "HIGH"):
+        reach_by_prof[ctl_name] = []
+        for prof_name in ("WEAK", "MID", "STRONG"):
+            out = cells[(ctl_name, prof_name)]["outcome"]
+            reach_by_prof[ctl_name].append(
+                pct(out["BB"] + out["1B"] + out["2B"] + out["3B"] + out["HR"], reps))
+        if not (reach_by_prof[ctl_name][0] < reach_by_prof[ctl_name][1] <
+                reach_by_prof[ctl_name][2]):
+            h6_ok = False
+    # H7 · la vía mecánica de BB no colapsa (BB% material en los 3 perfiles,
+    # incl. el matchup extremo WEAK/CTL-LOW). Piso fijado antes de correr:
+    # BB count ≥ 978 por celda (978 / 50,000 PA = 1.956%).
+    for ctl_name in ("LOW", "MID", "HIGH"):
+        for prof_name in ("WEAK", "MID", "STRONG"):
+            bb_cnt = cells[(ctl_name, prof_name)]["outcome"]["BB"]
+            if bb_cnt < 978:
+                h7_ok = False
+    # H8 · PA acotado: Pit/PA, p95, max, P(≥6) sin patologías (max ≤ 15)
+    for ctl_name in ("LOW", "MID", "HIGH"):
+        for prof_name in ("WEAK", "MID", "STRONG"):
+            a = cells[(ctl_name, prof_name)]
+            if a["max"] > 15 or a["p95"] > 12:
+                h8_ok = False
+    for ctl_name in ("LOW", "MID", "HIGH"):
+        for prof_name in ("WEAK", "MID", "STRONG"):
+            a = cells[(ctl_name, prof_name)]
+            ok = (cst_by_ctl[prof_name][0] < cst_by_ctl[prof_name][1] <
+                  cst_by_ctl[prof_name][2]
+                  and reach_by_prof[ctl_name][0] < reach_by_prof[ctl_name][1] <
+                  reach_by_prof[ctl_name][2]
+                  and pct(a["outcome"]["BB"], reps) >= 978
+                  and a["max"] <= 15 and a["p95"] <= 12)
+            print(
+                f"{ctl_name}-{prof_name:<7} | "
+                f"{'OK' if cst_by_ctl[prof_name][0] < cst_by_ctl[prof_name][1] < cst_by_ctl[prof_name][2] else 'FAIL':>10} "
+                f"{'OK' if reach_by_prof[ctl_name][0] < reach_by_prof[ctl_name][1] < reach_by_prof[ctl_name][2] else 'FAIL':>12} | "
+                f"{'OK' if pct(a['outcome']['BB'], reps) >= 978 else 'FAIL':>10} | "
+                f"{'OK' if a['max'] <= 15 and a['p95'] <= 12 else 'FAIL':>9} | "
+                f"{'PASS' if ok else 'FAIL':>6}"
+            )
+    print("-" * 130)
+    print(f"Veredicto 002E-2: H5 CTL-ord {'PASS' if h5_ok else 'FAIL'} | "
+          f"H6 perfil-ord {'PASS' if h6_ok else 'FAIL'} | "
+          f"H7 BB viva {'PASS' if h7_ok else 'FAIL'} | "
+          f"H8 PA acot {'PASS' if h8_ok else 'FAIL'}")
+    print("Watch (sin target): K%/BIP%/HR%/Whiff reconfirmados; CLAMP-001 "
+          "NO se toca aquí (es 002E-3, estudio aislado del piso 0.25).")
 
 
 # ---------------------------------------------------------------------------
@@ -2858,7 +3106,7 @@ def run_pa_level(reps: int) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Monte Carlo de fatiga (GAMEPLAY-ENGINE-001B)")
-    parser.add_argument("--mode", choices=["pa", "pitch", "discipline", "cv", "take", "foul", "bc", "d2", "cv2", "f5", "c1", "c3", "c4", "c5", "d1", "d3", "d4", "e1"], default="pa",
+    parser.add_argument("--mode", choices=["pa", "pitch", "discipline", "cv", "take", "foul", "bc", "d2", "cv2", "f5", "c1", "c3", "c4", "c5", "d1", "d3", "d4", "e1", "e2"], default="pa",
                         help="pa = PA completo (001B-4); pitch = pitch suelto (001B-3); "
                              "discipline = diagnóstico de count/disciplina sin fatiga (002A); "
                              "cv = factorial Control×Vision (002B); "
@@ -2867,13 +3115,16 @@ def main() -> None:
                              "bc = factorial TAKE×foul (002C-BC); "
                              "d2 = two-strike discipline sensitivity (002D); "
                              "cv2 = Control×Vision sobre candidato 002D (002C-CV); "
-                             "e1 = baseline PROD vs candidato B3-C1 head-to-head sobre grid CTL×VIS (002E-1); "
+                              "e1 = baseline PROD vs candidato B3-C1 head-to-head sobre grid CTL×VIS (002E-1); "
+                              "e2 = robustez B3-C1 por perfil ofensivo del bateador (WEAK/MID/STRONG over CTL fijo) (002E-2); "
+                              "e2 = robustez B3-C1 por perfil ofensivo del bateador WEAK/MID/STRONG sobre grid CTL (002E-2); "
                              "f5 = full-PA sobre el PA calibrado 002 (001B-5); "
                              "c1 = distribución natural de workload, fatiga neutralizada (001C-1); "
                              "c3 = threshold × outing completo, SMOOTH (001C-3); "
                              "c4 = robustez por matchup, SMOOTH-100 (001C-4); "
-                             "c5 = escala del threshold 3/6/9 innings (001C-5); "
-                             "d1 = caracterización de la decisión CPU de cambio bajo Policy v2 (001D-1); "
+                              "c5 = escala del threshold 3/6/9 innings (001C-5); "
+                              "d1 = caracterización de la decisión CPU de cambio bajo Policy v2 (001D-1); "
+                              "e2 = robustez B3-C1 por matchup ofensivo del bateador, CTL×perfil WEAK/MID/STRONG (002E-2); "
                              "d3 = comparación de estrategias CPU workload-based por matchup (001D-3); "
                              "d4 = barrido ampliado + coste marginal de esperar (001D-4A/B)")
     parser.add_argument("--reps", type=int, default=REPS, help="réplicas por escenario")
@@ -2897,6 +3148,8 @@ def main() -> None:
         run_control_vision_level_calibrated(args.reps)
     elif args.mode == "e1":
         run_prod_vs_b3c1(args.reps)
+    elif args.mode == "e2":
+        run_matchup_robustness_e2(args.reps)
     elif args.mode == "f5":
         run_fatigue_curve_comparison(args.reps)
     elif args.mode == "c1":

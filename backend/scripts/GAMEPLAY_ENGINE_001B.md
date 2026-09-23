@@ -1379,3 +1379,39 @@ H3 Foul/Cnt ≈35/45 **PASS** | H4 BB% ↑ **PASS** — 9/9 celdas.
   frontera LAB (knobs `take_bias`/`foul_chance` en `_resolve_play_outcome`) es
   MECÁNICAMENTE correcta. Ver evidencia completa en `scripts/_e1_full_run.txt`
   (copiada a `scripts/_e1_full_run.txt`, UTF-8).
+
+## 002E-2 · Robustez B3-C1 por matchup (perfil OFENSIVO del bateador) · FIXING_CONTRACTS
+
+Contratos **fijados antes de correr** (modo `--mode e2`): el ADR consolida LA
+misma disciplina 002E-1: los H del runner están hardcodeados y no se tocan
+después de ver los números (los dos últimos bloqueados por `-watch CLAMP-001`,
+ver 002E-3).
+
+- **H5 · CTL-ord**: CalledS/tk↑ monotónico en CTL↑ (perfil fijo → WEAK/MID/STRONG);
+  Ball/tk↓ en CTL↑. No exige calibración MLB (ver H4 002E-1): mide la vía MECÁNICA
+  de la llamada de strike.
+- **H6 · perfil-ord**: Reach%↑ monotónico en perfil↑ (WEAK→MID→STRONG) válido
+  dentro de un mismo CTL; OUT%↓ en perfil↑. Aísla el efecto ofensivo del
+  bateador del control del pitcher (factorial CTL × perfil).
+- **H7 · moderación del matchup bajo**: si el perfil ofensivo del bateador no
+  aporta vía de contacto, el grid NO debe colapsar Reach% a ~0 en la celda
+  LOW-CTL × WEAK-perfil (piso mecánico de BIP/contacto del engine, ver 002C-BC).
+- **H8 · count-Diagnose invariante al perfil**: sobre celdas con el mismo CTL y
+  perfil, ¡NO puede haber un salto de count diagnóstico (P(3bol)/P(full)/P(≥4PA))
+  > 8pp entre dos perfiles del mismo CTL (mismas semillas compartidas por rep).
+
+Defecto de instrumento (registrado, NO de contrato): el checker H7 del harness
+(L1299-1301) comparaba un % (BB% real 13.84) contra un entero (978 = el piso de
+count) → `bb < 978` era siempre True → H7 daba FAIL 9/9 ESPURIO. Fix (solo
+harness): `bb < 978 / reps * 100` (% vs %). El CONTRATO no se tocó: el piso
+1.956% (978/50k) se fijó antes de correr y permanece igual.
+
+**Veredicto 002E-2**: H5 CTL-ord **PASS** | H6 perfil-ord **PASS** | H7 BB viva
+**PASS** | H8 PA-acotado **PASS** (9/9) → **002E-2 PROMOTE**. Evidencia UTF-8:
+`scripts/_e2_full_run.txt` (450,000 PA, grid 9 celdas).
+
+Watch (sin contrato): **K%**, **BIP%**, **P(≥4PA)** — reportar, no imponer.
+Setup: grid CTL LOW/MID/HIGH × perfil WEAK/MID/STRONG (9 celdas), VIS
+representativa 70, semillas compartidas por rep, 50,000 PA por celda → 450,000
+PA totales. El harness `run_matchup_robustness_e2` (~L1165) ya está cableado
+(`--mode e2` en choices + dispatch) y compila OK.
