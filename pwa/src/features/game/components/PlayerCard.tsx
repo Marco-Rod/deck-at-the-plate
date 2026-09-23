@@ -8,7 +8,6 @@ interface PlayerCardProps {
   disableEffects?: boolean
   disablePulse?: boolean
   size?: 'sm' | 'md' | 'lg'
-  fatigueLevel?: number
   onClickPitcher?: () => void
 }
 
@@ -93,7 +92,6 @@ export function PlayerCard({
   disableEffects = false,
   disablePulse = false,
   size = 'md',
-  fatigueLevel = 0,
   onClickPitcher,
 }: PlayerCardProps) {
   const { t } = useTranslation()
@@ -147,9 +145,6 @@ export function PlayerCard({
   }
 
   const isPulsing = !disableEffects && !disablePulse
-  const vibrateIntensity = (fatigueLevel / 100) * 3
-  const vibrationDuration = Math.max(0.2, 1 - fatigueLevel / 100)
-  const shouldVibrate = role === 'PITCHER' && fatigueLevel > 0
   const isInteractive = role === 'PITCHER' && Boolean(onClickPitcher)
   const whileHover = disableEffects
     ? {}
@@ -199,17 +194,11 @@ export function PlayerCard({
               ],
             }
           : {}),
-        ...(shouldVibrate && {
-          x: [0, vibrateIntensity, -vibrateIntensity, vibrateIntensity, 0],
-        }),
       }}
       transition={{
         ...(isPulsing
           ? { duration: 2.5, repeat: Infinity, ease: 'easeInOut' as const }
           : {}),
-        ...(shouldVibrate && {
-          x: { duration: vibrationDuration, repeat: Infinity, ease: 'easeInOut' as const },
-        }),
       }}
       whileHover={whileHover}
       whileTap={whileTap}

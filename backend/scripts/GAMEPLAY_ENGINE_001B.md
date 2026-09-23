@@ -40,6 +40,16 @@ GAMEPLAY-FATIGUE-UI-001
   confirming the whole tree — PitcherStaminaBar, CentralField,
   PlayerCard fatigue haptics — is really unreachable).
 
+GAMEPLAY-FATIGUE-UI-001 — CLOSED
+
+- removed unreachable PitcherStaminaBar legacy model
+- removed unreachable CentralField if confirmed unused
+- removed stale fatigueLevel haptics from PlayerCard
+- no independent frontend fatigue formula remains
+- authoritative UI source:
+  fatigue_factor + fatigue_band
+  with temporary fatigue_level compatibility fallback
+
 GAMEPLAY-ENGINE-002 — DISCIPLINE / COUNT MODEL
 002A    PA/count characterization       CLOSED / PASS
 002B    CTL×VIS original                CLOSED / PASS
