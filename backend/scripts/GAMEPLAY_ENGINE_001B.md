@@ -1342,3 +1342,40 @@ Cerrado con 750,000 PA (50k × 5 starting workloads × 3 curvas). MID vs MID, po
   informa UI/CPU; semánticamente distinta de `apply_pitcher_fatigue` aunque
   derivan ambas del mismo factor. (Ver la decisión pendiente de 001B-6: si ambas
   representan la misma función o tienen semánticas deliberadamente distintas.)
+
+## 002E-1 · Baseline PROD (0.65/35) vs candidato B3-C1 (0.30/45) — head-to-head · CLOSED
+
+Contratos **fijados antes de correr** (modo `--mode e1`, `run_prod_vs_b3c1`):
+
+- **H1** · Whiff/Swing invariante |Δ| ≤ 1.0pp (whiff model intocado).
+- **H2** · CalledS/take ↓ y Ball/take ↑ en toda celda (take_bias 0.65→0.30).
+- **H3** · Foul/Cnt ≈ 35 (PROD) / ≈ 45 (B3-C1), tol ±1.5pp.
+- **H4** · BB% B3-C1 > PROD en toda celda.
+
+Setup: grid CTL×VIS 45/70/95 (9 celdas) × 2 brazos | agente LAB FIJO 65/50/30
+en ambos | fatiga congelada 75% (factor 1.0) | 50,000 PA por celda-brazo |
+semillas compartidas por rep entre brazos.
+
+| Celda | H1 whiff Δ | H2 CalledSΔ BallΔ | H3 Foul PROD / Foul B3-C1 | H4 BB% Δ | PASS? |
+|---|---|---|---|---|---|
+| LOW-LOW  | +0.07 | +34.91 / +34.91 | 35.10 / 45.18 | +10.33 | OK |
+| LOW-MID  | +0.04 | +34.15 / +34.15 | 35.13 / 45.17 | +11.99 | OK |
+| LOW-HIGH | +0.05 | +29.14 / +29.14 | 35.17 / 45.17 | +11.13 | OK |
+| MID-LOW  | +0.07 | +35.15 / +35.15 | 35.19 / 45.12 |  +7.51 | OK |
+| MID-MID  | +0.15 | +35.10 / +35.10 | 35.11 / 45.11 |  +9.37 | OK |
+| MID-HIGH | +0.12 | +34.76 / +34.76 | 35.07 / 45.20 | +11.30 | OK |
+| HIGH-LOW | -0.01 | +35.18 / +35.18 | 35.29 / 45.18 |  +5.09 | OK |
+| HIGH-MID | +0.02 | +35.11 / +35.11 | 35.27 / 45.13 |  +6.59 | OK |
+| HIGH-HIGH| +0.13 | +35.16 / +35.16 | 35.11 / 45.14 |  +8.43 | OK |
+
+**Veredicto**: H1 whiff/swing invariante **PASS** | H2 CalledS↓/Ball↑ **PASS** |
+H3 Foul/Cnt ≈35/45 **PASS** | H4 BB% ↑ **PASS** — 9/9 celdas.
+
+- **Watch CLAMP-001** (deuda visible, no se arregla en 002E-1): en CTL LOW del
+  brazo B3-C1 el piso 0.25 es binding (CalledS/tk V70≈V95, ver 002C-CV); PROD
+  no lo pisa → el delta de sensibilidad en esa fila es evidencia de la deuda,
+  del contraste no.
+- **Conclusión**: el candidato B3-C1 cumple los 4 contratos direccionales; la
+  frontera LAB (knobs `take_bias`/`foul_chance` en `_resolve_play_outcome`) es
+  MECÁNICAMENTE correcta. Ver evidencia completa en `scripts/_e1_full_run.txt`
+  (copiada a `scripts/_e1_full_run.txt`, UTF-8).

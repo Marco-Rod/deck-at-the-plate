@@ -869,6 +869,222 @@ def run_control_vision_cell_calibrated(control: int, vision: int, reps: int) -> 
 
 
 # ---------------------------------------------------------------------------
+# 002E-1 · Baseline PROD vs candidato B3-C1 (head-to-head sobre grid CTL×VIS)
+# ---------------------------------------------------------------------------
+# PROD (take_bias=None → 0.65, foul_chance=None → 35.0) vs B3-C1 (0.30/45.0).
+# Agente LAB 65/50/30 FIJO en ambos brazos (solo cambian los knobs del engine);
+# fatiga neutralizada (workload 0.75 → factor 1.0); mismas seeds por rep entre
+# brazos y celdas. Contratos FIJADOS antes de correr:
+#   H1 Whiff/swing invariante |Δ| ≤ 1.0pp (el whiff model no se toca).
+#   H2 CalledS/tk ↓ y Ball/tk ↑ en TODA celda (take_bias 0.65→0.30).
+#   H3 Foul/Cnt ≈ 35% (PROD) / 45% (B3-C1) ± 1.5pp en toda celda.
+#   H4 BB% ↑ (más bolas en TAKE → más bases por bolas).
+# K%, BIP%, Pit/PA y colas se REPORTAN: 002C-BC dejó a K% ambigua bajo políticas
+# con mucho TAKE (up- or down-stream del foul), no se fija dirección.
+E1_POLICY = {0: 0.65, 1: 0.50, 2: 0.30}  # agente fijo (candidato 002D), ambos brazos
+E1_FIX = {"take_bias": 0.30, "foul_chance": 45.0}
+
+
+def run_e1_cell(control: int, vision: int, take_bias: float, foul_chance: float,
+                reps: int) -> dict:
+    """Celda 002E-1: PA diagnóstico completo (3 capas de métricas) para un brazo."""
+    agg = {
+        "outcome": Counter(),
+        "pitches": 0,
+        "lengths": [],
+        "reached_2strikes": 0,
+        "reached_3balls": 0,
+        "reached_full": 0,
+        "take_attempts": 0,
+        "balls_on_take": 0,
+        "called_strikes_on_take": 0,
+        "take_at_2s": 0,
+        "pitches_at_2s": 0,
+        "swing_attempts": 0,
+        "whiffs": 0,
+        "fouls": 0,
+        "bips": 0,
+        "ge4": Counter(),
+        "outcome_at_2s": Counter(),
+    }
+    for rep in range(reps):
+        seed = int(DISCIPLINE_WORKLOAD * 1000) * 10**6 + rep  # mismas seeds entre brazos
+        d = _simulate_pa_diag(E1_POLICY, seed, control=control, vision=vision,
+                              take_bias=take_bias, foul_chance=foul_chance)
+        for key in ("reached_2strikes", "reached_3balls", "reached_full",
+                    "take_attempts", "balls_on_take", "called_strikes_on_take",
+                    "take_at_2s", "pitches_at_2s", "swing_attempts", "whiffs",
+                    "fouls", "bips"):
+            agg[key] += d[key]
+        agg["outcome"][d["outcome"]] += 1
+        agg["pitches"] += d["pitches"]
+        agg["lengths"].append(d["pitches"])
+        if d["pitches"] >= 4:
+            agg["ge4"]["n"] += 1
+            if d["outcome"] == "K":
+                agg["ge4"]["K"] += 1
+            elif d["outcome"] == "BB":
+                agg["ge4"]["BB"] += 1
+            else:
+                agg["ge4"]["BIP"] += 1
+        if d["reached_2strikes"]:
+            agg["outcome_at_2s"]["n"] += 1
+            if d["outcome"] == "K":
+                agg["outcome_at_2s"]["K"] += 1
+            elif d["outcome"] == "BB":
+                agg["outcome_at_2s"]["BB"] += 1
+            else:
+                agg["outcome_at_2s"]["BIP"] += 1
+    lengths = sorted(agg["lengths"])
+    agg["p95"] = lengths[int(len(lengths) * 0.95) - 1]
+    agg["max"] = lengths[-1]
+    return agg
+
+
+def run_prod_vs_b3c1(reps: int) -> None:
+    """002E-1 · PROD (0.65/35) vs B3-C1 (0.30/45) sobre CTL×VIS 3×3, agente fijo."""
+    arms = {"PROD": (None, None), "B3-C1": (E1_FIX["take_bias"], E1_FIX["foul_chance"])}
+    cells = {}
+    for ctl_name in ("LOW", "MID", "HIGH"):
+        for vis_name in ("LOW", "MID", "HIGH"):
+            ctl = CV_LEVELS[ctl_name]
+            vis = CV_LEVELS[vis_name]
+            for arm, (tb, fc) in arms.items():
+                cells[(arm, ctl_name, vis_name)] = run_e1_cell(ctl, vis, tb, fc, reps)
+
+    def pct(x, n):
+        return x / n * 100 if n else 0.0
+
+    print("=" * 130)
+    print("002E-1 · Baseline PROD (0.65/35) vs candidato B3-C1 (0.30/45) — head-to-head")
+    print(f"Grid CTL×VIS 45/70/95 (9 celdas) × 2 brazos | agente LAB FIJO 65/50/30 "
+          f"en ambos | fatiga congelada 75% (factor 1.0) | {reps:,} PA por celda-brazo")
+    print(f"Semillas compartidas por rep entre brazos. Contratos H1–H4 fijados antes de la corrida.")
+    print("=" * 130)
+
+    # Capa 1 · INPUT/MECANISMO
+    print()
+    print("-- CAPA 1 · INPUT / MECANISMO (parámetros y su integridad) --")
+    print(f"{'Celda':<8} {'Brazo':<6} | {'CalledS/tk':>10} {'Ball/tk':>8} | "
+          f"{'Foul/Cnt':>8} {'BIP/Cnt':>7} | {'Whiff/swing':>11} {'P(TAKE)':>7}")
+    print("-" * 130)
+    for ctl_name in ("LOW", "MID", "HIGH"):
+        for vis_name in ("LOW", "MID", "HIGH"):
+            for arm in ("PROD", "B3-C1"):
+                a = cells[(arm, ctl_name, vis_name)]
+                tk = a["take_attempts"]
+                ct = a["fouls"] + a["bips"]
+                sw = a["swing_attempts"]
+                print(
+                    f"{ctl_name}-{vis_name:<5} {arm:<6} | "
+                    f"{pct(a['called_strikes_on_take'], tk):>10.2f} "
+                    f"{pct(a['balls_on_take'], tk):>8.2f} | "
+                    f"{pct(a['fouls'], ct):>8.2f} {pct(a['bips'], ct):>7.2f} | "
+                    f"{pct(a['whiffs'], sw):>11.2f} "
+                    f"{pct(a['take_attempts'], a['pitches']):>6.2f} "
+                )
+    print("-" * 130)
+
+    # Capa 2 · ESTRUCTURA DE PA
+    print()
+    print("-- CAPA 2 · ESTRUCTURA DE PA --")
+    print(f"{'Celda':<8} {'Brazo':<6} | {'K%':>6} {'BB%':>6} {'BIP%':>6} | "
+          f"{'P(3bol)':>7} {'P(full)':>7} {'Pit/PA':>6} {'p95':>4} {'max':>4}")
+    print("-" * 130)
+    for ctl_name in ("LOW", "MID", "HIGH"):
+        for vis_name in ("LOW", "MID", "HIGH"):
+            for arm in ("PROD", "B3-C1"):
+                a = cells[(arm, ctl_name, vis_name)]
+                n = reps
+                out = a["outcome"]
+                bip = out["OUT"] + out["1B"] + out["2B"] + out["3B"] + out["HR"]
+                print(
+                    f"{ctl_name}-{vis_name:<5} {arm:<6} | "
+                    f"{pct(out['K'], n):>6.2f} {pct(out['BB'], n):>6.2f} "
+                    f"{pct(bip, n):>6.2f} | "
+                    f"{pct(a['reached_3balls'], n):>7.2f} {pct(a['reached_full'], n):>7.2f} "
+                    f"{a['pitches'] / n:>6.2f} {a['p95']:>4} {a['max']:>4}"
+                )
+    print("-" * 130)
+
+    # Capa 3 · OUTCOME
+    print()
+    print("-- CAPA 3 · OUTCOME (terminación del PA) --")
+    print(f"{'Celda':<8} {'Brazo':<6} | {'OUT%':>6} {'1B%':>5} {'2B%':>5} "
+          f"{'3B%':>5} {'HR%':>5} {'Reach%':>7}")
+    print("-" * 130)
+    for ctl_name in ("LOW", "MID", "HIGH"):
+        for vis_name in ("LOW", "MID", "HIGH"):
+            for arm in ("PROD", "B3-C1"):
+                out = cells[(arm, ctl_name, vis_name)]["outcome"]
+                n = reps
+                reach = out["BB"] + out["1B"] + out["2B"] + out["3B"] + out["HR"]
+                print(
+                    f"{ctl_name}-{vis_name:<5} {arm:<6} | "
+                    f"{pct(out['OUT'], n):>6.2f} {pct(out['1B'], n):>5.2f} "
+                    f"{pct(out['2B'], n):>5.2f} {pct(out['3B'], n):>5.2f} "
+                    f"{pct(out['HR'], n):>5.2f} {pct(reach, n):>7.2f}"
+                )
+    print("-" * 130)
+
+    # Contratos direccionales
+    print()
+    print("-- CONTRATOS (fijados antes de correr) --")
+    h1_ok = True
+    h2_ok = True
+    h3_ok = True
+    h4_ok = True
+    print(f"{'Celda':<10} | {'H1 Whiff Δ':>9} | {'H2 CalledS↓':>11} {'H2 Ball↑':>8} | "
+          f"{'H3 Foul PROD':>11} {'Foul B3C1':>10} | {'H4 BB Δ':>7} | {'PASS?':>6}")
+    print("-" * 130)
+    for ctl_name in ("LOW", "MID", "HIGH"):
+        for vis_name in ("LOW", "MID", "HIGH"):
+            p = cells[("PROD", ctl_name, vis_name)]
+            c = cells[("B3-C1", ctl_name, vis_name)]
+            n = reps
+            tk_p = max(1, p["take_attempts"])
+            tk_c = max(1, c["take_attempts"])
+            ct_p = max(1, p["fouls"] + p["bips"])
+            ct_c = max(1, c["fouls"] + c["bips"])
+            sw_p = max(1, p["swing_attempts"])
+            sw_c = max(1, c["swing_attempts"])
+            whiff_p = pct(p["whiffs"], sw_p)
+            whiff_c = pct(c["whiffs"], sw_c)
+            cst_p = pct(p["called_strikes_on_take"], tk_p)
+            cst_c = pct(c["called_strikes_on_take"], tk_c)
+            ball_p = pct(p["balls_on_take"], tk_p)
+            ball_c = pct(c["balls_on_take"], tk_c)
+            foul_p = pct(p["fouls"], ct_p)
+            foul_c = pct(c["fouls"], ct_c)
+            bb_p = pct(p["outcome"]["BB"], n)
+            bb_c = pct(c["outcome"]["BB"], n)
+            h1 = abs(whiff_p - whiff_c) <= 1.0
+            h2 = cst_c < cst_p and ball_c > ball_p
+            h3 = (33.5 <= foul_p <= 36.5) and (43.5 <= foul_c <= 46.5)
+            h4 = bb_c > bb_p
+            h1_ok &= h1
+            h2_ok &= h2
+            h3_ok &= h3
+            h4_ok &= h4
+            ok = h1 and h2 and h3 and h4
+            print(
+                f"{ctl_name}-{vis_name:<7} | "
+                f"{whiff_c - whiff_p:>+9.2f} | {cst_p - cst_c:>+11.2f} "
+                f"{ball_c - ball_p:>+8.2f} | "
+                f"{foul_p:>11.2f} {foul_c:>10.2f} | "
+                f"{bb_c - bb_p:>+7.2f} | {'OK' if ok else 'FAIL':>6}"
+            )
+    print("-" * 130)
+    print(f"Veredicto contratos: H1 whiff/swing invariante "
+          f"{'PASS' if h1_ok else 'FAIL'} | H2 CalledS↓/Ball↑ "
+          f"{'PASS' if h2_ok else 'FAIL'} | H3 Foul/Cnt ≈35/45 "
+          f"{'PASS' if h3_ok else 'FAIL'} | H4 BB↑ {'PASS' if h4_ok else 'FAIL'}")
+    print("Watch CLAMP-001: en CTL LOW del brazo B3-C1 el piso 0.25 es binding "
+          "(CalledS/tk V70≈V95, ver 002C-CV); PROD no lo pisa → el delta de "
+          "sensibilidad en esa fila es evidencia de la deuda, no del contraste.")
+
+
+# ---------------------------------------------------------------------------
 # 002C-B · TAKE calibration · baseline sweep (intercept de strike_chance)
 # ---------------------------------------------------------------------------
 # Mantiene coefs CTL/VIS actuales (0.003 / -0.002 con (attr-50)); solo varía
@@ -2642,7 +2858,7 @@ def run_pa_level(reps: int) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Monte Carlo de fatiga (GAMEPLAY-ENGINE-001B)")
-    parser.add_argument("--mode", choices=["pa", "pitch", "discipline", "cv", "take", "foul", "bc", "d2", "cv2", "f5", "c1", "c3", "c4", "c5", "d1", "d3", "d4"], default="pa",
+    parser.add_argument("--mode", choices=["pa", "pitch", "discipline", "cv", "take", "foul", "bc", "d2", "cv2", "f5", "c1", "c3", "c4", "c5", "d1", "d3", "d4", "e1"], default="pa",
                         help="pa = PA completo (001B-4); pitch = pitch suelto (001B-3); "
                              "discipline = diagnóstico de count/disciplina sin fatiga (002A); "
                              "cv = factorial Control×Vision (002B); "
@@ -2651,6 +2867,7 @@ def main() -> None:
                              "bc = factorial TAKE×foul (002C-BC); "
                              "d2 = two-strike discipline sensitivity (002D); "
                              "cv2 = Control×Vision sobre candidato 002D (002C-CV); "
+                             "e1 = baseline PROD vs candidato B3-C1 head-to-head sobre grid CTL×VIS (002E-1); "
                              "f5 = full-PA sobre el PA calibrado 002 (001B-5); "
                              "c1 = distribución natural de workload, fatiga neutralizada (001C-1); "
                              "c3 = threshold × outing completo, SMOOTH (001C-3); "
@@ -2678,6 +2895,8 @@ def main() -> None:
         run_two_strike_sweep(args.reps)
     elif args.mode == "cv2":
         run_control_vision_level_calibrated(args.reps)
+    elif args.mode == "e1":
+        run_prod_vs_b3c1(args.reps)
     elif args.mode == "f5":
         run_fatigue_curve_comparison(args.reps)
     elif args.mode == "c1":
