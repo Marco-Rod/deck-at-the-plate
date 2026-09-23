@@ -145,7 +145,7 @@ ENGINE_FUNCTIONS = {
     calculator: ["calculate_play_outcome"],
     cpu_ai: ["get_cpu_pitch_action", "get_cpu_swing_action", "get_cpu_pitcher_change_decision", "is_cpu_turn"],
     deck_manager: ["initialize_tactics_state", "draw_card", "discard_used_tactic"],
-    fatigue_manager: ["get_pitch_threshold", "compute_fatigue_level", "apply_pitcher_fatigue"],
+    fatigue_manager: ["get_pitch_threshold", "compute_fatigue_level", "apply_pitcher_fatigue", "get_workload", "get_fatigue_band"],
     fog_of_war: ["sanitize_state_for_player"],
     game_actions: ["build_play_resolved_payload", "apply_tactic_modifiers", "resolve_swing", "execute_cpu_pitcher_change", "trigger_cpu_response"],
     game_over_manager: ["check_game_over"],

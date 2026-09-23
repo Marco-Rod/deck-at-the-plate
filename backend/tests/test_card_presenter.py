@@ -4,6 +4,8 @@ dict-builders de pitcher/bateador que estaban duplicados).
 """
 from types import SimpleNamespace
 
+import pytest
+
 from app.services.card_presenter import (
     build_batter_payload,
     build_card_base,
@@ -91,6 +93,39 @@ def test_pitcher_payload_with_stamina():
     )
     assert payload["pitch_count"] == 42
     assert payload["fatigue_level"] == 38
+
+
+def test_pitcher_payload_factor_and_band_emitted_when_provided():
+    payload = build_pitcher_payload(
+        make_card(),
+        with_stamina=True,
+        pitch_count=120,
+        fatigue_level=60.0,
+        fatigue_factor=0.7735,
+        fatigue_band="FATIGUED",
+    )
+    assert payload["fatigue_factor"] == pytest.approx(0.7735)
+    assert payload["fatigue_band"] == "FATIGUED"
+
+
+def test_pitcher_payload_without_stamina_omits_factor_and_band():
+    payload = build_pitcher_payload(
+        make_card(),
+        fatigue_factor=0.7735,
+        fatigue_band="FATIGUED",
+    )
+    assert "fatigue_factor" not in payload
+    assert "fatigue_band" not in payload
+
+
+def test_pitcher_payload_factor_rounding_to_4_decimals():
+    payload = build_pitcher_payload(
+        make_card(),
+        with_stamina=True,
+        fatigue_factor=0.9118446,
+        fatigue_band="TIRING",
+    )
+    assert payload["fatigue_factor"] == pytest.approx(0.9118)
 
 
 def test_pitcher_payload_already_used():
