@@ -30,7 +30,7 @@ GAMEPLAY-FATIGUE-CPU-001 — UI / CPU STRATEGY SEMANTICS
 001D-3  Simulate CPU change strategies   CLOSED ✓ (AGGRESSIVE/BALANCED/TOLERANT × STRONG/MID/WEAK)
 001D-4  Select EASY/MEDIUM/HARD policies  CLOSED ✓ (recomendado HARD 1.20 / MEDIUM 1.35 / EASY 1.50)
 001D-5  UI fatigue representation        CLOSED / PASS
-001D-6  Production implementation        OPEN
+001D-6  Production implementation        CLOSED / PASS
 
 Finding:
 GAMEPLAY-FATIGUE-UI-001
@@ -901,6 +901,35 @@ Deuda relacionada registrada: `GAMEPLAY-FATIGUE-UI-001` (código muerto de
 `PitcherStaminaBar`, incluida una tercera política de fatiga contradictoria;
 limpieza en commit aparte tras 001D-6 para no mezclar CPU strategy + API
 contract + UI migration + dead-code deletion).
+
+## 001D-6 · Production implementation (cierre)
+
+```text
+001D-6 — Production implementation
+CLOSED / PASS
+
+Backend:
+  cpu_ai.get_cpu_pitcher_change_decision usa workload (001D-4): 1.20/1.35/1.50
+  fatigue_manager.get_workload / get_fatigue_band        (001D-2/001D-5)
+  payloads emiten fatigue_factor + fatigue_band (+ fatigue_level deprecated)
+
+Frontend:
+  PitcherMetaBar muestra la banda como texto principal; barra = factor*100.
+  Fallback legacy: sin fatigue_factor → STAMINA {pct} (fatigue_level).
+  fatigue_level NO es fuente autoritativa.
+
+Tests:
+  test_cpu_ai (workload), test_fatigue_manager (bandas/workload),
+  test_card_presenter (factor/banda en payloads), consumer inventory.
+
+Telemetry:
+  pitcher_fatigue existente sin cambios (semántica histórica sin investigar).
+  fatigue_factor/workload llegarán explícitos en telemetry v2 futura.
+
+Chain resultante: pitch count → workload → SMOOTH fatigue factor →
+atributos efectivos → decisión CPU / representación UI.
+fatigue_level legacy ya no dicta comportamiento de juego.
+```
 
 ## 002A · Plate discipline / count diagnostics
 
