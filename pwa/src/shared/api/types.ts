@@ -198,6 +198,7 @@ export interface TeamStatsResponse {
 export type PlayerRole = 'PITCHER' | 'BATTER'
 export type SwingType = 'NORMAL' | 'POWER' | 'TAKE' | 'BUNT'
 export type GameConnectionMode = 'ws' | 'polling'
+export type FatigueBand = 'FRESH' | 'TIRING' | 'FATIGUED' | 'EXHAUSTED'
 
 export interface PlayerStat {
   label: string
@@ -217,7 +218,9 @@ export interface PlayerGameData {
   repertoire?: PitchAttribute[]
   stats: PlayerStat[]
   pitch_count?: number
-  fatigue_level?: number
+  fatigue_level?: number // deprecated (001D-5): compatibility; prefer fatigue_factor/fatigue_band
+  fatigue_factor?: number
+  fatigue_band?: FatigueBand
 }
 
 export interface GameRunners {

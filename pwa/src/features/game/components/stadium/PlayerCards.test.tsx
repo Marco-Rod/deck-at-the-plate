@@ -11,6 +11,7 @@ const pitcher = {
   control: 88,
   movement: 86,
   stamina: 80,
+  fatigueBand: null,
   pitchCount: 4,
   rarity: 'GOLD',
   repertoire: null,

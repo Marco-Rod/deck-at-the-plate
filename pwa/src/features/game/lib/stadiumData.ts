@@ -1,5 +1,6 @@
 import type { BatterSummary, PitcherSummary } from '../components/stadium/playerPanelTypes'
 import type {
+  FatigueBand,
   GameStateWS,
   PlayerCard,
   PlayerGameData,
@@ -31,12 +32,17 @@ export function toPitcherSummary(player?: PlayerGameData): PitcherSummary {
       control: 0,
       movement: 0,
       stamina: 0,
+      fatigueBand: null,
       pitchCount: 0,
       rarity: 'COMMON',
       repertoire: null,
     }
-  const stamina =
-    player.fatigue_level == null
+  // Semántica vigente (001D-5): fatigue_factor/fatigue_band autoritativos.
+  // Fallback legacy: si no llega factor, se deriva de fatigue_level (deprecated).
+  const hasFatigueSignal = player.fatigue_factor != null && player.fatigue_band != null
+  const stamina = hasFatigueSignal
+    ? player.fatigue_factor! * 100
+    : player.fatigue_level == null
       ? statValue(player.stats, ['STAM', 'STAMINA'], 100)
       : 100 - player.fatigue_level
   return {
@@ -48,6 +54,7 @@ export function toPitcherSummary(player?: PlayerGameData): PitcherSummary {
     control: statValue(player.stats, ['CTRL', 'CONTROL']),
     movement: statValue(player.stats, ['MOV', 'MOVEMENT']),
     stamina: Math.round(Math.min(100, Math.max(0, stamina))),
+    fatigueBand: (hasFatigueSignal ? player.fatigue_band : null) as FatigueBand | null,
     pitchCount: player.pitch_count ?? 0,
     rarity: player.rarity ?? 'COMMON',
     repertoire: player.repertoire ?? null,

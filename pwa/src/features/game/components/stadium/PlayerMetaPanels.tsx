@@ -1,9 +1,18 @@
 import { motion } from 'framer-motion'
+import type { FatigueBand } from '@/shared/api/types'
 import styles from '../../pages/StadiumPage.module.css'
 
 interface PitcherMeta {
   stamina: number
+  fatigueBand: FatigueBand | null
   pitchCount: number
+}
+
+const FATIGUE_BAND_LABEL: Record<FatigueBand, string> = {
+  FRESH: 'Fresh',
+  TIRING: 'Tiring',
+  FATIGUED: 'Fatigued',
+  EXHAUSTED: 'Exhausted',
 }
 
 interface BatterPreview {
@@ -15,13 +24,18 @@ interface BatterPreview {
 }
 
 export function PitcherMetaBar({ pitcher }: { pitcher: PitcherMeta }) {
+  const bandLabel = pitcher.fatigueBand
+    ? FATIGUE_BAND_LABEL[pitcher.fatigueBand]
+    : null
+  // Texto principal = banda (001D-5); fallback legacy = porcentaje de fatigue_level.
+  const staminaText = bandLabel ? `STAMINA ${bandLabel}` : `STAMINA ${pitcher.stamina}%`
   return (
     <motion.div
       className={`${styles.pitcherMeta} flex flex-col justify-center gap-1 border border-koshien-dark/40 bg-koshien-dark/60 p-2 sm:p-3 lg:p-2`}
     >
       <div className="flex items-center justify-between">
         <span className="font-sports text-[10px] font-bold uppercase tracking-wider text-koshien-gold sm:text-sm lg:text-[9px]">
-          STAMINA {pitcher.stamina}%
+          {staminaText}
         </span>
         <span className="font-vintage text-[10px] uppercase text-koshien-cream sm:text-sm lg:text-[9px]">
           ⚾ {pitcher.pitchCount} LANZ.
