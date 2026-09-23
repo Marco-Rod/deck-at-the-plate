@@ -40,6 +40,7 @@ from app.engine.game_rules import EXTRA_INNINGS_MIN_INNING
 from app.engine.turn_guard import expected_actor, is_player_turn
 from app.engine.cpu_ai import is_cpu_turn
 from app.engine.attribute_mapper import map_card_to_pitcher_attrs
+from app.engine.fatigue_manager import get_fatigue_band
 from app.engine.game_actions import (
     PendingBroadcast,
     publish_pending_broadcasts,
@@ -467,13 +468,15 @@ async def change_pitcher(
     db.commit()
     db.refresh(game)
 
-    # ⭐ Construir datos del nuevo pitcher para el cliente
+    # ⭐ Construir datos del nuevo pitcher para el cliente (entra descansado)
     new_pitcher_data = build_pitcher_payload(
         new_pitcher,
         with_repertoire=True,
         with_stamina=True,
         pitch_count=0,
         fatigue_level=0.0,
+        fatigue_factor=1.0,
+        fatigue_band=get_fatigue_band(1.0).value,
     )
 
     logger.debug("PITCHER CHANGE: %s -> %s (%s)", old_pitcher_id, payload.new_pitcher_id, new_pitcher.name)

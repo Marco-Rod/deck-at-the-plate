@@ -36,6 +36,8 @@ def build_pitcher_payload(
     with_stamina: bool = False,
     pitch_count: int = 0,
     fatigue_level: float = 0.0,
+    fatigue_factor: float | None = None,
+    fatigue_band: str | None = None,
     already_used: bool | None = None,
     extra: dict[str, Any] | None = None,
 ) -> dict:
@@ -43,7 +45,8 @@ def build_pitcher_payload(
     Payload de un lanzador para el cliente.
 
     - with_repertoire: incluye el repertorio (necesario para el pitch selector).
-    - with_stamina: incluye pitch_count y fatigue_level (útil tras el cambio).
+    - with_stamina: incluye pitch_count, fatigue_level (deprecado) y, si se
+      proveen, fatigue_factor/fatigue_band (semántica vigente de la UI).
     - already_used: flag de bullpen ("ya lanzó en este partido").
     - extra: campos adicionales arbitrarios.
     """
@@ -55,6 +58,10 @@ def build_pitcher_payload(
     if with_stamina:
         payload["pitch_count"] = pitch_count
         payload["fatigue_level"] = round(fatigue_level)
+        if fatigue_factor is not None:
+            payload["fatigue_factor"] = round(fatigue_factor, 4)
+        if fatigue_band is not None:
+            payload["fatigue_band"] = fatigue_band
     if already_used is not None:
         payload["already_used"] = already_used
     if extra:

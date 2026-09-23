@@ -29,8 +29,16 @@ GAMEPLAY-FATIGUE-CPU-001 — UI / CPU STRATEGY SEMANTICS
 001D-2  Define fatigue signal semantics  CLOSED ✓ (workload canónico; bandas HEALTHY..SEVERE)
 001D-3  Simulate CPU change strategies   CLOSED ✓ (AGGRESSIVE/BALANCED/TOLERANT × STRONG/MID/WEAK)
 001D-4  Select EASY/MEDIUM/HARD policies  CLOSED ✓ (recomendado HARD 1.20 / MEDIUM 1.35 / EASY 1.50)
-001D-5  UI fatigue representation        OPEN
+001D-5  UI fatigue representation        CLOSED / PASS
 001D-6  Production implementation        OPEN
+
+Finding:
+GAMEPLAY-FATIGUE-UI-001
+  PitcherStaminaBar contains obsolete independent fatigue model.
+  Component currently unreachable.
+  Cleanup required (separate commit after 001D-6; only after
+  confirming the whole tree — PitcherStaminaBar, CentralField,
+  PlayerCard fatigue haptics — is really unreachable).
 
 GAMEPLAY-ENGINE-002 — DISCIPLINE / COUNT MODEL
 002A    PA/count characterization       CLOSED / PASS
@@ -795,6 +803,104 @@ coste**, no un óptimo. Lo que valida el mapeo es la frontera
 `≤1.10 gratis · 1.10–1.20 barato · 1.20–1.25 empieza · 1.25–1.35 claro ·
 1.35–1.50 fuerte · >1.50 severo`; HARD=1.20 = "empezar a protegerse justo
 cuando esperar deja de ser barato".
+
+## 001D-5 · UI fatigue representation (separación de señales)
+
+Se adopta la opción **B (aditiva)**: en lugar de reutilizar `fatigue_level`
+con un significado nuevo, se expresan explícitamente las capas del contrato.
+Evita la trampa histórica de un mismo campo con dos significados según versión
+(incómodo para telemetría, análisis histórico y debugging):
+
+```text
+fatigue_factor
+    ↓
+estado físico real del engine
+
+fatigue_band
+    ↓
+representación semántica para UI
+
+fatigue_level
+    ↓
+LEGACY / deprecated
+compatibilidad temporal solamente
+```
+
+Contrato que cierra 001D-5:
+
+- CPU: `strategic signal = workload` (nunca `fatigue_band`).
+- Engine: `physical degradation = fatigue_factor`.
+- UI: `fatigue_factor + fatigue_band`.
+- `fatigue_level` deja de ser fuente autoritativa.
+
+Bandas (sin ambigüedad en los límites):
+
+```text
+FRESH      factor >= 0.95
+TIRING     0.80 <= factor < 0.95
+FATIGUED   0.60 <= factor < 0.80
+EXHAUSTED  factor < 0.60
+```
+
+Correspondencia con lo calibrado en 001D-4 (sólo como referencia; **las bandas
+no gobiernan la CPU** — que exista relación con sus puntos de decisión no
+convierte `FATIGUED` en regla estratégica):
+
+```text
+w=1.00   factor 1.00   FRESH
+w=1.20   ~0.91         TIRING      ← HARD
+w=1.35   ~0.77         FATIGUED    ← MEDIUM
+w=1.50   ~0.63         FATIGUED    ← EASY
+>1.50    eventualmente EXHAUSTED
+```
+
+No se muestra `factor * 100` como "STAMINA 77%": un factor `0.77` significa
+aprox. que los atributos sujetos a fatiga se multiplican por `0.77`, no
+literalmente "77% de energía" fisiológica. El texto principal de la UI es la
+banda; la barra sí puede derivarse del factor para progresión visual.
+
+`fatigue_level` se mantiene temporalmente en el payload (`001D-6`) como
+`deprecated`, con fallback en el frontend (`fatigue_factor` presente → nueva
+UI; ausente → comportamiento legacy). La telemetría existente
+`pitcher_fatigue` **no se renombra ni se reinterpreta** (primero hay que
+averiguar su significado histórico); `fatigue_factor`/`workload` llegarán
+explícitamente a una telemetry v2 futura.
+
+### Cierre 001D-5
+
+```text
+001D-5 — UI fatigue semantics
+CLOSED / PASS
+
+Engine:
+  fatigue_factor = authoritative physical degradation
+
+CPU:
+  workload = authoritative strategic fatigue signal
+
+UI:
+  fatigue_factor = progression
+  fatigue_band = user-facing interpretation
+
+Bands:
+  FRESH      factor >= .95
+  TIRING     .80 <= factor < .95
+  FATIGUED   .60 <= factor < .80
+  EXHAUSTED  factor < .60
+
+Legacy:
+  fatigue_level deprecated
+  retained temporarily for compatibility
+  not authoritative
+
+Telemetry:
+  existing pitcher_fatigue semantics unchanged for now
+```
+
+Deuda relacionada registrada: `GAMEPLAY-FATIGUE-UI-001` (código muerto de
+`PitcherStaminaBar`, incluida una tercera política de fatiga contradictoria;
+limpieza en commit aparte tras 001D-6 para no mezclar CPU strategy + API
+contract + UI migration + dead-code deletion).
 
 ## 002A · Plate discipline / count diagnostics
 

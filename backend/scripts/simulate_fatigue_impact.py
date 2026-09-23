@@ -37,12 +37,12 @@ from app.engine.cpu_ai import (
     get_cpu_pitch_action,
     get_cpu_swing_action,
     get_cpu_pitcher_change_decision,
-    _CPU_CHANGE_FATIGUE_THRESHOLD,
+    _CPU_CHANGE_WORKLOAD_THRESHOLD,
 )
 from app.engine.fatigue_manager import (
-    compute_fatigue_level,
     get_fatigue_factor,
     get_pitch_threshold,
+    get_workload,
 )
 from app.engine.game_rules import MIN_PITCHES_TO_CHANGE
 
@@ -2273,18 +2273,18 @@ def run_cpu_change_characterization(reps: int) -> None:
     print('=' * 130)
     print('001D-1 · Decisión CPU de cambio bajo Fatigue Policy v2 (sin tocar producción)')
     print(f'Outings SMOOTH de 9 innings, threshold={threshold} | {reps:,} outings por matchup')
-    print('Elegible = primer PA con compute_fatigue_level() >= umbral de dificultad (onset v2, magnitud legacy).')
+    print('Elegible = primer PA con workload = get_workload(pc, threshold) >= umbral de dificultad.')
     print('Factor = SMOOTH real del engine (get_fatigue_factor) en ese pitch_count.')
     print('=' * 130)
 
     print()
-    print('-- Trigger nominal analítico (9 inn; onset=100; level = 10·(pc-100)) --')
-    print(f"{'Dif':>6} {'level umbral':>12} | {'pc':>4} {'w':>6} {'factor SMOOTH':>13}")
+    print('-- Trigger nominal analítico (9 inn; w_umbral por dificultad, 001D-4) --')
+    print(f"{'Dif':>6} {'w umbral':>9} | {'pc':>4} {'w':>6} {'factor SMOOTH':>13}")
     print('-' * 46)
     for diff in CPU_DIFFICULTIES:
-        level_thr = _CPU_CHANGE_FATIGUE_THRESHOLD.get(diff, 65.0)
-        pc = threshold + math.ceil(level_thr / 10.0)
-        print(f"{diff:>6} {level_thr:>12.1f} | {pc:>4} {pc / threshold:>6.2f} "
+        w_thr = _CPU_CHANGE_WORKLOAD_THRESHOLD.get(diff, 1.35)
+        pc = math.ceil(w_thr * threshold)
+        print(f"{diff:>6} {w_thr:>9.2f} | {pc:>4} {get_workload(pc, threshold):>6.2f} "
               f"{get_fatigue_factor(pc, threshold):>13.4f}")
     print('-' * 46)
 
@@ -2296,14 +2296,14 @@ def run_cpu_change_characterization(reps: int) -> None:
         actual = {d: [] for d in CPU_DIFFICULTIES}
         for idx, obs in enumerate(data):
             for diff in CPU_DIFFICULTIES:
-                level_thr = _CPU_CHANGE_FATIGUE_THRESHOLD.get(diff, 65.0)
+                w_thr = _CPU_CHANGE_WORKLOAD_THRESHOLD.get(diff, 1.35)
                 for inning, pc in obs:
-                    if compute_fatigue_level(pc, 9) >= level_thr:
+                    if get_workload(pc, threshold) >= w_thr:
                         eligible[diff].append((inning, pc))
                         break
                 random.seed(4_100_000 + idx + _CPU_DIFFICULTY_SEED[diff])
                 for inning, pc in obs:
-                    if get_cpu_pitcher_change_decision(pc, compute_fatigue_level(pc, 9), diff):
+                    if get_cpu_pitcher_change_decision(pc, get_workload(pc, threshold), diff):
                         actual[diff].append((inning, pc))
                         break
 

@@ -94,6 +94,24 @@ class Difficulty(str, enum.Enum):
     HARD = "HARD"
 
 
+class FatigueBand(str, enum.Enum):
+    """Banda semántica de fatiga para UI, derivada del ``fatigue_factor`` real.
+
+    Describe el estado físico del pitcher (no es una regla estratégica de CPU;
+    la CPU razona sobre ``workload``). Límites (GAMEPLAY-FATIGUE-CPU-001D-5):
+
+        factor >= 0.95           FRESH
+        0.80 <= factor < 0.95    TIRING
+        0.60 <= factor < 0.80    FATIGUED
+        factor < 0.60            EXHAUSTED
+    """
+
+    FRESH = "FRESH"
+    TIRING = "TIRING"
+    FATIGUED = "FATIGUED"
+    EXHAUSTED = "EXHAUSTED"
+
+
 class GameMode(str, enum.Enum):
     """Modo de partida."""
 

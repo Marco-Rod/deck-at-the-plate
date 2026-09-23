@@ -2,6 +2,8 @@ import logging
 import math
 from typing import Dict
 
+from app.core.enums import FatigueBand
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -53,6 +55,26 @@ def get_pitch_threshold(total_innings: int = STANDARD_GAME_INNINGS) -> int:
     )
 
 
+def get_workload(pitch_count: int, threshold: int) -> float:
+    """
+    Workload estratégico: trabajo acumulado del pitcher relativo a su outing.
+
+    ``workload = pitch_count / threshold``. Es la señal que consume la CPU para
+    decidir el cambio (GAMEPLAY-FATIGUE-CPU-001D-2): 1.0 = outing esperado.
+
+    Args:
+        pitch_count: lanzamientos acumulados del pitcher.
+        threshold:   umbral de fatiga (ver ``get_pitch_threshold``).
+
+    Returns:
+        Ratio >= 0.0. Puede superar 1.0 al exceder el umbral del outing.
+    """
+    if threshold <= 0:
+        raise ValueError("threshold must be positive")
+
+    return pitch_count / threshold
+
+
 def get_fatigue_factor(pitch_count: int, threshold: int) -> float:
     """
     Factor de degradación SMOOTH-0.55-F35 para un workload dado.
@@ -78,19 +100,39 @@ def get_fatigue_factor(pitch_count: int, threshold: int) -> float:
     )
 
 
+def get_fatigue_band(factor: float) -> FatigueBand:
+    """
+    Banda semántica de fatiga para la UI a partir del ``fatigue_factor`` real.
+
+    Cortes (GAMEPLAY-FATIGUE-CPU-001D-5):
+        factor >= 0.95           FRESH
+        0.80 <= factor < 0.95    TIRING
+        0.60 <= factor < 0.80    FATIGUED
+        factor < 0.60            EXHAUSTED
+
+    No gobierna la decisión de la CPU; esa usa ``workload`` (ver ``get_workload``).
+    """
+    if factor >= 0.95:
+        return FatigueBand.FRESH
+    if factor >= 0.80:
+        return FatigueBand.TIRING
+    if factor >= 0.60:
+        return FatigueBand.FATIGUED
+    return FatigueBand.EXHAUSTED
+
+
 def compute_fatigue_level(pitch_count: int, total_innings: int = STANDARD_GAME_INNINGS) -> float:
     """
-    Nivel de fatiga (0-100%) reportado a UI y usado por la decisión de la CPU.
+    Nivel de fatiga legacy (0-100%) reportado a UI por compatibilidad.
+
+    DEPRECADO (GAMEPLAY-FATIGUE-CPU-001D-2): ya NO es la fuente autoritativa ni
+    para UI ni para la CPU. La UI debe preferir ``fatigue_factor``/``fatigue_band``
+    y la CPU razona sobre ``get_workload``.
 
     Fórmula (LEGACY/APPROX):
         extra = pitch_count - threshold
         penalty_factor = 1.0 - (0.10 * extra)
         fatigue = (1.0 - penalty_factor) * 100   (cap 0-100)
-
-    Desde Fatigue Policy v2 comparte el onset con el motor de resultado
-    (``get_pitch_threshold``), pero su magnitud NO es el factor SMOOTH que se
-    aplica a los atributos. Deuda registrada: GAMEPLAY-FATIGUE-CPU-001
-    (calibrar/reemplazar la semántica de UI/CPU tras 001C-6).
 
     Args:
         pitch_count:   Número de lanzamientos realizados.

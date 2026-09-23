@@ -37,6 +37,10 @@ from app.engine.cpu_ai import (
 from app.engine.fatigue_manager import (
     apply_pitcher_fatigue,
     compute_fatigue_level,
+    get_fatigue_band,
+    get_fatigue_factor,
+    get_pitch_threshold,
+    get_workload,
 )
 from app.engine.state_manager import process_at_bat_transition
 from app.engine.tactic_resolver import (
@@ -167,12 +171,15 @@ def build_play_resolved_payload(game: GameSession, event: str, description: str,
         if active_pitcher_id:
             pitcher_card = get_card_by_id(db, active_pitcher_id)
             if pitcher_card:
-                # ⭐ MEJORADO: Calcular pitch count y fatigue level con umbral dinámico por innings
+                # ⭐ MEJORADO: Calcular pitch count y fatiga con umbral dinámico por innings
                 pitch_counts = state_with_role.get("pitch_counts", {})
                 current_pitch_count = pitch_counts.get(active_pitcher_id, 0)
 
-                # Calcular fatigue level (0-100%) - usar la misma lógica que apply_pitcher_fatigue
                 total_innings = state_with_role.get("total_innings", 9)
+                pitch_threshold = get_pitch_threshold(total_innings)
+                fatigue_factor = get_fatigue_factor(current_pitch_count, pitch_threshold)
+                fatigue_band = get_fatigue_band(fatigue_factor)
+                # fatigue_level legacy: se mantiene por compatibilidad (deprecado)
                 fatigue_level = compute_fatigue_level(current_pitch_count, total_innings)
 
                 active_pitcher_data = build_pitcher_payload(
@@ -180,6 +187,8 @@ def build_play_resolved_payload(game: GameSession, event: str, description: str,
                     with_stamina=True,
                     pitch_count=current_pitch_count,
                     fatigue_level=fatigue_level,
+                    fatigue_factor=fatigue_factor,
+                    fatigue_band=fatigue_band.value,
                 )
 
         # Obtener datos del bateador
@@ -500,13 +509,15 @@ async def execute_cpu_pitcher_change(
         if old_pitcher:
             old_pitcher_data = build_pitcher_payload(old_pitcher, with_repertoire=True)
     
-    # Construir datos del nuevo pitcher para broadcast
+    # Construir datos del nuevo pitcher para broadcast (entra descansado)
     new_pitcher_data = build_pitcher_payload(
         new_pitcher,
         with_repertoire=True,
         with_stamina=True,
         pitch_count=0,
         fatigue_level=0.0,
+        fatigue_factor=1.0,
+        fatigue_band=get_fatigue_band(1.0).value,
     )
     
     # Broadcast del cambio vía WebSocket (state_data sanitizado por destinatario)
@@ -592,11 +603,14 @@ async def trigger_cpu_response(
 
             if pitcher_card:
                 total_innings = state.get("total_innings", 9)
-                fatigue_level = compute_fatigue_level(pitch_count, total_innings)
+                workload = get_workload(
+                    pitch_count,
+                    get_pitch_threshold(total_innings),
+                )
 
                 should_change = get_cpu_pitcher_change_decision(
                     pitch_count=pitch_count,
-                    fatigue_level=fatigue_level,
+                    workload=workload,
                     difficulty=difficulty,
                 )
 

@@ -54,11 +54,12 @@ def get_cpu_swing_action(difficulty: str = "MEDIUM") -> SwingSelection:
 # Mínimo de lanzamientos antes de que la CPU pueda considerar un cambio
 # (regla compartida con el motor — ver app/engine/game_rules.py)
 
-# Umbrales de fatiga (%) por dificultad a partir de los cuales la CPU decide cambiar
-_CPU_CHANGE_FATIGUE_THRESHOLD: Dict[Difficulty, float] = {
-    Difficulty.EASY: 95.0,    # Aguanta hasta casi colapsar
-    Difficulty.MEDIUM: 65.0,  # Cambia cuando el pitcher está bastante cansado
-    Difficulty.HARD: 40.0,    # Cambia proactivamente antes de que el daño sea grave
+# Umbrales de workload por dificultad a partir de los cuales la CPU decide
+# cambiar (GAMEPLAY-FATIGUE-CPU-001D-4). workload = pitch_count / threshold.
+_CPU_CHANGE_WORKLOAD_THRESHOLD: Dict[Difficulty, float] = {
+    Difficulty.EASY: 1.50,    # Aguanta hasta casi colapsar (factor ~0.63)
+    Difficulty.MEDIUM: 1.35,  # Cambia cuando el pitcher está bastante cansado (~0.77)
+    Difficulty.HARD: 1.20,    # Cambia proactivamente antes de que el daño crezca (~0.91)
 }
 
 # Probabilidad adicional de cambiar cuando se supera el umbral (agrega variabilidad)
@@ -71,7 +72,7 @@ _CPU_CHANGE_PROBABILITY: Dict[Difficulty, float] = {
 
 def get_cpu_pitcher_change_decision(
     pitch_count: int,
-    fatigue_level: float,
+    workload: float,
     difficulty: str = "MEDIUM",
 ) -> bool:
     """
@@ -79,13 +80,15 @@ def get_cpu_pitcher_change_decision(
 
     Lógica:
       1. El pitcher debe haber lanzado al menos MIN_PITCHES_TO_CHANGE.
-      2. La fatiga debe superar el umbral configurado por dificultad.
+      2. El workload (trabajo acumulado relativo al outing) debe superar el
+         umbral configurado por dificultad.
       3. Aplica probabilidad aleatoria para añadir variabilidad (la CPU no es perfecta).
 
     Args:
-        pitch_count:   Número de lanzamientos del pitcher activo en este partido.
-        fatigue_level: Nivel de fatiga del pitcher (0.0 – 100.0).
-        difficulty:    "EASY" | "MEDIUM" | "HARD".
+        pitch_count: Número de lanzamientos del pitcher activo en este partido.
+        workload:    pitch_count / get_pitch_threshold(total_innings) (ver
+                     app.engine.fatigue_manager.get_workload).
+        difficulty:  "EASY" | "MEDIUM" | "HARD".
 
     Returns:
         True si la CPU debe ejecutar un cambio de pitcher, False en caso contrario.
@@ -93,16 +96,16 @@ def get_cpu_pitcher_change_decision(
     if pitch_count < MIN_PITCHES_TO_CHANGE:
         return False
 
-    threshold = _CPU_CHANGE_FATIGUE_THRESHOLD.get(difficulty, 65.0)
-    if fatigue_level < threshold:
+    threshold = _CPU_CHANGE_WORKLOAD_THRESHOLD.get(difficulty, 1.35)
+    if workload < threshold:
         return False
 
     change_prob = _CPU_CHANGE_PROBABILITY.get(difficulty, 0.75)
     decision = random.random() < change_prob
 
     logger.debug(
-        "Decision cambio de pitcher CPU: pitches=%s, fatigue=%.1f%%, threshold=%.1f%%, prob=%.0f%% -> %s",
-        pitch_count, fatigue_level, threshold, change_prob * 100,
+        "Decision cambio de pitcher CPU: pitches=%s, workload=%.3f, threshold=%.2f, prob=%.0f%% -> %s",
+        pitch_count, workload, threshold, change_prob * 100,
         "CHANGE" if decision else "KEEP",
     )
     return decision
