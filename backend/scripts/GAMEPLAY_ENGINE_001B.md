@@ -74,6 +74,12 @@ Action:
 > `65/50/30` es **política de agente LAB** (cómo decide batear) y en producción
 > debe originarse en estrategia/dificultad/atributos/count, no como regla
 > universal.
+>
+> **Frontera LAB (GAMEPLAY-ENGINE-002):** los hooks `take_bias`/`foul_chance`
+> descritos en 002C-B/002C-C viven hoy en `_resolve_play_outcome()`, el resolver
+> compartido por producción y el harness `scripts/simulate_fatigue_impact.py`.
+> La API pública `calculate_play_outcome()` NO acepta overrides: producción usa
+> siempre `_TAKE_BASE_PROD=0.65` / `_FOUL_PCT_PROD=35.0`.
 
 ## 001B-5 · Full PA Monte Carlo sobre el PA calibrado 002
 
@@ -1035,9 +1041,10 @@ No es necesario rediseñar el conector de atributos: solo recalibrar los
 ## 002C-B · TAKE baseline sweep (intercepto de strike_chance)
 
 Cerrado con 400,000 PA (100k × 4 baselines). MID/MID, fatiga congelada 75%,
-política CURRENT_LAB 35/25/10. **Production intacta**: `calculate_play_outcome`
-gana `take_bias: float = None` (None → 0.65); la variante CURRENT reproduce el
-comportamiento actual. Coefs CTL/VIS SIN tocar (0.003 / −0.002).
+política CURRENT_LAB 35/25/10. **Production intacta**: el resolver compartido
+gana `take_bias: float = None` (None → 0.65; hoy en `_resolve_play_outcome`, NO
+en `calculate_play_outcome`); la variante CURRENT reproduce el comportamiento
+actual. Coefs CTL/VIS SIN tocar (0.003 / −0.002).
 
 | Variante | Base | CalledS/take | Ball/take | K% | BB% | BIP% | P(3bolas) | P(full) | P(BB\|3bol) | Pit/PA | ≥3 | ≥4 | ≥6 |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
@@ -1069,9 +1076,10 @@ lo sigue a ~0.5pp.)
 ## 002C-C · Swing termination sweep (foul/contact)
 
 Cerrado con 400,000 PA (100k × 4 foules). TAKE vuelve a CURRENT (0.65) para
-aislar C. **Production intacta**: `foul_chance: float = None` en
-`calculate_play_outcome` (None → 35.0). NO se tocó el whiff model ni la regla
-zona+tipo. MID/MID, fatiga congelada 75%, política CURRENT_LAB 35/25/10.
+aislar C. **Production intacta**: `foul_chance: float = None` en el resolver
+compartido (`_resolve_play_outcome`, no la API pública; None → 35.0). NO se
+tocó el whiff model ni la regla zona+tipo. MID/MID, fatiga congelada 75%,
+política CURRENT_LAB 35/25/10.
 
 | Foul% | Foul/Cnt | BIP/Cnt | CalledS/tk | K% | BB% | BIP% | P(3bolas) | P(full) | P(BB\|3bol) | Pit/PA | p95 | max | ≥3 | ≥4 | ≥6 | ≥8 |
 |---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|

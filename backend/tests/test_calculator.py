@@ -10,9 +10,10 @@ umbrales. Cambiar deliberadamente la mecánica del juego exigirá actualizarlos
 explícitamente.
 """
 
+import inspect
 import random
 
-from app.engine.calculator import calculate_play_outcome
+from app.engine.calculator import _resolve_play_outcome, calculate_play_outcome
 
 
 DEFAULT_PITCHER = {"velocidad": 50, "control": 50, "movimiento": 50}
@@ -169,3 +170,79 @@ def test_tactics_modifiers_scale_power(monkeypatch):
         tactics_modifiers={"batter_pwr": 2.0},
     )
     assert event == "HOME_RUN"
+
+
+# ---------------------------------------------------------------------------
+# Frontera LAB vs PRODUCCIÓN (002C-B / 002C-C)
+# ---------------------------------------------------------------------------
+
+def test_public_api_has_no_lab_knobs():
+    params = inspect.signature(calculate_play_outcome).parameters
+    assert "take_bias" not in params
+    assert "foul_chance" not in params
+
+
+def test_lab_resolver_accepts_knobs():
+    params = inspect.signature(_resolve_play_outcome).parameters
+    assert "take_bias" in params
+    assert "foul_chance" in params
+
+
+def test_public_api_equals_lab_resolver_without_knobs(monkeypatch):
+    # Sin overrides, el resolver LAB y la API pública (que delega en él) producen
+    # el mismo resultado con la misma secuencia de RNG: una sola fórmula.
+    case = {
+        "pitcher_attrs": DEFAULT_PITCHER,
+        "batter_attrs": DEFAULT_BATTER,
+        "pitch_selected": {"pitch_type": "4-SEAM", "zone": 5},
+        "swing_selected": {"swing_type": "NORMAL", "guessed_zone": None, "guessed_pitch": None},
+    }
+    monkeypatch.setattr(random, "uniform", _uniform_sequence([90.0, 40.0, 70.0]))
+    public_event, public_desc = calculate_play_outcome(**case)
+    monkeypatch.setattr(random, "uniform", _uniform_sequence([90.0, 40.0, 70.0]))
+    lab_event, lab_desc = _resolve_play_outcome(**case)
+    assert (public_event, public_desc) == (lab_event, lab_desc)
+
+
+def test_take_bias_override_changes_take(monkeypatch):
+    # Zona no adivinada, draw 0.40: producción (0.65) lo canta strike; el LAB
+    # con take_bias=0.30 lo canta bola.
+    monkeypatch.setattr(random, "random", lambda: 0.40)
+    event_prod, _ = calculate_play_outcome(
+        DEFAULT_PITCHER,
+        DEFAULT_BATTER,
+        {"pitch_type": "4-SEAM", "zone": 5},
+        {"swing_type": "TAKE", "guessed_zone": None, "guessed_pitch": None},
+    )
+    monkeypatch.setattr(random, "random", lambda: 0.40)
+    event_lab, _ = _resolve_play_outcome(
+        DEFAULT_PITCHER,
+        DEFAULT_BATTER,
+        {"pitch_type": "4-SEAM", "zone": 5},
+        {"swing_type": "TAKE", "guessed_zone": None, "guessed_pitch": None},
+        take_bias=0.30,
+    )
+    assert event_prod == "STRIKE_LOOKING"
+    assert event_lab == "BALL"
+
+
+def test_foul_chance_override_changes_contact(monkeypatch):
+    # Contacto sin acertar zona ni picheo: producción (35%) con draw 40 es limpio
+    # (HIT_1B); el LAB con foul_chance=45 lo canta FOUL.
+    monkeypatch.setattr(random, "uniform", _uniform_sequence([90.0, 40.0, 70.0]))
+    event_prod, _ = calculate_play_outcome(
+        DEFAULT_PITCHER,
+        DEFAULT_BATTER,
+        {"pitch_type": "4-SEAM", "zone": 5},
+        {"swing_type": "NORMAL", "guessed_zone": None, "guessed_pitch": None},
+    )
+    monkeypatch.setattr(random, "uniform", _uniform_sequence([90.0, 40.0]))
+    event_lab, _ = _resolve_play_outcome(
+        DEFAULT_PITCHER,
+        DEFAULT_BATTER,
+        {"pitch_type": "4-SEAM", "zone": 5},
+        {"swing_type": "NORMAL", "guessed_zone": None, "guessed_pitch": None},
+        foul_chance=45.0,
+    )
+    assert event_prod == "HIT_1B"
+    assert event_lab == "FOUL"

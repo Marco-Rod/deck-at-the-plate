@@ -1,8 +1,10 @@
 """GAMEPLAY-ENGINE-001B — Monte Carlo de fatiga (nivel pitch y PA completo).
 
 Fuera de producción: no toca fatigue_manager.py ni calculator.py. Reproduce el
-pipeline real de un pitch (CPU MEDIUM) y llama a calculate_play_outcome() tal
-cual lo hace resolve_swing().
+pipeline real de un pitch (CPU MEDIUM) y llama al resolver del engine:
+calculate_play_outcome() en las call sites de referencia (pipeline real, tal
+cual resolve_swing()) y _resolve_play_outcome() con overrides LAB
+(take_bias / foul_chance) en los tratamientos de disciplina.
 
 RNG determinista y compartido entre curvas:
     Para cada escenario (workload) y replica (seed), las TRES curvas se ejecutan
@@ -32,7 +34,7 @@ from collections import Counter
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.core.enums import Event, PitchType, SwingType
-from app.engine.calculator import calculate_play_outcome
+from app.engine.calculator import _resolve_play_outcome, calculate_play_outcome
 from app.engine.cpu_ai import (
     get_cpu_pitch_action,
     get_cpu_swing_action,
@@ -379,7 +381,7 @@ def _simulate_pa_diag(take_probs: dict, seed: int,
         pitch["control"] = pitch_eff["control"]
         pitch["movement"] = pitch_eff["movement"]
 
-        event, _description = calculate_play_outcome(
+        event, _description = _resolve_play_outcome(
             pitcher_attrs=fatigued_pitcher,
             batter_attrs=batter_attrs,
             pitch_selected=pitch,
@@ -1413,7 +1415,7 @@ def _simulate_pa_f5(curve: str, start_workload: float, seed: int) -> dict:
         else:
             swings += 1
 
-        event, _description = calculate_play_outcome(
+        event, _description = _resolve_play_outcome(
             pitcher_attrs=fatigued_pitcher,
             batter_attrs=BATTER,
             pitch_selected=pitch,
@@ -1603,7 +1605,7 @@ def _simulate_pa_neutral(pitcher_raw: dict, seed: int):
         pitch["control"] = pitch_eff["control"]
         pitch["movement"] = pitch_eff["movement"]
 
-        event, _description = calculate_play_outcome(
+        event, _description = _resolve_play_outcome(
             pitcher_attrs=fatigued,
             batter_attrs=BATTER,
             pitch_selected=pitch,
@@ -1798,7 +1800,7 @@ def _simulate_pa_fatigued(pitcher_raw: dict, pitch_count_start: int, threshold, 
         pitch['control'] = pitch_eff['control']
         pitch['movement'] = pitch_eff['movement']
 
-        event, _description = calculate_play_outcome(
+        event, _description = _resolve_play_outcome(
             pitcher_attrs=fatigued,
             batter_attrs=BATTER,
             pitch_selected=pitch,
