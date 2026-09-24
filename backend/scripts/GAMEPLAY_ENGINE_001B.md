@@ -1415,3 +1415,39 @@ Setup: grid CTL LOW/MID/HIGH × perfil WEAK/MID/STRONG (9 celdas), VIS
 representativa 70, semillas compartidas por rep, 50,000 PA por celda → 450,000
 PA totales. El harness `run_matchup_robustness_e2` (~L1165) ya está cableado
 (`--mode e2` en choices + dispatch) y compila OK.
+
+## 002E-3 · CLAMP-001 · Caracterización analítica del piso 0.25 del TAKE (B3-C1) · CARACTERIZACIÓN
+- **Pregunta**: CLAMP-001 = "el piso 0.25 del TAKE aplana demasiado". Antes de mover nada: ¿cuánta
+  superficie satura el piso?, ¿cuál es su frontera exacta?, ¿cuántos pares CTL×VIS materialmente
+  distintos (d≥5) quedan indistinguibles bajo cada candidato de piso? Fase puramente **analítica**
+  (determinista, PA=1, sin MC): NO toca el engine ni PROD, NO promueve ningún candidato.
+- **Setup (fijo)**: grid fino CTL 40..99 × VIS 40..99 (60×60 = 3,600 celdas), fórmula del calculator
+  `raw = 0.30 + (CTL−50)·0.003 − (VIS−50)·0.002`, clamp CURRENT `max(0.25, min(0.85, raw))`.
+  Candidatos de piso SOLO comparados: CURRENT 0.25 / FLOOR-20 0.20 / FLOOR-15 0.15 / NO-FLOOR.
+- **Contratos fijados antes de correr**:
+  - **H9 · Monotonicidad sana**: CTL↑ nunca reduce ni VIS↑ nunca aumenta take-strike en la zona sana
+    (raw ≥ 0.25). Verifica que el harness no introduzca inversión bajo el clamp.
+  - **H10 · Sensibilidad (colapso)**: el piso SOLO puede colapsar celdas con raw en su cota
+    (raw < piso); zona sana debe permanecer idéntica a NO-FLOOR. El conteo de pares d≥5 aplanados
+    es el MAPA de decisión, se informa por candidato.
+  - **H11 · Rincón exacto**: la frontera raw = 0.25 es exactamente `VIS = 1.5·CTL`
+    (binding ⟺ `3·CTL − 2·VIS < 0`, aritmética entera). Todo binding en CTL≤65 × VIS≥61.
+  - **H12 · Centro invariante**: zona central (CTL 60..90 × VIS 60..90, raw ≥ 0.25) invariante entre
+    candidatos y vs CURRENT.
+- **Resultado** (evidencia `scripts/_e3_full_run.txt`, `--mode e3`): **H9 PASS | H10 PASS | H11 PASS
+  (flutter diagonal 7 celdas ruido-float 0.249999…) | H12 PASS** → **CARACTERIZACIÓN 4/4**.
+- **Mapa entregado**:
+  - **15.00%** de la superficie (540/3600) binding en piso 0.25; frontera exacta `VIS = 1.5·CTL`
+    (CTL≤65, VIS≥61). Deficiencia real, acotada y perfectamente localizada.
+  - CURRENT colapsa **127,025** pares d≥5 indistinguibles; FLOOR-20 deja **1,453**; FLOOR-15 → 0;
+    NO-FLOOR → 0. El piso actual es ~87× más dañino en resolución que FLOOR-20.
+- Defecto de instrumento (registrado, NO de contrato): la 1ª iteración del checker H11 comparaba
+  `binding == VIS > 1.5·CTL` en float → FAIL por 7 celdas de la diagonal donde `3·CTL = 2·VIS`
+  produce raw = 0.249999... Fix (solo checker): frontera en aritmética entera `3·CTL − 2·VIS < 0` y
+  el ruido-float se cuenta como 'flutter diagonal' (instrumento), no como fuga del rincón. El
+  CONTRATO (frontera VIS = 1.5·CTL) no se tocó.
+- **Watch → 002E-3-B** (sin promover nada en 002E-3): la DECISIÓN de mover piso = experimento MC
+  aislado en el rincón afectado (CTL45×VIS45/70/95 y CTL70×VIS70 — pequeño, NO 900k), engomando
+  CLAMP-001 localmente SIN recalibrar B3-C1 (vía H12: el centro es invariante; el problema es solo
+  el rincón). Harness `run_clamp_characterization_e3` cableado como `--mode e3` (choices + dispatch)
+  y compila OK.

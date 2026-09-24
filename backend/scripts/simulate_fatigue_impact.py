@@ -1333,6 +1333,182 @@ def run_matchup_robustness_e2(reps: int) -> None:
 
 
 # ---------------------------------------------------------------------------
+# 002E-3 · CLAMP-001 · Caracterización analítica del piso 0.25 del TAKE (B3-C1)
+# ---------------------------------------------------------------------------
+# Determinista (PA=1, sin MC): sweep fino CTL×VIS sobre la fórmula del
+# calculator `raw = 0.30 + (CTL-50)*0.003 - (VIS-50)*0.002`, clamp CURRENT
+# `max(0.25, min(0.85, raw))`. NO toca el engine ni PROD; NO promueve.
+# Contratos H9-H12 fijados ANTES de correr (ADR 002E-3). Objetivo: localizar
+# exactamente dónde y cuánto es binding el piso 0.25 para decidir CLAMP-001
+# con mapa, no a ciegas (H12: resolver en el rincón saturado, sin recalibrar
+# B3-C1).
+CLAMP001_TAKE_BASE = 0.30          # = E1_FIX["take_bias"] (B3-C1)
+CLAMP001_CAP = 0.85
+CLAMP001_CANDIDATES = {
+    "CURRENT": 0.25,               # producción LAB (referencia, no se promueve)
+    "FLOOR-20": 0.20,
+    "FLOOR-15": 0.15,
+    "NO-FLOOR": None,              # solo clamp superior (cap 0.85)
+}
+
+
+def _clamp001_raw(ctl: int, vis: int) -> float:
+    return (CLAMP001_TAKE_BASE + (ctl - 50) * 0.003
+            - (vis - 50) * 0.002)
+
+
+def _clamp001_current(raw: float) -> float:
+    return max(0.25, min(CLAMP001_CAP, raw))
+
+
+def _clamp001_candidate(raw: float, floor) -> float:
+    if floor is None:
+        return min(CLAMP001_CAP, raw)
+    return max(floor, min(CLAMP001_CAP, raw))
+
+
+def run_clamp_characterization_e3(reps: int = 1) -> None:
+    """002E-3 · CLAMP-001 · mapa analítico del piso 0.25 (determinista).
+
+    reps se ignora (PA=1 analítico): la caracterización es matemática, no MC.
+    """
+    ctls = list(range(40, 100))    # 40..99 (sweep fino, 60 valores)
+    viss = list(range(40, 100))
+    raw_cells = {}
+
+
+    def raw(ctl: int, vis: int) -> float:
+        return _clamp001_raw(ctl, vis)
+
+    for ctl in ctls:
+        for vis in viss:
+            raw_cells[(ctl, vis)] = raw(ctl, vis)
+
+    n = len(ctls) * len(viss)
+    binding = [(c, v) for (c, v), r in raw_cells.items() if r < 0.25]
+    nb = len(binding)
+
+    # H9 · monotonicidad en celdas SANAS (raw >= 0.25): CTL↑ no baja, VIS↑ no sube.
+    h9_ok = True
+    for vis in viss:
+        for c1, c2 in zip(ctls, ctls[1:]):
+            r1, r2 = raw(c1, vis), raw(c2, vis)
+            if r1 < 0.25 or r2 < 0.25:
+                continue
+            if _clamp001_current(r2) < _clamp001_current(r1):
+                h9_ok = False
+    for ctl in ctls:
+        for v1, v2 in zip(viss, viss[1:]):
+            r1, r2 = raw(ctl, v1), raw(ctl, v2)
+            if r1 < 0.25 or r2 < 0.25:
+                continue
+            if _clamp001_current(r2) > _clamp001_current(r1):
+                h9_ok = False
+
+    # H10 · sensibilidad: el piso SOLO debe colapsar lo que está en su cota
+    # (raw < piso). Zona sana (raw >= 0.25): CURRENT == NO-FLOOR exacto.
+    # Pares indistinguibles = pares (materialmente distintos, d>=5) con raw
+    # distinto que CURRENT aplana al mismo valor (y NO-FLOOR resolvería).
+    floor_free_ok = all(
+        _clamp001_current(r) == _clamp001_candidate(r, None)
+        for r in raw_cells.values() if r >= 0.25)
+    binding_pairs = list(raw_cells.items())
+    indist = 0
+    dist_material = 0
+    for i in range(len(binding_pairs)):
+        (c1, v1), r1 = binding_pairs[i]
+        for j in range(i + 1, len(binding_pairs)):
+            (c2, v2), r2 = binding_pairs[j]
+            if max(abs(c1 - c2), abs(v1 - v2)) < 5:
+                continue
+            dist_material += 1
+            # ambos caen al piso (mismo valor) solo si raw < piso
+            if (r1 < 0.25 and r2 < 0.25
+                    and abs(r1 - r2) > 1e-9):
+                indist += 1
+    # H10 PASS: cero colapso fuera del piso (zona sana idéntica a NO-FLOOR).
+    # 'indist' es el mapa (cuánto resolución cuesta el piso 0.25), se informa.
+    h10_ok = floor_free_ok
+
+    # H11 · rincón CLAMP-001: la frontera EXACTA raw = 0.25 es VIS = 1.5*CTL
+    # (lineal), i.e. `3*CTL - 2*VIS < 0` en aritmética ENTERA (sin float).
+    # El engine clampa cuando raw<0.25 en float; en la frontera (3c=2v) el
+    # float puede dar 0.24999... → flutter de borde (1 celda, ruido). H11
+    # verifica que TODO el binding quede exactamente en VIS > 1.5*CTL, salvo
+    # ruta de ruido float en la diagonal misma.
+    frontier_int = {(c, v) for c in ctls for v in viss if 3 * c - 2 * v < 0}
+    binding_set = {k for k, r in raw_cells.items() if r < 0.25}
+    dev = binding_set.symmetric_difference(frontier_int)
+    dev_ruido = sum(
+        1 for c, v in dev if abs(raw(c, v) - 0.25) < 5e-4)
+    h11_ok = len(dev) == dev_ruido
+
+    # H12 · zona central invariante entre candidatos Y vs CURRENT.
+    central = [(c, v) for c in range(60, 91) for v in range(60, 91)
+               if raw(c, v) >= 0.25]
+    h12_ok = True
+    for floor_name, floor in CLAMP001_CANDIDATES.items():
+        if floor_name == "CURRENT":
+            continue
+        for (c, v) in central:
+            if _clamp001_candidate(raw(c, v), floor) != \
+               _clamp001_current(raw(c, v)):
+                h12_ok = False
+
+    print("=" * 118)
+    print("002E-3 · CLAMP-001 · Caracterizacion analitica del piso 0.25 (TAKE)")
+    print(f"Determinista (PA=1, sin MC) | engine/PROD NO tocados | "
+          f"ningun candidato se promueve")
+    print("=" * 118)
+    print(f"raw = {CLAMP001_TAKE_BASE} + (CTL-50)*0.003 - (VIS-50)*0.002 | "
+          f"clamp CURRENT [0.25, {CLAMP001_CAP}]")
+    print(f"Grid fino CTL 40..99 x VIS 40..99 = {len(ctls)} x {len(viss)} = {n} celdas")
+    print("")
+    print(f"[saturacion] celdas con raw < 0.25 (binding en el piso): "
+          f"{nb} / {n} = {nb / n * 100:.2f}% de la superficie")
+    print(f"[saturacion] frontera EXACTA raw = 0.25: VIS = 1.5 * CTL "
+          f"(binding = VIS > 1.5*CTL), celdas CTL<=65, VIS>=61")
+    print(f"[saturacion] pares materialmente distintos (d>=5) en grid: "
+          f"{dist_material:,}")
+    print(f"[piso 0.25] pares d>=5 que CURRENT aplana (raw distinto, mismo "
+          f"0.25) = {indist:,} | NO-FLOOR los resolvería | zona sana "
+          f"identica a NO-FLOOR: {'PASS' if floor_free_ok else 'FAIL'}")
+    print("")
+    print("-" * 118)
+    print("Candidatos de piso (comparacion SOLO, no se promueve):")
+    print(f"  {'candidato':<10} {'piso':>6} | {'cambian vs CURRENT':>18} | "
+          f"pares d>=5 colapsados por el piso")
+    for cname, floor in CLAMP001_CANDIDATES.items():
+        if cname == "CURRENT":
+            continue
+        chg = sum(1 for (c, v), r in raw_cells.items()
+                  if _clamp001_candidate(r, floor) != _clamp001_current(r))
+        piso = "0.25" if cname == "CURRENT" else (
+            f"{floor:.2f}" if floor is not None else "none")
+        n_coll = 0
+        for i in range(len(binding_pairs)):
+            (c1, v1), r1 = binding_pairs[i]
+            for j in range(i + 1, len(binding_pairs)):
+                (c2, v2), r2 = binding_pairs[j]
+                if max(abs(c1 - c2), abs(v1 - v2)) < 5:
+                    continue
+                if (r1 < (floor if floor is not None else -1.0)
+                        and r2 < (floor if floor is not None else -1.0)
+                        and abs(r1 - r2) > 1e-9):
+                    n_coll += 1
+        print(f"  {cname:<10} {piso:>6} | {chg:>18} | {n_coll:,}")
+    print("")
+    print(f"[H9 monotonicidad sana] {'PASS' if h9_ok else 'FAIL'} | "
+          f"[H10 sensibilidad sana] {'PASS' if h10_ok else 'FAIL'} | "
+          f"[H11 rincón exacto] {'PASS' if h11_ok else 'FAIL'} "
+          f"(flutter diagonal {dev_ruido} celda(s)) | "
+          f"[H12 centro invariante] {'PASS' if h12_ok else 'FAIL'}")
+    print("Veredicto 002E-3 (caracterizacion): mapa entregado; la DECISION "
+          "de mover el piso = 002E-3-B (MC aislado en el rincón, sin "
+          "recalibrar B3-C1 / ver H12).")
+
+
+# ---------------------------------------------------------------------------
 # 002C-B · TAKE calibration · baseline sweep (intercept de strike_chance)
 # ---------------------------------------------------------------------------
 # Mantiene coefs CTL/VIS actuales (0.003 / -0.002 con (attr-50)); solo varía
@@ -3106,7 +3282,7 @@ def run_pa_level(reps: int) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Monte Carlo de fatiga (GAMEPLAY-ENGINE-001B)")
-    parser.add_argument("--mode", choices=["pa", "pitch", "discipline", "cv", "take", "foul", "bc", "d2", "cv2", "f5", "c1", "c3", "c4", "c5", "d1", "d3", "d4", "e1", "e2"], default="pa",
+    parser.add_argument("--mode", choices=["pa", "pitch", "discipline", "cv", "take", "foul", "bc", "d2", "cv2", "f5", "c1", "c3", "c4", "c5", "d1", "d3", "d4", "e1", "e2", "e3"], default="pa",
                         help="pa = PA completo (001B-4); pitch = pitch suelto (001B-3); "
                              "discipline = diagnóstico de count/disciplina sin fatiga (002A); "
                              "cv = factorial Control×Vision (002B); "
@@ -3150,6 +3326,8 @@ def main() -> None:
         run_prod_vs_b3c1(args.reps)
     elif args.mode == "e2":
         run_matchup_robustness_e2(args.reps)
+    elif args.mode == "e3":
+        run_clamp_characterization_e3(args.reps)
     elif args.mode == "f5":
         run_fatigue_curve_comparison(args.reps)
     elif args.mode == "c1":
