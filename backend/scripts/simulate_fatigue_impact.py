@@ -324,6 +324,7 @@ def _simulate_pa_diag(take_probs: dict, seed: int,
                       control: int = None, vision: int = None,
                       take_bias: float = None,
                       foul_chance: float = None,
+                      take_floor: float = None,
                       batter_attrs: dict = None) -> dict:
     """PA 0-0 → K/BB/BIP con diagnóstico de count y de disciplinas, SIN fatiga.
 
@@ -336,6 +337,8 @@ def _simulate_pa_diag(take_probs: dict, seed: int,
                     None → 0.65 (producción).
         foul_chance: override del % de FOUL sobre contactos (002C-C);
                     None → 35.0 (producción).
+        take_floor: piso inferior del clamp del TAKE (002E-3 · CLAMP-001);
+                    None → 0.25 (producción); 0.0 → sin piso inferior.
         batter_attrs: override COMPLETO del perfil ofensivo del batter
                     (002E-2 · matchup WEAK/MID/STRONG sobre CTL fijo del
                     pitcher; la Vision del PA sigue controlada por `vision`).
@@ -395,6 +398,7 @@ def _simulate_pa_diag(take_probs: dict, seed: int,
             tactics_modifiers=None,
             take_bias=take_bias,
             foul_chance=foul_chance,
+            take_floor=take_floor,
         )
 
         if swing["swing_type"] == SwingType.TAKE:
@@ -1506,6 +1510,344 @@ def run_clamp_characterization_e3(reps: int = 1) -> None:
     print("Veredicto 002E-3 (caracterizacion): mapa entregado; la DECISION "
           "de mover el piso = 002E-3-B (MC aislado en el rincón, sin "
           "recalibrar B3-C1 / ver H12).")
+
+
+# ---------------------------------------------------------------------------
+# 002E-3-B · CLAMP-001 · MC aislado en el rincón: decisión del piso del TAKE
+# ---------------------------------------------------------------------------
+# Después de la caracterización analítica (002E-3: 15% de la superficie
+# binding en 0.25; frontera VIS>1.5*CTL; CURRENT colapsa 127,025 pares d>=5),
+# este estudio responde CUÁNTO bajar el piso antes de que el rincón
+# LOW-CTL/HIGH-VIS produzca disciplina excesiva. 4 celdas x 4 candidatos,
+# NO ampliar el grid. Candidatos SOLO comparados (no se promueve aquí).
+#
+# AGENTE y knobs fijos: take_bias=0.30, foul_chance=45.0 (B3-C1 intacto),
+# política LAB 65/50/30, fatiga congelada (factor 1.0), mismas seeds por rep
+# entre candidatos. El knob take_floor (calculator.py) es LAB: None → 0.25
+# producción; 0.0 → sin piso inferior. NO se toca nada de producción.
+E3B_FIX = {"take_bias": 0.30, "foul_chance": 45.0}
+E3B_CELLS = [(45, 45), (45, 70), (45, 95), (70, 70)]
+E3B_CELL_NAMES = {45: "LOW", 70: "MID", 95: "HIGH"}
+E3B_FLOORS = {
+    "CURRENT": 0.25,   # producción LAB vigente (referencia, no se promueve)
+    "FLOOR-20": 0.20,  # piso al 20%: ya resuelve 127k-1.5k colapsos
+    "FLOOR-15": 0.15,  # piso al 15%: elimina los últimos 1,453 colapsos
+    "NO-FLOOR": 0.0,   # sin piso inferior (solo cap 0.85)
+}
+E3B_COLLAPSE_PHASE_A = {
+    "CURRENT": 127_025,
+    "FLOOR-20": 1_453,
+    "FLOOR-15": 0,
+    "NO-FLOOR": 0,
+}
+
+
+def run_e3b_cell(control: int, vision: int, take_floor: float, reps: int) -> dict:
+    """Celda 002E-3-B: MC por (CTL, VIS) y piso candidato (mismas seeds/rep)."""
+    agg = {
+        "outcome": Counter(),
+        "pitches": 0,
+        "lengths": [],
+        "reached_2strikes": 0,
+        "reached_3balls": 0,
+        "reached_full": 0,
+        "take_attempts": 0,
+        "balls_on_take": 0,
+        "called_strikes_on_take": 0,
+        "take_at_2s": 0,
+        "pitches_at_2s": 0,
+        "swing_attempts": 0,
+        "whiffs": 0,
+        "fouls": 0,
+        "bips": 0,
+        "ge4": Counter(),
+        "outcome_at_2s": Counter(),
+    }
+    for rep in range(reps):
+        seed = int(DISCIPLINE_WORKLOAD * 1000) * 10**6 + rep  # mismas seeds entre candidatos
+        d = _simulate_pa_diag(
+            E1_POLICY, seed, control=control, vision=vision,
+            take_bias=E3B_FIX["take_bias"], foul_chance=E3B_FIX["foul_chance"],
+            take_floor=take_floor,
+        )
+        for key in ("reached_2strikes", "reached_3balls", "reached_full",
+                    "take_attempts", "balls_on_take", "called_strikes_on_take",
+                    "take_at_2s", "pitches_at_2s", "swing_attempts", "whiffs",
+                    "fouls", "bips"):
+            agg[key] += d[key]
+        agg["outcome"][d["outcome"]] += 1
+        agg["pitches"] += d["pitches"]
+        agg["lengths"].append(d["pitches"])
+        if d["pitches"] >= 4:
+            agg["ge4"]["n"] += 1
+            if d["outcome"] == "K":
+                agg["ge4"]["K"] += 1
+            elif d["outcome"] == "BB":
+                agg["ge4"]["BB"] += 1
+            else:
+                agg["ge4"]["BIP"] += 1
+        if d["reached_2strikes"]:
+            agg["outcome_at_2s"]["n"] += 1
+            if d["outcome"] == "K":
+                agg["outcome_at_2s"]["K"] += 1
+            elif d["outcome"] == "BB":
+                agg["outcome_at_2s"]["BB"] += 1
+            else:
+                agg["outcome_at_2s"]["BIP"] += 1
+    lengths = sorted(agg["lengths"])
+    agg["p95"] = lengths[int(len(lengths) * 0.95) - 1]
+    agg["max"] = lengths[-1]
+    return agg
+
+
+def run_clamp001_floor_mc_e3b(reps: int) -> None:
+    """002E-3-B · MC aislado: 4 celdas x 4 candidatos de piso, contratos H13–H16."""
+    cells = {}
+    for (ctl, vis) in E3B_CELLS:
+        for fname, floor in E3B_FLOORS.items():
+            cells[(ctl, vis, fname)] = run_e3b_cell(ctl, vis, floor, reps)
+
+    def pct(x, n):
+        return x / n * 100 if n else 0.0
+
+    def called_s(o):
+        return pct(o["called_strikes_on_take"], max(1, o["take_attempts"]))
+
+    def balls_t(o):
+        return pct(o["balls_on_take"], max(1, o["take_attempts"]))
+
+    def whiff_s(o):
+        return pct(o["whiffs"], max(1, o["swing_attempts"]))
+
+    n = reps
+    print("=" * 130)
+    print("002E-3-B · CLAMP-001 · MC aislado de piso TAKE (decisión experimental)")
+    print(f"4 celdas CTL×VIS x 4 candidatos | {reps:,} PA/celda/candidato | "
+          f"{4 * 4 * reps:,} PA | take_bias=0.30 foul=45 agente 65/50/30 "
+          f"fatiga OFF (factor 1.0) | mismas seeds por rep")
+    print("Contratos H13–H16 fijados ANTES de correr (ver ADR 002E-3-B). "
+          "Ningún candidato se promueve aquí.")
+    print("=" * 130)
+
+    # CAPA 1 · INPUT / MECANISMO: el cambio debe entrar SOLO por TAKE (H16)
+    print()
+    print("-- CAPA 1 · MECANISMO (el cambio entra por TAKE; swing/contacto intactos) --")
+    print(f"{'Celda':<12} {'Piso':<8} | {'CalledS/tk':>10} {'Ball/tk':>8} | "
+          f"{'Foul/Cnt':>8} {'BIP/Cnt':>7} | {'Whiff/Swing':>11} {'Takes/PA':>8} | "
+          f"{'pares_d>=5':>11}")
+    print("-" * 130)
+    for (ctl, vis) in E3B_CELLS:
+        cname = f"CTL{E3B_CELL_NAMES[ctl]}/VIS{E3B_CELL_NAMES[vis]}"
+        for fname in E3B_FLOORS:
+            o = cells[(ctl, vis, fname)]
+            tk = max(1, o["take_attempts"])
+            ct = max(1, o["fouls"] + o["bips"])
+            sw = max(1, o["swing_attempts"])
+            print(
+                f"{cname:<12} {fname:<8} | "
+                f"{called_s(o):>10.2f} {balls_t(o):>8.2f} | "
+                f"{pct(o['fouls'], ct):>8.2f} {pct(o['bips'], ct):>7.2f} | "
+                f"{whiff_s(o):>11.2f} {o['take_attempts'] / n:>8.2f} | "
+                f"{E3B_COLLAPSE_PHASE_A[fname]:>11,}"
+            )
+    print("-" * 130)
+
+    # CAPA 2 · COUNT / ESTRUCTURA
+    print()
+    print("-- CAPA 2 · COUNT / ESTRUCTURA DE PA --")
+    print(f"{'Celda':<12} {'Piso':<8} | {'BB%':>6} {'K%':>6} {'BIP%':>6} | "
+          f"{'P(3bol)':>7} {'P(full)':>7} {'Pit/PA':>6} {'p95':>4} {'max':>4} "
+          f"{'P(≥4)':>6}")
+    print("-" * 130)
+    for (ctl, vis) in E3B_CELLS:
+        cname = f"CTL{E3B_CELL_NAMES[ctl]}/VIS{E3B_CELL_NAMES[vis]}"
+        for fname in E3B_FLOORS:
+            o = cells[(ctl, vis, fname)]
+            out = o["outcome"]
+            bip = out["1B"] + out["2B"] + out["3B"] + out["HR"] + out["OUT"]
+            ge4n = o["ge4"]["n"]
+            ge6 = sum(1 for L in o["lengths"] if L >= 6)
+            print(
+                f"{cname:<12} {fname:<8} | "
+                f"{pct(out['BB'], n):>6.2f} {pct(out['K'], n):>6.2f} "
+                f"{pct(bip, n):>6.2f} | "
+                f"{pct(o['reached_3balls'], n):>7.2f} {pct(o['reached_full'], n):>7.2f} "
+                f"{o['pitches'] / n:>6.2f} {o['p95']:>4} {o['max']:>4} "
+                f"{pct(ge4n, n):>6.2f}"
+            )
+    print("-" * 130)
+
+    # CAPA 3 · OUTCOME
+    print()
+    print("-- CAPA 3 · OUTCOME (terminación del PA) --")
+    print(f"{'Celda':<12} {'Piso':<8} | {'K%':>6} {'BB%':>6} {'1B%':>5} {'2B%':>5} "
+          f"{'HR%':>5} {'Reach%':>7} {'OUT%':>7}")
+    print("-" * 130)
+    for (ctl, vis) in E3B_CELLS:
+        cname = f"CTL{E3B_CELL_NAMES[ctl]}/VIS{E3B_CELL_NAMES[vis]}"
+        for fname in E3B_FLOORS:
+            out = cells[(ctl, vis, fname)]["outcome"]
+            reach = out["BB"] + out["1B"] + out["2B"] + out["3B"] + out["HR"]
+            print(
+                f"{cname:<12} {fname:<8} | "
+                f"{pct(out['K'], n):>6.2f} {pct(out['BB'], n):>6.2f} "
+                f"{pct(out['1B'], n):>5.2f} {pct(out['2B'], n):>5.2f} "
+                f"{pct(out['HR'], n):>5.2f} {pct(reach, n):>7.2f} "
+                f"{pct(out['OUT'], n):>7.2f}"
+            )
+    print("-" * 130)
+
+    # CONTRATOS H13–H16 (fijados antes de correr)
+    # H13 · CONTROL PRESERVATION: CTL70/VIS70 estadísticamente equivalente entre
+    #   los 4 candidatos (CTL70/VIS70 tiene raw=0.32 > todos los pisos → debe
+    #   ser idéntico; tolerancia MC ±0.5pp).
+    # H14 · SENSITIVITY RECOVERY: en CTL45, VIS45→VIS70→VIS95 produce
+    #   CalledS/take ↓ y BB% ↑ de forma monótona (la meseta del piso actual
+    #   no puede continuar).
+    # H15 · NO PATHOLOGICAL DISCIPLINE: CTL45/VIS95 recupera sensibilidad sin
+    #   explosión de BB/counts (BB% y Pit/PA sin bil berte; ver tabla; sin
+    #   target MLB absoluto, se compara entre candidatos y vs CTL70/VIS70).
+    # H16 · MECHANISM ISOLATION: Whiff/Swing invariante entre pisos (|Δ| ≤ 1.0pp);
+    #   el cambio se concentra en CalledS/take.
+
+    print()
+    print("-- CONTRATOS 002E-3-B (fijados ANTES de correr) --")
+    h13_ok = h14_ok = h15_ok = h16_ok = True
+
+    # H13 · CTL70/VIS70 = control: misma CalledS/tk y BB% entre candidatos
+    c70 = cells[(70, 70, "CURRENT")]
+    for fname in E3B_FLOORS:
+        if fname == "CURRENT":
+            continue
+        o = cells[(70, 70, fname)]
+        d_cs = abs(called_s(o) - called_s(c70))
+        d_bb = abs(pct(o["outcome"]["BB"], n) - pct(c70["outcome"]["BB"], n))
+        if d_cs > 0.5 or d_bb > 0.5:
+            h13_ok = False
+    print(f"H13 CONTROL PRESERVATION (CTL70/VIS70 idéntico entre pisos, "
+          f"|Δ|≤0.5pp): {'PASS' if h13_ok else 'FAIL'}")
+
+    # H14 · monotonicidad en CTL45: CalledS ↓ y BB% ↑ con VIS↑ (45→70→95).
+    # Se evalúa POR CANDIDATO: CURRENT es la referencia (expected FAIL = la
+    # meseta que motiva CLAMP-001); los candidatos deben restaurar estricta
+    # monotonicidad.
+    vis_seq = [45, 70, 95]
+    seq_cs = {fname: [called_s(cells[(45, v, fname)]) for v in vis_seq]
+              for fname in E3B_FLOORS}
+    seq_bb = {fname: [pct(cells[(45, v, fname)]["outcome"]["BB"], n) for v in vis_seq]
+              for fname in E3B_FLOORS}
+    cand_ok = {}
+    for fname in E3B_FLOORS:
+        cs = seq_cs[fname]
+        bb = seq_bb[fname]
+        ok = (cs[0] > cs[1] > cs[2]) and (bb[0] < bb[1] < bb[2])
+        cand_ok[fname] = ok
+        if fname != "CURRENT" and not ok:
+            h14_ok = False
+    print(f"H14 SENSITIVITY RECOVERY (CTL45: CalledS/tk↓ y BB%↑ con VIS↑ "
+          f"45→70→95, estricto): {'PASS' if h14_ok else 'FAIL'}")
+    print(f"    {'candidato':<10} | {'CalledS/tk':>10} {'dir':>4} | "
+          f"{'BB%':>6} {'dir':>4} | {'H14':>4}")
+    for fname in E3B_FLOORS:
+        cs = seq_cs[fname]
+        bb = seq_bb[fname]
+        print(f"    {fname:<10} | {cs[0]:>6.2f}→{cs[1]:>5.2f}→{cs[2]:>5.2f} "
+              f"{'OK' if cs[0] > cs[1] > cs[2] else 'X':>4} | "
+              f"{bb[0]:>5.2f}→{bb[1]:>5.2f}→{bb[2]:>5.2f} "
+              f"{'OK' if bb[0] < bb[1] < bb[2] else 'X':>4} | "
+              f"{'PASS' if cand_ok[fname] else 'FAIL':>4}")
+
+    # H15 · CTL45/VIS95: sin explosión (comparar entre candidatos, sin target
+    #   MLB; Pit/PA máximo razonable y colas acotadas).
+    c95 = cells[(45, 95, "CURRENT")]
+    bb95 = {fname: pct(cells[(45, 95, fname)]["outcome"]["BB"], n)
+            for fname in E3B_FLOORS}
+    pit95 = {fname: cells[(45, 95, fname)]["pitches"] / n
+             for fname in E3B_FLOORS}
+    max95 = {fname: cells[(45, 95, fname)]["max"] for fname in E3B_FLOORS}
+    p95_95 = {fname: cells[(45, 95, fname)]["p95"] for fname in E3B_FLOORS}
+    # Criterio de No-explosión: CTL45/VIS95 no debe superar en mucho al control
+    # CTL70/VIS70 bajo el MISMO candidato (sin target absoluto aún).
+    for fname in E3B_FLOORS:
+        ref = cells[(70, 70, fname)]
+        if pct(cells[(45, 95, fname)]["outcome"]["BB"], n) > \
+           pct(ref["outcome"]["BB"], n) * 1.6 + 2.0:
+            h15_ok = False
+        if cells[(45, 95, fname)]["max"] > 15:
+            h15_ok = False
+    print(f"H15 NO PATHOLOGICAL DISCIPLINE (CTL45/VIS95 sin explosión cont. "
+          f"CTL70/VIS70): {'PASS' if h15_ok else 'FAIL'}")
+    print(f"    {'candidato':<10} {'BB% 45/95':>10} {'BB% 70/70':>10} "
+          f"{'Pit/PA 45/95':>13} {'p95':>4} {'max':>4}")
+    for fname in E3B_FLOORS:
+        ref = cells[(70, 70, fname)]
+        print(f"    {fname:<10} {bb95[fname]:>10.2f} "
+              f"{pct(ref['outcome']['BB'], n):>10.2f} {pit95[fname]:>13.2f} "
+              f"{p95_95[fname]:>4} {max95[fname]:>4}")
+
+    # H16 · MECHANISM ISOLATION: la rama de swing/contacto NO cambia con el
+    #   piso (|Δ| ≤ 1.0pp vs CURRENT en Whiff/Swing, Foul/Cnt, BIP/Cnt). El
+    #   cambio entra SOLO por TAKE (CalledS/tk ↓, Ball/tk ↑). Takes/PA puede
+    #   subir: es downstream de PA más largos (más bolas → más oportunidades),
+    #   NO una violación de aislamiento.
+    mech_keys = [("whiffs", "swing_attempts", "Whiff/Swing"),
+                 ("fouls", "fouls", "Foul/Cnt"),
+                 ("bips", "bips", "BIP/Cnt")]
+    h16_rows = []
+    for (ctl, vis) in E3B_CELLS:
+        cname = f"CTL{E3B_CELL_NAMES[ctl]}/VIS{E3B_CELL_NAMES[vis]}"
+        ref = cells[(ctl, vis, "CURRENT")]
+        for fname in E3B_FLOORS:
+            if fname == "CURRENT":
+                continue
+            o = cells[(ctl, vis, fname)]
+            d_ws = abs(whiff_s(o) - whiff_s(ref))
+            d_fo = abs(pct(o["fouls"], max(1, o["fouls"] + o["bips"])) -
+                       pct(ref["fouls"], max(1, ref["fouls"] + ref["bips"])))
+            d_bi = abs(pct(o["bips"], max(1, o["fouls"] + o["bips"])) -
+                       pct(ref["bips"], max(1, ref["fouls"] + ref["bips"])))
+            ok = max(d_ws, d_fo, d_bi) <= 1.0
+            if not ok:
+                h16_ok = False
+            h16_rows.append((cname, fname, d_ws, d_fo, d_bi, ok))
+    print(f"H16 MECHANISM ISOLATION (Whiff/Swing, Foul/Cnt, BIP/Cnt |Δ|≤1.0pp "
+          f"vs CURRENT): {'PASS' if h16_ok else 'FAIL'}")
+    print(f"    {'Celda':<12} {'Piso':<8} | {'ΔWhiff/Swing':>12} "
+          f"{'ΔFoul/Cnt':>9} {'ΔBIP/Cnt':>8} | {'H16':>4}")
+    for (cname, fname, d_ws, d_fo, d_bi, ok) in h16_rows:
+        print(f"    {cname:<12} {fname:<8} | {d_ws:>12.3f} {d_fo:>9.3f} "
+              f"{d_bi:>8.3f} | {'PASS' if ok else 'FAIL':>4}")
+
+    # GANANCIA MARGINAL DE SENSIBILIDAD por cada reducción del floor
+    # (en la celda más afectada CTL45/VIS95, rincón CLAMP-001):
+    #   ΔCalledS/tk por -0.05 de floor y ΔBB% asociado. Respuesta a: ¿vale
+    #   el juego eliminar los últimos N colapsos con una reducción más?
+    print()
+    print("-- GANANCIA MARGINAL POR REDUCCIÓN DE FLOOR (CTL45/VIS95) --")
+    print(f"    {'paso':<24} | {'ΔCalledS/tk':>10} {'ΔBB%':>6} | "
+          f"{'residuo pares':>13}")
+    steps = [("CURRENT→FLOOR-20 (0.25→0.20)", "CURRENT", "FLOOR-20"),
+             ("FLOOR-20→FLOOR-15 (0.20→0.15)", "FLOOR-20", "FLOOR-15"),
+             ("FLOOR-15→NO-FLOOR (0.15→0.0)", "FLOOR-15", "NO-FLOOR")]
+    for label, a, b in steps:
+        d_cs = called_s(cells[(45, 95, a)]) - called_s(cells[(45, 95, b)])
+        d_bb = pct(cells[(45, 95, b)]["outcome"]["BB"], n) - \
+               pct(cells[(45, 95, a)]["outcome"]["BB"], n)
+        res_a = E3B_COLLAPSE_PHASE_A[a]
+        res_b = E3B_COLLAPSE_PHASE_A[b]
+        print(f"    {label:<24} | {d_cs:>9.2f}pp {d_bb:>+6.2f} | "
+              f"{res_a:,} → {res_b:,}")
+
+    print("-" * 130)
+    print(f"Veredicto 002E-3-B: H13 {'PASS' if h13_ok else 'FAIL'} | "
+          f"H14 {'PASS' if h14_ok else 'FAIL'} | "
+          f"H15 {'PASS' if h15_ok else 'FAIL'} | "
+          f"H16 {'PASS' if h16_ok else 'FAIL'}")
+    print("Watch (decisión experimental, NO se promueve): "
+          ".20 si recupera sensibilidad material + extremos sanos + residuo "
+          "irrelevante; .15 solo si elimina meseta observable sin patología; "
+          "NO-FLOOR solo con ventaja clara vs .15. CLAMP-001 se cierra en el "
+          "siguiente paso si hay ganador claro; luego -> 002E-4 (paquete).")
 
 
 # ---------------------------------------------------------------------------
@@ -3282,7 +3624,7 @@ def run_pa_level(reps: int) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Monte Carlo de fatiga (GAMEPLAY-ENGINE-001B)")
-    parser.add_argument("--mode", choices=["pa", "pitch", "discipline", "cv", "take", "foul", "bc", "d2", "cv2", "f5", "c1", "c3", "c4", "c5", "d1", "d3", "d4", "e1", "e2", "e3"], default="pa",
+    parser.add_argument("--mode", choices=["pa", "pitch", "discipline", "cv", "take", "foul", "bc", "d2", "cv2", "f5", "c1", "c3", "c4", "c5", "d1", "d3", "d4", "e1", "e2", "e3", "e3b"], default="pa",
                         help="pa = PA completo (001B-4); pitch = pitch suelto (001B-3); "
                              "discipline = diagnóstico de count/disciplina sin fatiga (002A); "
                              "cv = factorial Control×Vision (002B); "
@@ -3328,6 +3670,8 @@ def main() -> None:
         run_matchup_robustness_e2(args.reps)
     elif args.mode == "e3":
         run_clamp_characterization_e3(args.reps)
+    elif args.mode == "e3b":
+        run_clamp001_floor_mc_e3b(args.reps)
     elif args.mode == "f5":
         run_fatigue_curve_comparison(args.reps)
     elif args.mode == "c1":

@@ -1451,3 +1451,59 @@ PA totales. El harness `run_matchup_robustness_e2` (~L1165) ya está cableado
   CLAMP-001 localmente SIN recalibrar B3-C1 (vía H12: el centro es invariante; el problema es solo
   el rincón). Harness `run_clamp_characterization_e3` cableado como `--mode e3` (choices + dispatch)
   y compila OK.
+
+## 002E-3-B · CLAMP-001 · MC aislado del piso TAKE (decisión experimental) · EXPERIMENTO
+- **Pregunta**: ¿cuánto bajar el piso 0.25 del TAKE (CLAMP-001) antes de que el rincón
+  LOW-CTL/HIGH-VIS produzca disciplina excesiva? La fase A (002E-3) dejó el mapa: 15% de la
+  superficie binding, frontera `VIS = 1.5·CTL`, CURRENT colapsa 127,025 pares d≥5 indistinguibles.
+  Aquí se decide experimentamente cuál piso restaura sensibilidad SIN romper extremos ni mecanismo.
+- **Setup (fijo, NO se amplía el grid)**: 4 celdas CTL×VIS × 4 candidatos = 16 combinaciones,
+  50k PA c/u → 800k PA. Celdas: CTL45×VIS45, CTL45×VIS70, CTL45×VIS95, CTL70×VIS70 (control).
+  Candidatos: CURRENT 0.25 / FLOOR-20 0.20 / FLOOR-15 0.15 / NO-FLOOR (0.0).
+- **Knob LAB nuevo (engine, NO producción)**: `take_floor: float = None` en
+  `_resolve_play_outcome`/`_take_strike_probability` (calculator.py). None → 0.25 (producción
+  intocada vía `calculate_play_outcome()`); 0.0 → sin piso inferior (solo cap 0.85). Mismo patrón
+  que `take_bias`/`foul_chance` (frontera LAB documentada en la cabecera del ADR).
+- **Fijo**: take_bias=0.30, foul=45 (B3-C1 intacto), política LAB 65/50/30, fatiga congelada
+  (factor 1.0), mismas seeds por rep entre candidatos.
+- **Contratos fijados ANTES de correr**:
+  - **H13 · Control Preservation**: CTL70/VIS70 estadísticamente equivalente entre los cuatro
+    candidatos (|Δ| ≤ 0.5pp en CalledS/tk y BB%).
+  - **H14 · Sensitivity Recovery**: en CTL45, VIS45→VIS70→VIS95 produce CalledS/tk ↓ y BB% ↑
+    monótonos ESTRICTOS en los candidatos. CURRENT es la referencia (falla por diseño = la meseta).
+  - **H15 · No Pathological Discipline**: CTL45/VIS95 recupera sensibilidad sin explosión de
+    BB/counts (comparado contra CTL70/VIS70 del mismo candidato; colas acotadas).
+  - **H16 · Mechanism Isolation**: Whiff/Swing, Foul/Cnt, BIP/Cnt invariantes entre pisos
+    (|Δ| ≤ 1.0pp vs CURRENT); el cambio entra SOLO por TAKE. Takes/PA puede crecer: es downstream
+    de PA más largos, no violación.
+- **Métrica de decisión**: ganancia marginal de sensibilidad por paso de piso en CTL45/VIS95
+  (ΔCalledS/tk y ΔBB% por -0.05 de floor) + residuo de pares colapsados. Criterio conservador:
+  preferir FLOOR-20 si recupera sensibilidad material + extremos sanos + residuo irrelevante en
+  gameplay; FLOOR-15 solo si elimina una meseta observable sin patología; NO-FLOOR solo con ventaja
+  clara vs FLOOR-15.
+- **Resultado (corrida 50k PA × 16 combos = 800k PA, evidencia `_e3b_full_run.txt`)**: H13 PASS |
+  H14 PASS | H15 PASS | H16 PASS. Ganancia marginal en CTL45/VIS95:
+  | paso | ΔCalledS/tk | ΔBB% | residuo pares d≥5 |
+  |---|---|---|---|
+  | CURRENT→FLOOR-20 (0.25→0.20) | 4.93pp | +3.10 | 127,025 → 1,453 |
+  | FLOOR-20→FLOOR-15 (0.20→0.15) | 0.66pp | +0.43 | 1,453 → 0 |
+  | FLOOR-15→NO-FLOOR (0.15→0.0) | 0.26pp | +0.17 | 0 → 0 |
+  FLOOR-20 recupera ~89% de la sensibilidad de la meseta; FLOOR-15/NO-FLOOR son rendimientos
+  decrecientes irrelevantes en gameplay.
+- **Diagnóstico CLAMP-001 en H14 (CURRENT = referencia)**: CTL45 → VIS70 → VIS95 CONGELADOS en
+  CalledS/tk 24.66 y BB% 13.61 (meseta exacta, ambos raw < 0.25 → clamp). Los candicatos
+  restauran monotonicidad estricta (FLOOR-20: 28.91→24.05→19.72; BB% 11.42→13.99→16.71).
+- **Mecanismo aislado (H16)**: Whiff/Swing, Foul/Cnt y BIP/Cnt invariantes entre pisos (|Δ| ≤ 0.08pp
+  para Whiff/Swing, ≤ 0.07pp para Foul/BIP — órdenes de magnitud bajo la tolerancia 1.0pp). El
+  cambio entra SOLO por TAKE. Takes/PA sube 1.95→2.05 en CTL45/VIS95 (PA más largos por más bolas),
+  downstream de estructura, no del mecanismo de swing.
+- **Veredicto 002E-3-B**: 4/4 PASS. **Ganador experimental: FLOOR-20 (0.20)**. Cierre experimental de
+  CLAMP-001 aquí: el floor 0.20 elimina 98.9% de los colapsos (127,025→1,453), restaura sensibilidad
+  estricta en el rincón, extremos sanos (BB% 16.71 vs control 10.24, max 12, Pit/PA 3.81) sin tocar
+  el centro (CTLMID/VISMID y CTL70/VIS70 idénticos). NO-FLOOR (0.0) rechazado por criterio
+  conservador: último paso aporta 0.26pp sobre un residuo de 1,453 pares sin efecto gameplay, y un
+  floor sigue siendo protección útil. FLOOR-15 (0.15) descartado: no hay meseta observable en FLOOR-20
+  que justifique el siguiente paso.
+- **Watch → 002E-4 (PROMUEVE el paquete)**: TAKE floor = 0.20; take_bias = 0.30, foul = 45 (B3-C1),
+  agente 65/50/30 queda LAB (NO se promueve en el engine). El paquete PISA el engine en el siguiente
+  experimento; knobs LAB del 002E-3-B (`take_floor` etc.) no tocan producción.

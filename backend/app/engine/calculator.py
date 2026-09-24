@@ -43,8 +43,9 @@ from app.core.engine_types import (
 # _resolve_play_outcome(), el resolver que comparten producción y el harness de
 # disciplina (scripts/simulate_fatigue_impact.py) — una sola fórmula, cero
 # duplicación, y la API de gameplay queda sin knobs experimentales.
-_TAKE_BASE_PROD = 0.65  # Base MLB: ~65% de picheos sin swing son strikes
-_FOUL_PCT_PROD = 35.0   # MLB: ~35% de los contactos que no abanican son fouls
+_TAKE_BASE_PROD = 0.65    # Base MLB: ~65% de picheos sin swing son strikes
+_FOUL_PCT_PROD = 35.0     # MLB: ~35% de los contactos que no abanican son fouls
+_TAKE_FLOOR_PROD = 0.25   # Piso inferior del clamp de strike_chance (CLAMP-001)
 
 
 def calculate_play_outcome(
@@ -90,17 +91,22 @@ def _resolve_play_outcome(
     tactics_modifiers: TacticsModifiers = None,
     take_bias: float = None,
     foul_chance: float = None,
+    take_floor: float = None,
 ) -> PlayResult:
     """Resolución completa de una jugada con knobs LAB (002C-B / 002C-C).
 
     take_bias:   baseline de strike_chance en TAKE; None → producción (0.65).
     foul_chance: % de FOUL sobre contactos; None → producción (35.0).
+    take_floor:  piso inferior del clamp de strike_chance en TAKE; None →
+                 producción (0.25, CLAMP-001). 0.0 → sin piso inferior
+                 (solo cap superior 0.85). NO se toca producción con None.
 
     Sólo para el harness experimental de disciplina; gameplay llama a
     calculate_play_outcome(), que delega aquí sin overrides.
     """
     take_bias = _TAKE_BASE_PROD if take_bias is None else take_bias
     foul_chance = _FOUL_PCT_PROD if foul_chance is None else foul_chance
+    take_floor = _TAKE_FLOOR_PROD if take_floor is None else take_floor
 
     tactics: TacticsModifiers = tactics_modifiers or {
         "batter_con": 1.0,
@@ -137,7 +143,7 @@ def _resolve_play_outcome(
 
     # --- FASE 1: BATEADOR NO HACE SWING (TAKE) ---
     if swing_type == SwingType.TAKE:
-        return _calculate_take_outcome(take_bias, ctl, vis, zone_matched)
+        return _calculate_take_outcome(take_bias, ctl, vis, zone_matched, take_floor)
 
     # --- FASE 2/3: SWING → whiff / foul / bola en juego ---
     return _calculate_contact_outcome(
@@ -146,10 +152,11 @@ def _resolve_play_outcome(
 
 
 def _calculate_take_outcome(
-    take_bias: float, ctl: float, vis: float, zone_matched: bool,
+    take_bias: float, ctl: float, vis: float, zone_matched: bool, take_floor: float,
 ) -> PlayResult:
-    """FASE 1 — TAKE: strike cantado vs bola (002C-B: take_bias LAB)."""
-    if random.random() < _take_strike_probability(take_bias, ctl, vis, zone_matched):
+    """FASE 1 — TAKE: strike cantado vs bola (002C-B: take_bias LAB, CLAMP-001)."""
+    if random.random() < _take_strike_probability(take_bias, ctl, vis,
+                                                  zone_matched, take_floor):
         return PlayResult(Event.STRIKE_LOOKING, "Lanzamiento en la zona. ¡Strike cantado!")
     return PlayResult(Event.BALL, "Lanzamiento fuera de la zona. ¡Bola!")
 
@@ -210,12 +217,13 @@ def _calculate_contact_outcome(
         return PlayResult(Event.OUT_FLY, "Elevado de rutina atrapado en el jardín.")
 
 
-def _take_strike_probability(take_bias: float, ctl: float, vis: float, zone_matched: bool) -> float:
-    """Probabilidad de strike en TAKE (pura; incluye el clamp 0.25–0.85 CLAMP-001)."""
+def _take_strike_probability(take_bias: float, ctl: float, vis: float,
+                             zone_matched: bool, take_floor: float) -> float:
+    """Probabilidad de strike en TAKE (pura; clamp [piso, 0.85] CLAMP-001)."""
     strike_chance = take_bias + (ctl - 50) * 0.003 - (vis - 50) * 0.002
     if zone_matched:
         strike_chance -= 0.12  # Bono por anticipar la zona correcta
-    return max(0.25, min(0.85, strike_chance))
+    return max(take_floor, min(0.85, strike_chance))
 
 
 def _contact_foul_probability(foul_chance: float, zone_matched: bool, pitch_matched: bool) -> float:
