@@ -70,7 +70,7 @@ GAMEPLAY-ENGINE-003A — CALIBRATED ENGINE BASELINE
 [CLOSED — PASS with superseded measurement contract · CALIBRATED-BASELINE-v1 congelado]
 
 GAMEPLAY-ENGINE-003B — STUFF
-[IN PROGRESS — 003B-1 CLOSE (S1/S2/S3 L1–L6 PASS); 003B-2 CLOSE (M1–M6 PASS, S2 promote, Stuff=Contact-Quality); 003B-3 CLOSE (N1–N7 PASS, k=0.30 candidato primario v1); pendiente 003B-4 matchup Power×Stuff]
+[IN PROGRESS — 003B-1..4 CLOSE (S1/S2/S3 PASS → M1–M6 PASS → N1–N7 PASS → O1–O7 PASS, k=.30 ROBUSTNESS-VALIDATED CANDIDATE); 003B-5 fatiga de Stuff en curso]
 
 Finding:
 GAMEPLAY-ENGINE-002-CLAMP-001
@@ -2196,3 +2196,101 @@ MÉTRICA por celda (más allá de XBH/BIP):
   propuesta de magnitud, NO como cambio de producción. 003B-4 cruza
   Power×Stuff (POW45/55/70/85/95 × Stuff45/70/95) para confirmar que un POW95
   aún expresa poder frente a Stuff95 y que Stuff45 no dispara extremos.
+
+## GAMEPLAY-ENGINE-003B-4 · Power × Stuff Matchup Robustness
+
+```
+GAMEPLAY-ENGINE-003B-4
+Power × Stuff Matchup Robustness — intentar ROMPER al candidato k=0.30
+
+Objective:
+  Confirmar que con k=0.30, Power y Stuff conservan expresión en TODA la
+  superficie enfrentada: ninguno de los dos atributos borra al otro. Si falla
+  por dominancia o saturación → downscope a .20; si Power o Stuff pierden
+  expresión → k=.30 FAIL.
+
+k = 0.30  (candidato primario 003B-3, fijado AQUÍ)
+Power : 45 / 55 / 70 / 85 / 95
+Stuff : 45 / 70 / 95
+→ 15 cells × 50k PA = 750k PA
+
+VEL/CTL/MOV = 70 (MID pitcher) · CON/VIS = 70 (MID batter)
+fatigue_factor = 1.0 · Discipline = PROD · Agent = 65/50/30 LAB-only
+shared seeds (750M+rep) · S2 arm · calculator.py UNCHANGED
+```
+
+- **Contratos O1–O7 fijados ANTES de correr**:
+  - **O1 · POWER MONOTONIC WITH STUFF FIXED**: XBH/BIP crece con POWER en cada
+    columna de Stuff, INCLUIDO bajo Stuff95: POW45 < POW55 < POW70 < POW85 <
+    POW95 (trade-off estricto por pasos, tol ≤ 0.2pp). El chequeo clave: la
+    pendiente sigue viva justo donde más querría amortiguarla Stuff.
+  - **O2 · STUFF MONOTONIC WITH POWER FIXED**: XBH/BIP decrece con STUFF en cada
+    fila de Power, INCLUIDO con POW95: Stuff45 > Stuff70 > Stuff95 (por pasos,
+    tol ≤ 0.2pp). Ningún atributo borra al otro en su punto más adverso.
+  - **O3 · POW95×ST95 > POW70×ST95**: el bateador máximo conserva ventaja
+    material (≥ 1.0pp de XBH/BIP) sobre el bateador medio bajo el mismo Stuff
+    máximo → Power sigue expresándose donde se le enfrenta a la supresión
+    máxima.
+  - **O4 · NO EXTREMOS CON STUFF45**: Stuff45 (el más permisivo) NO dispara
+    en ningún Power una cola de extra-base desmedida: XBH/BIP ≤ 55.0 en toda la
+    columna y HR/BIP ≤ 35.0 en toda la columna.
+  - **O5 · DIAGONAL 45/45 → 70/70 → 95/95 SIN COLAPSO ARTIFICIAL**: la
+    diagonal (Power sube a la vez que Stuff suprime) no se aplana ni revierte:
+    XBH/BIP@45/45 < XBH/BIP@70/70 < XBH/BIP@95/95 (o a lo sumo plano con Δ ≤
+    1.0pp total) — si fuera monótona decreciente, habría señal de cancelación
+    Power↔Stuff.
+  - **O6 · MECHANISM ISOLATION**: Contact/Swing, Whiff/Swing, CalledS/Take, K%,
+    BB% permanecen INVARIANTES a través de las 15 celdas (span ≤ 0.5pp en cada
+    canal). S2 solo recalcula power_score al llegar al BIP.
+  - **O7 · PA STABILITY**: K5-R sano en las 15 celdas — p95 ≤ 6, sin CAP.
+- **Reporteo adicional (detección de saturación aunque O1/O2 pasen)**:
+  matrices de XBH/BIP y HR/BIP (5×3), pendientes `Δ XBH/BIP / 10 Power` por
+  columna de Stuff (47 puntos disparidad de rango distinto: rango de Stuff es
+  {45,70,95} → la pendiente Stuff45→95 se divide en 5 para Δ/10) y
+  `Δ XBH/BIP / 10 Stuff` por fila de Power. Si la pendiente Power@ST95 → ~0
+  aunque O1 pase, hay saturación → revisar contra .20.
+- **Decisión 003B-4 (cerrada por estos resultados)**:
+  - O1–O7 PASS + superficie sana → **k=.30 → ROBUSTNESS-VALIDATED CANDIDATE**.
+  - Monotonía PASS pero extremos se comprimen →
+    **k=.30 → revisar contra .20**.
+  - Power o Stuff pierden expresión → **k=.30 → FAIL**.
+  Aún SIN promover a producción (003B-5 fatiga → 003B-6 producción).
+- **Veredicto 003B-4**: [PENDIENTE — corrida 750k PA tras `--mode e003b4`].
+
+### RESULTADOS · 003B-4 (evidencia `scripts/_e003b4_full_run.txt`, 750k PA)
+
+- **O1 · POWER MONOTONIC · PASS en las 3 columnas**: XBH/BIP crece con Power
+  también bajo Stuff95 (5.53 → 9.52 → 15.77 → 21.68 → 25.59). Pendiente
+  @ST95 = +4.012/10 — **Power NO pierde expresión donde más debería
+  amortiguarlo Stuff**.
+- **O2 · STUFF MONOTONIC · PASS en las 5 filas**: XBH/BIP cae con Stuff
+  también con POW95 (40.66 → 32.95 → 25.59). Δ/10 Stuff @POW95 = −3.013 —
+  **Stuff NO se disuelve contra el bateador máximo**.
+- **O3 · POW95×ST95 > POW70×ST95 · PASS**: 25.59 vs 15.77 → ventaja +9.83pp
+  (piso +1.0pp). El bateador máximo sigue batiendo al lanzador máximo.
+- **O4 · SIN EXTREMOS CON STUFF45 · PASS**: columna ST45 máx XBH/BIP 40.66
+  (piso 55.0), máx HR/BIP 29.49 (piso 35.0).
+- **O5 · DIAGONAL SIN COLAPSO · PASS**: 20.72 (45/45) → 23.03 (70/70) →
+  25.59 (95/95): la diagonal es creciente — Power gana terreno aunque Stuff
+  suba al mismo ritmo; no hay cancelación.
+- **O6 · MECHANISM ISOLATION · PASS**: spans 0.000 en Contact/Sw, Whiff/Sw,
+  CalledS/Tk, K%, BB% a través de las 15 celdas — S2 solo recalcula
+  power_score sobre el BIP.
+- **O7 · PA STABILITY · PASS**: max p95=6, sin CAP.
+- **Pendientes (saturaciones ausentes)**: Power +3.99/+3.97/+4.01 por ST; Stuff
+  −3.04/−3.01/−2.95/−2.98/−3.01 por POW. Sin compresión en los extremos.
+
+### 003B-4 ROBUSTNESS DECISION
+
+- **O1–O7 PASS + superficie sana → k=.30 = ROBUSTNESS-VALIDATED CANDIDATE.**
+- No hay señal de dominancia (Stuff no borra a Power), ni de saturación (Power
+  no pierde pendiente bajo Stuff95, Stuff no pierde pendiente con POW95), ni
+  extremos (Stuff45 contenido, diagonal creciente, colas K5-R sanas).
+- **k=.20 queda como referencia histórica**: no se abre la comparación .20 vs
+  .30 (condición para ello era "monotonía PASS con extremos comprimidos", que
+  no ocurrió). POW45×ST95→XBH 5.53 con HR 0.01 es un rincón legítimo de
+  "bateador débil vs pitcher máximo" (expresión mínima pero no ausente), no una
+  deformación de la superficie.
+- **Sigue SIN promover a producción**: k=.30 pasa a 003B-5 como el coeficiente
+  cuyo comportamiento ante la fatiga hay que determinar (¿se fatiga Stuff?,
+  ¿cuánto, misma curva física que VEL/CTL/MOV o transformación distinta?).

@@ -3478,6 +3478,199 @@ def run_stuff_coefficient_e003b3(reps: int) -> None:
 
 
 # ---------------------------------------------------------------------------
+# 003B-4 · Power × Stuff matchup robustness (romper/no romper k=0.30)
+# ---------------------------------------------------------------------------
+# Con k=0.30 fijado, cruzar POWER (batter) × STUFF (pitcher) para confirmar que
+# NINGÚN atributo borra al otro en su punto más adverso. 15 celdas = POW
+# {45,55,70,85,95} × ST {45,70,95}. O1–O7 congelados antes de correr.
+O1_MONO_PP = 0.2    # O1/O2: tol de monotonía por paso
+O3_MIN_PP = 1.0     # O3: POW95×ST95 ≥ POW70×ST95 + 1.0pp
+O4_XBH_MAX = 55.0   # O4: XBH/BIP max en columna Stuff45
+O4_HR_MAX = 35.0    # O4: HR/BIP max en columna Stuff45
+O5_TOL_PP = 1.0     # O5: diagonal no decreciente (tol total de acumulación)
+O6_SPAN_PP = 0.5    # O6: span por canal de aislamiento
+O7_P95_MAX = 6      # O7: K5-R tail
+
+
+def run_matchup_robustness_e003b4(reps: int) -> None:
+    """003B-4 · POWER×STUFF k=.30, contrọaros O1–O7 (750k PA)."""
+    n = reps
+    k = 0.30
+    powers = [45, 55, 70, 85, 95]
+    stuffs = [45, 70, 95]
+    pitcher = PITCHER_PROFILES_003A["MID"]
+    cells = {}
+
+    for powa in powers:
+        for st in stuffs:
+            batter = {"contacto": 70, "poder": powa, "vision": 70}
+            agg = {"pitches": 0, "take_attempts": 0, "called_strikes_on_take": 0,
+                   "swing_attempts": 0, "whiffs": 0, "outcome": Counter(),
+                   "lengths": [], "power": [], "bips": 0, "len12": 0, "len16": 0}
+            for rep in range(reps):
+                seed = int(DISCIPLINE_WORKLOAD * 1000) * 10**6 + rep  # seeds compartidas
+                d = _simulate_pa_diag(E1_POLICY, seed,
+                                      batter_attrs=batter,
+                                      pitcher_attrs=pitcher,
+                                      stuff_level=st,
+                                      stuff_arm="S2",
+                                      stuff_k_qty=k)
+                agg["pitches"] += d["pitches"]
+                agg["take_attempts"] += d["take_attempts"]
+                agg["called_strikes_on_take"] += d["called_strikes_on_take"]
+                agg["swing_attempts"] += d["swing_attempts"]
+                agg["whiffs"] += d["whiffs"]
+                agg["bips"] += d["bips"]
+                agg["outcome"][d["outcome"]] += 1
+                agg["lengths"].append(d["pitches"])
+                if d["pitches"] >= 12:
+                    agg["len12"] += 1
+                if d["pitches"] >= 16:
+                    agg["len16"] += 1
+            agg["lengths"].sort()
+            agg["p95"] = agg["lengths"][int(len(agg["lengths"]) * 0.95) - 1]
+            agg["power"].sort()
+            cells[(powa, st)] = agg
+
+    rows = {(powa, st): _metric_row(cells[(powa, st)], n)
+            for powa in powers for st in stuffs}
+
+    def xbh(p, s):
+        return rows[(p, s)]["xbh"]
+
+    def hr(p, s):
+        return rows[(p, s)]["hr"]
+
+    print("=" * 150)
+    print("GAMEPLAY-ENGINE-003B-4 · POWER × STUFF MATCHUP ROBUSTNESS (k=0.30)")
+    print(f"5 Powers × 3 Stuffs × {reps:,} PA = {reps*15:,} PA | seeds compartidas "
+          "(750M+rep) | MID pitcher/batter | agent 65/50/30 | PROD discipline")
+    print("Contratos O1–O7 FIJADOS ANTES de correr. calculator.py UNCHANGED.")
+    print("=" * 150)
+
+    # Matrices XBH/BIP y HR/BIP
+    print()
+    print("-- XBH/BIP (%) · filas = POWER, columnas = STUFF --")
+    print(f"{'POW':>5} | {'ST45':>8} {'ST70':>8} {'ST95':>8}")
+    print("-" * 40)
+    for p in powers:
+        print(f"{p:>5} | {xbh(p, 45):>8.2f} {xbh(p, 70):>8.2f} {xbh(p, 95):>8.2f}")
+    print("-" * 40)
+    print()
+    print("-- HR/BIP (%) · filas = POWER, columnas = STUFF --")
+    print(f"{'POW':>5} | {'ST45':>8} {'ST70':>8} {'ST95':>8}")
+    print("-" * 40)
+    for p in powers:
+        print(f"{p:>5} | {hr(p, 45):>8.2f} {hr(p, 70):>8.2f} {hr(p, 95):>8.2f}")
+    print("-" * 40)
+
+    # Pendientes de saturación
+    print()
+    print("-- PENDIENTES (Δ XBH/BIP / 10) --")
+    print(f"{'':>5} | {'Δ/10 Power ST45':>15} {'Δ/10 Power ST70':>15} "
+          f"{'Δ/10 Power ST95':>15}")
+    print("-" * 60)
+    for p in (None,):
+        print(f"{'POW':>5} | {'':>15} {'':>15} {'':>15}")
+    line = " "
+    for st in stuffs:
+        slope = (xbh(95, st) - xbh(45, st)) / 5.0
+        line += f" | Δ/10 Pow @ ST{st} = {slope:.3f}"
+    print(line)
+    print()
+    for p in powers:
+        slope_st = (xbh(p, 95) - xbh(p, 45)) / 5.0
+        print(f"Δ/10 Stuff @ POW{p} = {slope_st:.3f}")
+
+    # CONTRATOS O1–O7
+    print()
+    print("-- CONTRATOS (O1–O7, fijados antes) --")
+
+    def mono_inc(s):
+        return all(s[i + 1] + O1_MONO_PP >= s[i] for i in range(len(s) - 1))
+
+    def mono_dec(s):
+        return all(s[i + 1] <= s[i] + O1_MONO_PP for i in range(len(s) - 1))
+
+    # O1 · POWER MONOTONIC con STUFF fijo (incluso ST95).
+    o1_ok = True
+    for st in stuffs:
+        seq = [xbh(p, st) for p in powers]
+        ok = mono_inc(seq)
+        o1_ok &= ok
+        print(f"  O1 POWER↑ @ST{st} ({' · '.join(f'{v:.2f}' for v in seq)}): "
+              f"{'PASS' if ok else 'FAIL'}")
+    print(f"  O1 POWER MONOTONIC (todos): {'PASS' if o1_ok else 'FAIL'}")
+
+    # O2 · STUFF MONOTONIC con POWER fijo (incluso POW95).
+    o2_ok = True
+    for p in powers:
+        seq = [xbh(p, st) for st in stuffs]
+        ok = mono_dec(seq)
+        o2_ok &= ok
+        print(f"  O2 STUFF↓ @POW{p} ({' · '.join(f'{v:.2f}' for v in seq)}): "
+              f"{'PASS' if ok else 'FAIL'}")
+    print(f"  O2 STUFF MONOTONIC (todos): {'PASS' if o2_ok else 'FAIL'}")
+
+    # O3 · POW95×ST95 ≥ POW70×ST95 + margen.
+    o3_margin = xbh(95, 95) - xbh(70, 95)
+    o3_ok = o3_margin >= O3_MIN_PP
+    print(f"  O3 POW95×ST95 vs POW70×ST95 (Δ {o3_margin:+.2f} ≥ +{O3_MIN_PP}): "
+          f"{'PASS' if o3_ok else 'FAIL'}")
+
+    # O4 · sin extremos con STUFF45.
+    o4_x = max(xbh(p, 45) for p in powers)
+    o4_h = max(hr(p, 45) for p in powers)
+    o4_ok = o4_x <= O4_XBH_MAX and o4_h <= O4_HR_MAX
+    print(f"  O4 STUFF45 sin extremos (max XBH {o4_x:.2f}≤{O4_XBH_MAX}, "
+          f"max HR {o4_h:.2f}≤{O4_HR_MAX}): "
+          f"{'PASS' if o4_ok else 'FAIL'}")
+
+    # O5 · diagonal 45/45 → 70/70 → 95/95 sin colapso (no decreciente).
+    diag = [xbh(p, p) for p in (45, 70, 95)]
+    o5_ok = diag[0] < diag[1] + O5_TOL_PP and diag[1] < diag[2] + O5_TOL_PP
+    print(f"  O5 DIAGONAL ({' → '.join(f'{v:.2f}' for v in diag)}) "
+          f"no decreciente: {'PASS' if o5_ok else 'FAIL'}")
+
+    # O6 · MECHANISM ISOLATION (invariantes a través de 15 celdas).
+    o6_ok = True
+    for chan in ("cnt", "whiff", "called_tk", "k", "bb"):
+        vals = [rows[(p, st)][chan] for p in powers for st in stuffs]
+        span = max(vals) - min(vals)
+        if span > O6_SPAN_PP:
+            o6_ok = False
+        print(f"  O6 {chan} span {span:.3f} (≤{O6_SPAN_PP}): "
+              f"{'PASS' if span <= O6_SPAN_PP else 'FAIL'}")
+    print(f"  O6 MECHANISM ISOLATION (todos): {'PASS' if o6_ok else 'FAIL'}")
+
+    # O7 · PA STABILITY (K5-R).
+    o7_ok = all(cells[(p, st)]["p95"] <= O7_P95_MAX
+                and cells[(p, st)]["outcome"]["CAP"] == 0
+                for p in powers for st in stuffs)
+    max_p95 = max(cells[(p, st)]["p95"] for p in powers for st in stuffs)
+    caps = sum(cells[(p, st)]["outcome"]["CAP"]
+               for p in powers for st in stuffs)
+    print(f"  O7 PA STABILITY (max p95 {max_p95}≤{O7_P95_MAX}, CAP {caps}): "
+          f"{'PASS' if o7_ok else 'FAIL'}")
+
+    # Decisión 003B-4
+    print("-" * 150)
+    all_pass = o1_ok and o2_ok and o3_ok and o4_ok and o5_ok and o6_ok and o7_ok
+    print(f"Veredicto 003B-4: O1 {'PASS' if o1_ok else 'FAIL'} · "
+          f"O2 {'PASS' if o2_ok else 'FAIL'} · O3 {'PASS' if o3_ok else 'FAIL'} · "
+          f"O4 {'PASS' if o4_ok else 'FAIL'} · O5 {'PASS' if o5_ok else 'FAIL'} · "
+          f"O6 {'PASS' if o6_ok else 'FAIL'} · O7 {'PASS' if o7_ok else 'FAIL'}")
+    if all_pass:
+        print("k=.30 → ROBUSTNESS-VALIDATED CANDIDATE (superficie sana). "
+              "Siguiente: 003B-5 (fatiga de Stuff).")
+    elif o1_ok and o2_ok:
+        print("Monotonía PASS pero extremos comprimidos/otra señal: "
+              "k=.30 → revisar contra .20.")
+    else:
+        print("Power o Stuff pierden expresión: k=.30 → FAIL.")
+
+
+# ---------------------------------------------------------------------------
 # 002C-B · TAKE calibration · baseline sweep (intercept de strike_chance)
 # ---------------------------------------------------------------------------
 # Mantiene coefs CTL/VIS actuales (0.003 / -0.002 con (attr-50)); solo varía
@@ -5257,7 +5450,7 @@ def run_pa_level(reps: int) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Monte Carlo de fatiga (GAMEPLAY-ENGINE-001B)")
-    parser.add_argument("--mode", choices=["pa", "pitch", "discipline", "cv", "take", "foul", "bc", "d2", "cv2", "f5", "c1", "c3", "c4", "c5", "d1", "d3", "d4", "e1", "e2", "e3", "e3b", "e5", "e003a", "e003a-tail", "e003b", "e003b2", "e003b3"], default="pa",
+    parser.add_argument("--mode", choices=["pa", "pitch", "discipline", "cv", "take", "foul", "bc", "d2", "cv2", "f5", "c1", "c3", "c4", "c5", "d1", "d3", "d4", "e1", "e2", "e3", "e3b", "e5", "e003a", "e003a-tail", "e003b", "e003b2", "e003b3", "e003b4"], default="pa",
                         help="pa = PA completo (001B-4); pitch = pitch suelto (001B-3); "
                              "discipline = diagnóstico de count/disciplina sin fatiga (002A); "
                              "cv = factorial Control×Vision (002B); "
@@ -5282,6 +5475,7 @@ def main() -> None:
                               "e003b = stuff semantic candidates: 3 brazos × 5 niveles (45/55/70/85/95), LAB, contratos L1–L6 (003B-1); "
                               "e003b2 = stuff vs VEL/MOV sensitivity: 5 sweeps × 5 niveles, contratos M1–M6 + geometría de vectores (003B-2); "
                               "e003b3 = S2 coefficient sweep: 7 coefs × 5 Stuff + power reference, contratos N1–N7, suppression_ratio diagnóstico (003B-3); "
+                              "e003b4 = Power×Stuff matchup robustness: k=.30, 5 Powers × 3 Stuffs, contratos O1–O7 + matrices XBH/HR + pendientes (003B-4); "
                               "d3 = comparación de estrategias CPU workload-based por matchup (001D-3); "
                              "d4 = barrido ampliado + coste marginal de esperar (001D-4A/B)")
     parser.add_argument("--reps", type=int, default=REPS, help="réplicas por escenario")
@@ -5323,6 +5517,8 @@ def main() -> None:
         run_stuff_vs_vel_mov_sensitivity_e003b2(args.reps)
     elif args.mode == "e003b3":
         run_stuff_coefficient_e003b3(args.reps)
+    elif args.mode == "e003b4":
+        run_matchup_robustness_e003b4(args.reps)
     elif args.mode == "f5":
         run_fatigue_curve_comparison(args.reps)
     elif args.mode == "c1":
