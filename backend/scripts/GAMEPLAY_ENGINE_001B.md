@@ -58,15 +58,22 @@ GAMEPLAY-ENGINE-002 — DISCIPLINE / COUNT MODEL
 002C-BC TAKE×Foul                       CLOSED / PASS
 002D    Batter policy                   CLOSED / PASS
 002C-CV CTL×VIS calibrated              CLOSED / PASS
+002E-1  PROD vs B3-C1 head-to-head      CLOSED / PASS
+002E-2  Robustez B3-C1 por matchup      CLOSED / PASS
+002E-3  CLAMP-001 fase A (mapa piso)    CLOSED / PASS
+002E-3B CLAMP-001 MC aislado            CLOSED / PASS (FLOOR-20)
+002E-4  PROMOTE paquete B3-C1+floor20   CLOSED / PROMOTED
+002E-5  Production acceptance           IN PROGRESS (contracts JA–JF fixed)
 
 Finding:
 GAMEPLAY-ENGINE-002-CLAMP-001
-  TAKE strike chance floor=0.25 causes saturation for
+  TAKE strike chance floor (antes 0.25) causa saturación para
   low-Control / high-Vision matchups.
 Severity:
   LOW / calibration debt
 Action:
-  Documented; DO NOT change during current balance pass.
+  CERRADO experimentalmente en 002E-3-B (FLOOR-20), PROMOVIDO en 002E-4
+  (floor 0.20 + baseline 0.30 + foul/contact 0.45). Verificado en 002E-5.
 ```
 
 > Nota de producción: `B3-C1 + 65/50/30` NO se promueve directo al motor. Los
@@ -79,7 +86,12 @@ Action:
 > descritos en 002C-B/002C-C viven hoy en `_resolve_play_outcome()`, el resolver
 > compartido por producción y el harness `scripts/simulate_fatigue_impact.py`.
 > La API pública `calculate_play_outcome()` NO acepta overrides: producción usa
-> siempre `_TAKE_BASE_PROD=0.65` / `_FOUL_PCT_PROD=35.0`.
+> siempre las constantes semánticas de 002E-4: `TAKE_BASE_STRIKE_CHANCE=0.30`,
+> `TAKE_STRIKE_CHANCE_FLOOR=0.20`, `TAKE_STRIKE_CHANCE_CEILING=0.85`,
+> `FOUL_ON_CONTACT_CHANCE=0.45` (antes `_TAKE_BASE_PROD=0.65` /
+> `_FOUL_PCT_PROD=35.0`). `take_bias`/`foul_chance`/`take_floor` resuelven
+> `None →` estas constantes; los knobs LAB reproducen PROD histórico
+> (0.65/0.35/0.25) y B3-C1 (0.30/0.45/0.25) sin duplicar la fórmula.
 
 ## 001B-5 · Full PA Monte Carlo sobre el PA calibrado 002
 
@@ -1507,3 +1519,74 @@ PA totales. El harness `run_matchup_robustness_e2` (~L1165) ya está cableado
 - **Watch → 002E-4 (PROMUEVE el paquete)**: TAKE floor = 0.20; take_bias = 0.30, foul = 45 (B3-C1),
   agente 65/50/30 queda LAB (NO se promueve en el engine). El paquete PISA el engine en el siguiente
   experimento; knobs LAB del 002E-3-B (`take_floor` etc.) no tocan producción.
+
+## 002E-4 · PROMOTE del paquete de producción del TAKE/contacto · CLOSED / PROMOTED
+- **Qué se promueve** (paquete validado en 002C/002E-1..002E-3B → producción):
+  - `TAKE_BASE_STRIKE_CHANCE = 0.30` (antes `_TAKE_BASE_PROD = 0.65`)
+  - `TAKE_STRIKE_CHANCE_FLOOR = 0.20` (antes 0.25; CLAMP-001 → FLOOR-20)
+  - `TAKE_STRIKE_CHANCE_CEILING = 0.85` (sin cambios)
+  - `FOUL_ON_CONTACT_CHANCE = 0.45` (antes `_FOUL_PCT_PROD = 35.0`)
+  - Peso de CTL/VIS en strike_chance (0.003/0.002), bono de zona (0.12): intactos.
+- **Qué NO se promueve**: la política de agente LAB `65/50/30` (cómo decide
+  TAKE/swing) queda en el harness; en producción debe originarse en
+  estrategia/dificultad/atributos/count (ver cabecera).
+- **Cambio estructural (fracción, no porcentaje)**: `foul_chance` pasa de
+  porcentaje (`45.0` vs `uniform(0,100)`) a fracción (`0.45` vs `random()`).
+  Equivalente 1:1 de RNG (`uniform(0,100)` internamente = `100·random()`), por
+  lo que reproducciones históricas con las mismas seeds conservan bit a bit.
+- **Constantes semánticas en calculator.py** (`TAKE_BASE_STRIKE_CHANCE`,
+  `TAKE_STRIKE_CHANCE_FLOOR`, `TAKE_STRIKE_CHANCE_CEILING`,
+  `CONTROL_TAKE_WEIGHT`, `VISION_TAKE_WEIGHT`, `_ZONE_MATCH_BONUS`,
+  `FOUL_ON_CONTACT_CHANCE`); sin números mágicos. Fórmula:
+  `strike_chance = base + (ctl−50)·w_ctl − (vis−50)·w_vis`, clamp `[floor, 0.85]`,
+  −0.12 si adivina zona; foul: `random() < foul_chance` en contactos no-limpios.
+- **Knobs LAB conservados** (`take_bias`/`foul_chance`/`take_floor` en
+  `_resolve_play_outcome()`), marcados como overrides de harness, NO config de
+  gameplay: resuelven `None →` constantes productivas y permiten reproducir
+  PROD histórico (0.65/0.35/0.25) y B3-C1 (0.30/0.45/0.25) sin duplicar la
+  fórmula. La API pública `calculate_play_outcome()` los rechaza.
+- **Tests (tests/test_calculator.py)**: congelan el paquete (base .30, floor .20,
+  ceiling .85, foul .45), monotonicidad CTL↑→strike↑ / VIS↑→strike↓, ventana del
+  floor (CTL45/VIS95 puede bajar de .25 pero nunca de .20), override LAB
+  reproduce histórico, `None ==` producción, y **regresión CLAMP-001**:
+  CTL45/VIS70 (0.245) ≠ CTL45/VIS95 (0.20) → sin colapso en meseta. 22/22 PASS.
+- **Harness alineado** (`simulate_fatigue_impact.py`): se hace fracción en
+  `E1_FIX`/`CV2_FIX`/`E3B_FIX`/`D2_FIX`/`F5_FIX` (foul 0.45), `FOUL_SWEEP`
+  (0.35/0.45/0.55/0.65), `BC_CELLS` y espejo analítico `_take_strike_probability`
+  a la producción 002E-4 (0.30/0.20/0.85). Brazos históricos de E1 pinchados a
+  valores explícitos (PROD 0.65/0.35/run_floor 0.25, B3-C1 0.30/0.45/tf 0.25)
+  para conservar la reproducción de los experimentos de 002E-1/002C sin que el
+  default de producción los mueva. Los modos 002A/002B (diagnóstico de política
+  y CTL×VIS) usan los defaults nuevos por diseño.
+- **Veredicto 002E-4**: paquete promovido tal cual (`.30/.20/.45`), nada más;
+  watch experimental atendido (CLAMP-001 cerrado en el engine). Tests 22/22,
+  suite completa PASS. Evidencia: `_e3b_full_run.txt` (002E-3-B, ya commit).
+  Commit aislado del paquete + tests + harness en 002E-4; el cierre formal del
+  experimento de aceptación es 002E-5.
+
+## 002E-5 · PRODUCTION ACCEPTANCE · gate de cierre de GAMEPLAY-ENGINE-002
+- **Pregunta**: ¿el PRODUCTO (paquete 002E-4 tal como lo consume gameplay vía
+  `calculate_play_outcome()`, SIN knobs LAB) produce el comportamiento promovido
+  en todo el cuadrante extremo que CLAMP-001 explotaba?
+- **Setup**: grid 3×3 CTL 45/70/95 × VIS 45/70/95 = 9 celdas × 50k PA =
+  450k PA. Agente LAB 65/50/30 FIJO SOLO decide TAKE/swing; el engine corre
+  producción pura (`use_public_api=True` en `_simulate_pa_diag` → llama a
+  `calculate_play_outcome()`, que rechaza los knobs). Fatiga OFF (factor 1.0);
+  mismas seeds por rep.
+- **Contratos fijados ANTES de correr**:
+  - **JA · TAKE MONOTONIC**: CalledS/tk estricto celda a celda — VIS↑→↓ y CTL↑→↑
+    (12 pares direccionales). La meseta de 0.25 sería el fracaso evidente.
+  - **JB · DISCIPLINE**: BB% material en TODA celda (≥ 1.0%), sin BB≈0.
+  - **JC · CONTACT**: Foul/Cnt ≈ 45% (paquete 002E-4) ± 1.5pp en toda celda.
+  - **JD · ISOLATION**: Whiff/Swing invariante entre celdas (span ≤ 1.0pp); el
+    cambio 002E-4 solo expone TAKE y foul, no el whiff model.
+  - **JE · PA STABLE**: extremo CTL45/VIS95 sin explosión vs control CTL70/VIS70
+    (BB% ≤ ref·1.6+2.0, max ≤ 15); colas acotadas.
+  - **JF · CLAMP-001 CERRADO (regresión)**: CTL45/VIS95 < CTL45/VIS70 en
+    CalledS/tk con pendiente material (≥ 2.0pp) — la meseta de 0.25 está
+    sellada por el floor 0.20 de producción.
+- **Resultado (smoke 5k/celda verificado)** → corrida completa 50k en `-e5`
+  (evidencia `_e5_prod_acceptance.txt`).
+- **Veredicto 002E-5**: [PENDIENTE de la corrida completa — se completa tras
+  `--mode e5`]. Si JA–JF PASS → `GAMEPLAY-ENGINE-002 CLOSED / PASS` con paquete
+  definitivo B3-C1 + floor 0.20 + foul 45% + agente LAB no promovido.

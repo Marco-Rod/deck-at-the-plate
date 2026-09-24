@@ -9,7 +9,7 @@ Flujo de resolución:
                     basándose en el control del pitcher y la visión del bateador.
     2. Whiff:       Si el bateador hace swing, se calcula la tasa de fallo (whiff%)
                     usando velocidad y movimiento del pitcher vs contacto del bateador.
-    3. Foul:        Si hace contacto pero no conectó limpio, probabilidad de foul (~35%).
+    3. Foul:        Si hace contacto pero no conectó limpio, probabilidad de foul (~45%).
     4. BABIP:       Bola en juego. Se calcula un power_score que determina el tipo
                     de hit u out según umbrales empíricos de MLB.
 
@@ -38,14 +38,21 @@ from app.core.engine_types import (
 )
 
 
-# Valores de producción (baseline 002). La API pública calculate_play_outcome()
-# siempre usa éstos; los knobs LAB (take_bias / foul_chance) sólo existen en
+# --- Política de producción del TAKE/contacto (002E-4 · PROMOTE) ---
+# Calibración validada en las series 002C/002E y PROMOVIDA a producción en
+# 002E-4. La API pública calculate_play_outcome() usa SIEMPRE estas constantes;
+# los knobs LAB (take_bias / foul_chance / take_floor) sólo existen en
 # _resolve_play_outcome(), el resolver que comparten producción y el harness de
 # disciplina (scripts/simulate_fatigue_impact.py) — una sola fórmula, cero
-# duplicación, y la API de gameplay queda sin knobs experimentales.
-_TAKE_BASE_PROD = 0.65    # Base MLB: ~65% de picheos sin swing son strikes
-_FOUL_PCT_PROD = 35.0     # MLB: ~35% de los contactos que no abanican son fouls
-_TAKE_FLOOR_PROD = 0.25   # Piso inferior del clamp de strike_chance (CLAMP-001)
+# duplicación, y la API de gameplay queda sin knobs experimentales. Los knobs
+# resuelven None → estas constantes productivas.
+TAKE_BASE_STRIKE_CHANCE = 0.30      # Baseline de strike_chance en TAKE (002E-4)
+TAKE_STRIKE_CHANCE_FLOOR = 0.20     # Piso del clamp (CLAMP-001: 0.25 → 0.20)
+TAKE_STRIKE_CHANCE_CEILING = 0.85   # Techo del clamp (sin cambios desde 002C)
+CONTROL_TAKE_WEIGHT = 0.003         # Peso del control del pitcher en strike_chance
+VISION_TAKE_WEIGHT = 0.002          # Peso de la visión del bateador en strike_chance
+_ZONE_MATCH_BONUS = 0.12            # Bono por anticipar la zona correcta en TAKE
+FOUL_ON_CONTACT_CHANCE = 0.45       # Foul/contact en los contactos no-limpios (002E-4)
 
 
 def calculate_play_outcome(
@@ -93,20 +100,24 @@ def _resolve_play_outcome(
     foul_chance: float = None,
     take_floor: float = None,
 ) -> PlayResult:
-    """Resolución completa de una jugada con knobs LAB (002C-B / 002C-C).
+    """Resolución completa de una jugada con knobs LAB (002C-B / 002C-C / 002E-4).
 
-    take_bias:   baseline de strike_chance en TAKE; None → producción (0.65).
-    foul_chance: % de FOUL sobre contactos; None → producción (35.0).
+    take_bias:   baseline de strike_chance en TAKE; None → producción
+                 (TAKE_BASE_STRIKE_CHANCE = 0.30).
+    foul_chance: fracción de FOUL sobre contactos no-limpios; None →
+                 producción (FOUL_ON_CONTACT_CHANCE = 0.45).
     take_floor:  piso inferior del clamp de strike_chance en TAKE; None →
-                 producción (0.25, CLAMP-001). 0.0 → sin piso inferior
-                 (solo cap superior 0.85). NO se toca producción con None.
+                 producción (TAKE_STRIKE_CHANCE_FLOOR = 0.20).
+                 0.0 → sin piso inferior (solo cap superior 0.85).
 
-    Sólo para el harness experimental de disciplina; gameplay llama a
-    calculate_play_outcome(), que delega aquí sin overrides.
+    LAB overrides (SÓLO para el harness experimental): producen los mismos
+    valores históricos que el engine ya validó (PROD histórico 0.65/0.35,
+    B3-C1 0.30/0.45, FLOOR-25/20/15/NO-FLOOR) sin duplicar la fórmula.
+    gameplay llama a calculate_play_outcome(), que delega aquí sin overrides.
     """
-    take_bias = _TAKE_BASE_PROD if take_bias is None else take_bias
-    foul_chance = _FOUL_PCT_PROD if foul_chance is None else foul_chance
-    take_floor = _TAKE_FLOOR_PROD if take_floor is None else take_floor
+    take_bias = TAKE_BASE_STRIKE_CHANCE if take_bias is None else take_bias
+    foul_chance = FOUL_ON_CONTACT_CHANCE if foul_chance is None else foul_chance
+    take_floor = TAKE_STRIKE_CHANCE_FLOOR if take_floor is None else take_floor
 
     tactics: TacticsModifiers = tactics_modifiers or {
         "batter_con": 1.0,
@@ -191,10 +202,10 @@ def _calculate_contact_outcome(
     if random.uniform(0, 100) < whiff_chance:
         return PlayResult(Event.STRIKE_SWINGING, "Swing abanicado. ¡Strike!")
 
-    # De los contactos que no abanican, ~35% son Fouls en MLB (002C-C: foul_chance LAB).
-    # El draw se evalúa SIEMPRE (orden de RNG preservado); acertar zona + tipo
-    # deja la probabilidad en 0 → contacto limpio garantizado.
-    if random.uniform(0, 100) < _contact_foul_probability(foul_chance, zone_matched, pitch_matched):
+    # De los contactos que no abanican, ~45% son Fouls (002E-4: foul_chance LAB
+    # ahora en fracción 0–1). El draw se evalúa SIEMPRE (orden de RNG preservado);
+    # acertar zona + tipo deja la probabilidad en 0 → contacto limpio garantizado.
+    if random.random() < _contact_foul_probability(foul_chance, zone_matched, pitch_matched):
         return PlayResult(Event.FOUL, "Batazo de foul.")
 
     # --- BOLA PUESTA EN JUEGO (BABIP MLB REAL) ---
@@ -219,15 +230,19 @@ def _calculate_contact_outcome(
 
 def _take_strike_probability(take_bias: float, ctl: float, vis: float,
                              zone_matched: bool, take_floor: float) -> float:
-    """Probabilidad de strike en TAKE (pura; clamp [piso, 0.85] CLAMP-001)."""
-    strike_chance = take_bias + (ctl - 50) * 0.003 - (vis - 50) * 0.002
+    """Probabilidad de strike en TAKE (pura; clamp [piso, techo] 002E-4)."""
+    strike_chance = (
+        take_bias
+        + (ctl - 50) * CONTROL_TAKE_WEIGHT
+        - (vis - 50) * VISION_TAKE_WEIGHT
+    )
     if zone_matched:
-        strike_chance -= 0.12  # Bono por anticipar la zona correcta
-    return max(take_floor, min(0.85, strike_chance))
+        strike_chance -= _ZONE_MATCH_BONUS  # Bono por anticipar la zona correcta
+    return max(take_floor, min(TAKE_STRIKE_CHANCE_CEILING, strike_chance))
 
 
 def _contact_foul_probability(foul_chance: float, zone_matched: bool, pitch_matched: bool) -> float:
-    """Probabilidad de FOUL sobre un contacto, en % sobre 100 (pura)."""
+    """Probabilidad de FOUL sobre un contacto no-limpio (fracción 0–1, pura)."""
     if zone_matched and pitch_matched:
         return 0.0
     return foul_chance
