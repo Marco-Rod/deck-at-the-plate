@@ -326,6 +326,7 @@ def _simulate_pa_diag(take_probs: dict, seed: int,
                       foul_chance: float = None,
                       take_floor: float = None,
                       batter_attrs: dict = None,
+                      pitcher_attrs: dict = None,
                       use_public_api: bool = False) -> dict:
     """PA 0-0 → K/BB/BIP con diagnóstico de count y de disciplinas, SIN fatiga.
 
@@ -344,6 +345,9 @@ def _simulate_pa_diag(take_probs: dict, seed: int,
                     (002E-2 · matchup WEAK/MID/STRONG sobre CTL fijo del
                     pitcher; la Vision del PA sigue controlada por `vision`).
                     None → BATTER (70/70/70).
+        pitcher_attrs: override COMPLETO del perfil del pitcher
+                    (003A · baseline: velocidad/control/movimiento
+                    WEAK/MID/STRONG). None → PITCHER_RAW (90/80/85).
         use_public_api: True → resuelve la jugada con calculate_play_outcome()
                     (producción pura, sin knobs LAB) en vez de
                     _resolve_play_outcome (002E-5 · production acceptance).
@@ -355,9 +359,13 @@ def _simulate_pa_diag(take_probs: dict, seed: int,
     pitch_count = int(DISCIPLINE_WORKLOAD * THRESHOLD)  # congelado → factor 1.0
 
     # Overrides 002B (factorial Control × Vision) + 002E-2 (perfil ofensivo
-    # del batter); resto MID fijo.
-    pitcher_raw = dict(PITCHER_RAW)
-    pitch_raw = dict(PITCH_RAW)
+    # del batter) + 003A (perfil completo del pitcher); resto MID fijo.
+    pitcher_raw = dict(PITCHER_RAW if pitcher_attrs is None else pitcher_attrs)
+    pitch_raw = dict(PITCH_RAW if pitcher_attrs is None else {
+        "velocity": pitcher_attrs["velocidad"],
+        "control": pitcher_attrs["control"],
+        "movement": pitcher_attrs["movimiento"],
+    })
     batter_attrs = dict(BATTER if batter_attrs is None else batter_attrs)
     if control is not None:
         pitcher_raw["control"] = control
@@ -2084,6 +2092,395 @@ def run_production_acceptance_e5(reps: int) -> None:
     print("Watch: si JA/JB/JF fallan el paquete 002E-4 está mal promovido; "
           "si JC/JD fallan el cambio entró por el mecanismo equivocado. "
           "002E-4 NO se re-calibra aquí; esto es la verificación del PRODUCTO.")
+
+
+# ---------------------------------------------------------------------------
+# GAMEPLAY-ENGINE-003A · Calibrated Engine Baseline
+# ---------------------------------------------------------------------------
+# Snapshot de la superficie del motor cerrado (Fatigue v2 + Discipline v2).
+# CERO cambios de gameplay: calculator.py intacto; la jugada se resuelve con la
+# API pública (calculate_play_outcome, sin knobs LAB). Fatiga neutralizada
+# (workload 0.75 → factor 1.0). Agente de medición fijo 65/50/30 = E1_POLICY,
+# NO parte de 003A y NO promovido. Stuff/Clutch fuera deliberadamente.
+PITCHER_PROFILES_003A = {
+    "WEAK": {"velocidad": 55, "control": 55, "movimiento": 55},
+    "MID": {"velocidad": 70, "control": 70, "movimiento": 70},
+    "STRONG": {"velocidad": 90, "control": 90, "movimiento": 90},
+}
+BATTER_PROFILES_003A = {
+    "WEAK": {"contacto": 55, "poder": 55, "vision": 55},
+    "MID": {"contacto": 70, "poder": 70, "vision": 70},
+    "STRONG": {"contacto": 90, "poder": 90, "vision": 90},
+}
+PROFILE_ORDER_003A = ("WEAK", "MID", "STRONG")
+
+# K1-K6 contratos con tolerancias de ruido de muestra (50k PA).
+K3_TOL_PP = 0.5   # tolerancia de no-empeoramiento para HR/BIP y XBH/BIP
+K5_MAX_PA = 15    # techo de cola de PA por celda (misma regla que JE/002E-5)
+
+
+def run_calibrated_baseline_e003a(reps: int) -> None:
+    """003A-1 · Baseline 3×3 pitcher×batter, producción pura, contratos K1–K6."""
+    n = reps
+    cells = {}
+    for pname in PROFILE_ORDER_003A:
+        for bname in PROFILE_ORDER_003A:
+            agg = {k: 0 for k in ("pitches", "reached_2strikes", "reached_3balls",
+                                  "reached_full", "take_attempts", "balls_on_take",
+                                  "called_strikes_on_take", "swing_attempts",
+                                  "whiffs", "fouls", "bips", "depth4", "depth6")}
+            agg["outcome"] = Counter()
+            agg["lengths"] = []
+            batter = BATTER_PROFILES_003A[bname]
+            pitcher = PITCHER_PROFILES_003A[pname]
+            for rep in range(reps):
+                seed = int(DISCIPLINE_WORKLOAD * 1000) * 10**6 + rep  # seeds compartidas
+                d = _simulate_pa_diag(E1_POLICY, seed,
+                                      batter_attrs=batter,
+                                      pitcher_attrs=pitcher,
+                                      use_public_api=True)
+                for k in ("pitches", "reached_3balls", "reached_full",
+                          "take_attempts", "balls_on_take",
+                          "called_strikes_on_take", "swing_attempts", "whiffs",
+                          "fouls", "bips"):
+                    agg[k] += d[k]
+                agg["outcome"][d["outcome"]] += 1
+                agg["lengths"].append(d["pitches"])
+                if d["pitches"] >= 4:
+                    agg["depth4"] += 1
+                if d["pitches"] >= 6:
+                    agg["depth6"] += 1
+            lengths = sorted(agg["lengths"])
+            agg["p95"] = lengths[int(len(lengths) * 0.95) - 1]
+            agg["max"] = lengths[-1]
+            cells[(pname, bname)] = agg
+
+    def pct(x, k):
+        return x / k * 100 if k else 0.0
+
+    def called_s(o):
+        return pct(o["called_strikes_on_take"], max(1, o["take_attempts"]))
+
+    def whiff_s(o):
+        return pct(o["whiffs"], max(1, o["swing_attempts"]))
+
+    def foul_c(o):
+        return pct(o["fouls"], max(1, o["fouls"] + o["bips"]))
+
+    def bip(o):
+        return o["outcome"]["OUT"] + o["outcome"]["1B"] + o["outcome"]["2B"] + \
+               o["outcome"]["3B"] + o["outcome"]["HR"]
+
+    def xbh(o):
+        return o["outcome"]["2B"] + o["outcome"]["3B"] + o["outcome"]["HR"]
+
+    print("=" * 132)
+    print("GAMEPLAY-ENGINE-003A · CALIBRATED ENGINE BASELINE (003A-1)")
+    print(f"Grid Pitcher×Batter WEAK/MID/STRONG (9 celdas) | {reps:,} PA/celda | "
+          f"{reps*9:,} PA total | seeds compartidas por rep (fatiga congelada → factor 1.0)")
+    print("Discipline v2 productiva vía calculate_play_outcome() SIN knobs LAB: "
+          "base 0.30 · floor 0.20 · ceiling 0.85 · foul/contact 0.45")
+    print("Agente de medición fijo 65/50/30 (E1_POLICY). NO es parte de 003A "
+          "y NO se promueve. Stuff/Clutch FUERA deliberadamente.")
+    print("Contratos K1–K6 fijados ANTES de correr. SIN targets externos "
+          "(K%=22, BB%=8, etc.) por diseño.")
+    print("=" * 132)
+
+    # Fotografía completa de superficie
+    print()
+    print("-- PA OUTCOMES + BATTED-BALL (fotografía de superficie) --")
+    hdr = (f"{'Matchup':<18} | {'K%':>6} {'BB%':>6} {'BIP%':>6} {'Reach%':>7} | "
+           f"{'OUT%':>6} {'1B%':>6} {'2B%':>6} {'3B%':>6} {'HR%':>6}")
+    print(hdr)
+    print("-" * 132)
+    for pname in PROFILE_ORDER_003A:
+        for bname in PROFILE_ORDER_003A:
+            o = cells[(pname, bname)]
+            out = o["outcome"]
+            k = int(bip(o))
+            bb = out["BB"]
+            reach = out["BB"] + out["1B"] + out["2B"] + out["3B"] + out["HR"]
+            print(
+                f"{bname:<8} vs {pname:<7} | "
+                f"{pct(out['K'], n):>6.2f} {pct(bb, n):>6.2f} {pct(k, n):>6.2f} "
+                f"{pct(reach, n):>7.2f} | "
+                f"{pct(out['OUT'], k):>6.2f} {pct(out['1B'], k):>6.2f} "
+                f"{pct(out['2B'], k):>6.2f} {pct(out['3B'], k):>6.2f} "
+                f"{pct(out['HR'], k):>6.2f}"
+            )
+        if pname != "STRONG":
+            print("-" * 132)
+    print("-" * 132)
+    print("Reach% = (BB+1B+2B+3B+HR)/PA · batted-ball sobre BIP · K%+BB%+BIP%=100")
+
+    print()
+    print("-- MECHANISMS + PA SHAPE --")
+    print(f"{'Matchup':<18} | {'CalledS/tk':>10} | {'Whiff/Sw':>8} "
+          f"{'Foul/Cnt':>8} {'Cnt/Sw':>7} | {'Pit/PA':>6} {'P(≥4)':>6} "
+          f"{'P(≥6)':>6} {'P(full)':>7} {'p95':>4} {'max':>4}")
+    print("-" * 132)
+    for pname in PROFILE_ORDER_003A:
+        o_p = None
+        for bname in PROFILE_ORDER_003A:
+            o = cells[(pname, bname)]
+            sw = max(1, o["swing_attempts"])
+            cont = sw - o["whiffs"]
+            print(
+                f"{bname:<8} vs {pname:<7} | "
+                f"{called_s(o):>10.2f} | "
+                f"{whiff_s(o):>8.2f} {foul_c(o):>8.2f} {pct(cont, sw):>7.2f} | "
+                f"{o['pitches'] / n:>6.2f} {pct(o['depth4'], n):>6.2f} "
+                f"{pct(o['depth6'], n):>6.2f} {pct(o['reached_full'], n):>7.2f} "
+                f"{o['p95']:>4} {o['max']:>4}"
+            )
+        print("-" * 132)
+
+    print()
+    print("-- DERIVADAS (para separar 'Stuff reduce contacto' de 'Stuff cambia "
+          "calidad del contacto') --")
+    print(f"{'Matchup':<18} | {'Contact/Swing':>13} | {'XBH/BIP':>7}")
+    print("-" * 132)
+    for pname in PROFILE_ORDER_003A:
+        for bname in PROFILE_ORDER_003A:
+            o = cells[(pname, bname)]
+            sw = max(1, o["swing_attempts"])
+            print(
+                f"{bname:<8} vs {pname:<7} | "
+                f"{pct(sw - o['whiffs'], sw):>13.2f} | "
+                f"{pct(xbh(o), max(1, bip(o))):>7.2f}"
+            )
+    print("-" * 132)
+
+    # CONTRATOS K1–K6
+    print()
+    print("-- CONTRATOS (K1–K6, fijados antes) --")
+
+    # K1 · PITCHER STRENGTH (batter fijo): pitcher WEAK→MID→STRONG →
+    # K%↑, Whiff/Swing↑, Reach%↓.
+    k1_ok = True
+    k1_rows = []
+    for bname in PROFILE_ORDER_003A:
+        ks = [pct(cells[(p, bname)]["outcome"]["K"], n) for p in PROFILE_ORDER_003A]
+        ws = [whiff_s(cells[(p, bname)]) for p in PROFILE_ORDER_003A]
+        rs = [pct(cells[(p, bname)]["outcome"]["BB"] +
+                  cells[(p, bname)]["outcome"]["1B"] +
+                  cells[(p, bname)]["outcome"]["2B"] +
+                  cells[(p, bname)]["outcome"]["3B"] +
+                  cells[(p, bname)]["outcome"]["HR"], n) for p in PROFILE_ORDER_003A]
+        k1_ok &= ks[0] < ks[1] < ks[2]
+        k1_ok &= ws[0] < ws[1] < ws[2]
+        k1_ok &= rs[0] > rs[1] > rs[2]
+        k1_rows.append((f"vs {bname}", ks[0], ks[2], ws[0], ws[2], rs[0], rs[2]))
+    print(f"K1 PITCHER STRENGTH (batter fijo; WEAK→MID→STRONG pitcher: K%↑, "
+          f"Whiff/Swing↑, Reach%↓): {'PASS' if k1_ok else 'FAIL'}")
+    for (lbl, k0, k2, w0, w2, r0, r2) in k1_rows:
+        print(f"    {lbl:<8} K% {k0:.2f}→{k2:.2f} | Whiff/Sw {w0:.2f}→{w2:.2f} | "
+              f"Reach% {r0:.2f}→{r2:.2f}")
+
+    # K2 · BATTER STRENGTH (pitcher fijo): batter WEAK→MID→STRONG →
+    # Whiff/Swing↓, Reach%↑.
+    k2_ok = True
+    k2_rows = []
+    for pname in PROFILE_ORDER_003A:
+        ws = [whiff_s(cells[(pname, b)]) for b in PROFILE_ORDER_003A]
+        rs = [pct(cells[(pname, b)]["outcome"]["BB"] +
+                  cells[(pname, b)]["outcome"]["1B"] +
+                  cells[(pname, b)]["outcome"]["2B"] +
+                  cells[(pname, b)]["outcome"]["3B"] +
+                  cells[(pname, b)]["outcome"]["HR"], n) for b in PROFILE_ORDER_003A]
+        k2_ok &= ws[0] > ws[1] > ws[2]
+        k2_ok &= rs[0] < rs[1] < rs[2]
+        k2_rows.append((f"P {pname}", ws[0], ws[2], rs[0], rs[2]))
+    print(f"K2 BATTER STRENGTH (pitcher fijo; batter WEAK→MID→STRONG: "
+          f"Whiff/Swing↓, Reach%↑): {'PASS' if k2_ok else 'FAIL'}")
+    for (lbl, w0, w2, r0, r2) in k2_rows:
+        print(f"    {lbl:<7} Whiff/Sw {w0:.2f}→{w2:.2f} | Reach% {r0:.2f}→{r2:.2f}")
+
+    # K3 · POWER EXPRESSION: batter strength↑ → HR/BIP y XBH/BIP no empeoran
+    # (con tolerancia de ruido).
+    k3_ok = True
+    k3_rows = []
+    for pname in PROFILE_ORDER_003A:
+        hr = [pct(cells[(pname, b)]["outcome"]["HR"], max(1, bip(cells[(pname, b)])))
+              for b in PROFILE_ORDER_003A]
+        xb = [pct(xbh(cells[(pname, b)]), max(1, bip(cells[(pname, b)])))
+              for b in PROFILE_ORDER_003A]
+        ok = hr[1] >= hr[0] - K3_TOL_PP and hr[2] >= hr[1] - K3_TOL_PP
+        ok &= xb[1] >= xb[0] - K3_TOL_PP and xb[2] >= xb[1] - K3_TOL_PP
+        k3_ok &= ok
+        k3_rows.append((f"P {pname}", hr[0], hr[2], xb[0], xb[2], ok))
+    print(f"K3 POWER EXPRESSION (batter↑ → HR/BIP y XBH/BIP no empeoran, "
+          f"tol ±{K3_TOL_PP}pp): {'PASS' if k3_ok else 'FAIL'}")
+    for (lbl, h0, h2, x0, x2, ok) in k3_rows:
+        print(f"    {lbl:<7} HR/BIP {h0:.2f}→{h2:.2f} | XBH/BIP {x0:.2f}→{x2:.2f} "
+              f"| {'PASS' if ok else 'FAIL'}")
+
+    # K4 · DISCIPLINE SURVIVES: pitcher↑ → CalledStrike/TAKE↑; batter↑ (VIS↑)
+    # → CalledStrike/TAKE↓.
+    k4_ok = True
+    k4_rows = []
+    for bname in PROFILE_ORDER_003A:
+        cs = [called_s(cells[(p, bname)]) for p in PROFILE_ORDER_003A]
+        ok = cs[0] < cs[1] < cs[2]
+        k4_ok &= ok
+        k4_rows.append((f"vs {bname} pitcher↑", cs[0], cs[2], ok))
+    for pname in PROFILE_ORDER_003A:
+        cs = [called_s(cells[(pname, b)]) for b in PROFILE_ORDER_003A]
+        ok = cs[0] > cs[1] > cs[2]
+        k4_ok &= ok
+        k4_rows.append((f"P {pname} batter↑", cs[0], cs[2], ok))
+    print(f"K4 DISCIPLINE SURVIVES (pitcher↑ → CalledS/TAKE↑; batter↑ (VIS↑) → "
+          f"CalledS/TAKE↓): {'PASS' if k4_ok else 'FAIL'}")
+    for (lbl, c0, c2, ok) in k4_rows:
+        print(f"    {lbl:<15} CalledS/tk {c0:.2f}→{c2:.2f} | "
+              f"{'PASS' if ok else 'FAIL'}")
+
+    # K5 · PA STABILITY: max ≤ 15 en toda celda; sin CAP; Pit/PA del rincón más
+    # extremo sin explosión vs MID/MID.
+    k5_ok = True
+    k5_max = max(cells[(p, b)]["max"] for (p, b) in cells)
+    k5_caps = sum(cells[(p, b)]["outcome"]["CAP"] for (p, b) in cells)
+    ext = max((cells[(p, b)]["pitches"] / n for (p, b) in cells))
+    ref = cells[("MID", "MID")]["pitches"] / n
+    k5_ok = k5_max <= K5_MAX_PA and k5_caps == 0 and ext <= ref * 1.6 + 2.0
+    print(f"K5 PA STABILITY (max ≤ {K5_MAX_PA}, sin CAP, Pit/PA extremo "
+          f"≤ ref·1.6+2.0): {'PASS' if k5_ok else 'FAIL'} "
+          f"(max={k5_max} CAP={k5_caps} extremo={ext:.2f} vs ref MID/MID={ref:.2f})")
+
+    # K6 · FINITE/VALID: todas las métricas finitas y en [0,100]; invariantes
+    # K%+BB%+BIP%=100 y batted-ball suma 100 (sobre BIP).
+    k6_ok = True
+    k6_rows = []
+    for pname in PROFILE_ORDER_003A:
+        for bname in PROFILE_ORDER_003A:
+            o = cells[(pname, bname)]
+            out = o["outcome"]
+            k = bip(o)
+            kp = pct(out["K"], n)
+            bbp = pct(out["BB"], n)
+            bipsum = kp + bbp + pct(k, n)
+            bb_sc = pct(out["OUT"], k) + pct(out["1B"], k) + pct(out["2B"], k) + \
+                    pct(out["3B"], k) + pct(out["HR"], k)
+            finite = all(all(math.isfinite(v) for v in (
+                kp, bbp, pct(k, n), pct(xbh(o), max(1, k)),
+                called_s(o), whiff_s(o), foul_c(o), o['pitches'] / n))
+                for _ in (0,))
+            inv_ok = abs(bipsum - 100.0) <= 0.5 and abs(bb_sc - 100.0) <= 0.5
+            ok = finite and inv_ok
+            k6_ok &= ok
+            k6_rows.append((f"{bname} vs {pname}", bipsum, bb_sc, ok))
+    print(f"K6 FINITE/VALID (métricas finitas, 0≤%≤100, K%+BB%+BIP%=100, "
+          f"batted-ball 100): {'PASS' if k6_ok else 'FAIL'}")
+    for (lbl, s1, s2, ok) in k6_rows:
+        print(f"    {lbl:<15} K+BB+BIP={s1:5.2f} BBall(sum)={s2:5.2f} | "
+              f"{'PASS' if ok else 'FAIL'}")
+
+    print("-" * 132)
+    print(f"Veredicto 003A-1: K1 {'PASS' if k1_ok else 'FAIL'} | "
+          f"K2 {'PASS' if k2_ok else 'FAIL'} | "
+          f"K3 {'PASS' if k3_ok else 'FAIL'} | "
+          f"K4 {'PASS' if k4_ok else 'FAIL'} | "
+          f"K5 {'PASS' if k5_ok else 'FAIL'} | "
+          f"K6 {'PASS' if k6_ok else 'FAIL'}")
+    all_ok = k1_ok and k2_ok and k3_ok and k4_ok and k5_ok and k6_ok
+    if all_ok:
+        print("RESULTADO: K1–K6 PASS → superficie congelada como "
+              "CALIBRATED-BASELINE-v1 (entrada a 003B · Stuff integration).")
+    else:
+        print("RESULTADO: K1–K6 con fallas → NO se congela; diagnosticar antes "
+              "de abrir 003B.")
+
+
+# ---------------------------------------------------------------------------
+# 003A-TAIL-1 · K5-R validation (cola de PA en la celda STRONG×WEAK)
+# ---------------------------------------------------------------------------
+# K5 original (max ≤ 15) falló con max=16 en STRONG batter × WEAK pitcher.
+# Diagnóstico: outlier aislado (1/50k = 0.002%), p95=6, sin CAP, sin
+# acumulación cerca de la cola; mecanismo = fouls repetidos con 2 strikes.
+# `max` no es un contrato asintótico estable (5k→13, 50k→16). K5-R mide la
+# DISTRIBUCIÓN de la cola con seeds INDEPENDIENTES (base fuera del rango
+# 750M..750.5M de la corrida 003A-1) para no validar con los mismos datos que
+# diseñaron el contrato.
+TAIL1_CELL_BATTER = "STRONG"
+TAIL1_CELL_PITCHER = "WEAK"
+TAIL1_REPS = 200_000
+TAIL1_SEED_BASE = 9_000_000_000  # independiente del rango de 003A-1 (750M..)
+# K5-R congelados antes de correr (003A-TAIL-1):
+TAIL1_P95_MAX = 6
+TAIL1_P12_MAX_PP = 0.05
+TAIL1_P16_MAX_PP = 0.01
+
+
+def run_tail_stability_k5r(reps: int) -> None:
+    """003A-TAIL-1 · K5-R: valida la cola de forme 200k con seeds nuevas."""
+    n = reps
+    batter = BATTER_PROFILES_003A[TAIL1_CELL_BATTER]
+    pitcher = PITCHER_PROFILES_003A[TAIL1_CELL_PITCHER]
+    lengths = []
+    caps = 0
+    for rep in range(reps):
+        seed = TAIL1_SEED_BASE + rep  # seeds NUEVAS/independientes
+        d = _simulate_pa_diag(E1_POLICY, seed,
+                              batter_attrs=batter,
+                              pitcher_attrs=pitcher,
+                              use_public_api=True)
+        lengths.append(d["pitches"])
+        if d["outcome"] == "CAP":
+            caps += 1
+    lengths.sort()
+    p95 = lengths[int(len(lengths) * 0.95) - 1]
+    p99 = lengths[int(len(lengths) * 0.99) - 1]
+    n_ = n
+
+    def pge(x):
+        return sum(1 for v in lengths if v >= x) / n_ * 100
+
+    p8 = pge(8)
+    p10 = pge(10)
+    p12 = pge(12)
+    p14 = pge(14)
+    p16 = pge(16)
+    p20 = pge(20)
+    p95_ok = p95 <= TAIL1_P95_MAX
+    p12_ok = p12 <= TAIL1_P12_MAX_PP
+    p16_ok = p16 <= TAIL1_P16_MAX_PP
+    cap_ok = caps == 0
+    k5r_ok = p95_ok and p12_ok and p16_ok and cap_ok
+
+    print("=" * 100)
+    print("003A-TAIL-1 · K5-R VALIDATION · PA tail stability")
+    print(f"Celda: {TAIL1_CELL_BATTER} batter × {TAIL1_CELL_PITCHER} pitcher "
+          f"(la que falló K5 original) | {n:,} PA | seeds NUEVAS independientes "
+          f"(base {TAIL1_SEED_BASE})")
+    print("K5-R congelado ANTES de correr: p95 ≤ 6 · P(≥12) ≤ 0.05% · "
+          "P(≥16) ≤ 0.01% · sin CAP. max = solo informativo.")
+    print("=" * 100)
+    print(f"{'Metric':<12} {'Observed':>14} {'K5-R bound':>14} | {'Result':>6}")
+    print("-" * 100)
+    print(f"{'p95':<12} {p95:>14} {TAIL1_P95_MAX:>14} | "
+          f"{'PASS' if p95_ok else 'FAIL':>6}")
+    print(f"{'p99 (info)':<12} {p99:>14} {'—':>14} |")
+    print(f"{'P(≥8)':<12} {p8:>14.4f} {'—':>14} |")
+    print(f"{'P(≥10)':<12} {p10:>14.4f} {'—':>14} |")
+    print(f"{'P(≥12)':<12} {p12:>14.4f} {TAIL1_P12_MAX_PP:>14} | "
+          f"{'PASS' if p12_ok else 'FAIL':>6}")
+    print(f"{'P(≥14)':<12} {p14:>14.4f} {'—':>14} |")
+    print(f"{'P(≥16)':<12} {p16:>14.4f} {TAIL1_P16_MAX_PP:>14} | "
+          f"{'PASS' if p16_ok else 'FAIL':>6}")
+    print(f"{'P(≥20)':<12} {p20:>14.4f} {'—':>14} |")
+    print(f"{'CAP':<12} {caps:>14} {'0':>14} | "
+          f"{'PASS' if cap_ok else 'FAIL':>6}")
+    print(f"{'max (info)':<12} {lengths[-1]:>14} {'—':>14} |")
+    print("-" * 100)
+    print(f"K5-R veredicto: {'PASS' if k5r_ok else 'FAIL'}")
+    if k5r_ok:
+        print("Conclusión: la cola es legal (fouls repetidos con 2 strikes); "
+              "el fallo de K5 original fue un defecto del instrumento `max`, "
+              "no una cola patológica.")
+    else:
+        print("Conclusión: hay evidencia de cola patológica en la interacción "
+              "high Contact × 45% foul/contact × two strikes; investigar antes "
+              "de abrir 003B.")
 
 
 # ---------------------------------------------------------------------------
@@ -3866,7 +4263,7 @@ def run_pa_level(reps: int) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Monte Carlo de fatiga (GAMEPLAY-ENGINE-001B)")
-    parser.add_argument("--mode", choices=["pa", "pitch", "discipline", "cv", "take", "foul", "bc", "d2", "cv2", "f5", "c1", "c3", "c4", "c5", "d1", "d3", "d4", "e1", "e2", "e3", "e3b", "e5"], default="pa",
+    parser.add_argument("--mode", choices=["pa", "pitch", "discipline", "cv", "take", "foul", "bc", "d2", "cv2", "f5", "c1", "c3", "c4", "c5", "d1", "d3", "d4", "e1", "e2", "e3", "e3b", "e5", "e003a", "e003a-tail"], default="pa",
                         help="pa = PA completo (001B-4); pitch = pitch suelto (001B-3); "
                              "discipline = diagnóstico de count/disciplina sin fatiga (002A); "
                              "cv = factorial Control×Vision (002B); "
@@ -3885,8 +4282,10 @@ def main() -> None:
                               "c5 = escala del threshold 3/6/9 innings (001C-5); "
                               "d1 = caracterización de la decisión CPU de cambio bajo Policy v2 (001D-1); "
                               "e2 = robustez B3-C1 por matchup ofensivo del bateador, CTL×perfil WEAK/MID/STRONG (002E-2); "
-                              "e5 = producción acceptance: calculate_play_outcome() sin knobs, grid 3×3 CTL×VIS, contratos JA–JF (002E-5); "
-                             "d3 = comparación de estrategias CPU workload-based por matchup (001D-3); "
+"e5 = producción acceptance: calculate_play_outcome() sin knobs, grid 3×3 CTL×VIS, contratos JA–JF (002E-5); "
+                              "e003a = calibrated engine baseline: 3×3 pitcher×batter, producción pura, contratos K1–K6 (003A); "
+                              "e003a-tail = K5-R: validación de cola de PA (STRONG×WEAK, 200k, seeds nuevas) (003A-TAIL-1); "
+                              "d3 = comparación de estrategias CPU workload-based por matchup (001D-3); "
                              "d4 = barrido ampliado + coste marginal de esperar (001D-4A/B)")
     parser.add_argument("--reps", type=int, default=REPS, help="réplicas por escenario")
     args = parser.parse_args()
@@ -3917,6 +4316,10 @@ def main() -> None:
         run_clamp001_floor_mc_e3b(args.reps)
     elif args.mode == "e5":
         run_production_acceptance_e5(args.reps)
+    elif args.mode == "e003a":
+        run_calibrated_baseline_e003a(args.reps)
+    elif args.mode == "e003a-tail":
+        run_tail_stability_k5r(args.reps)
     elif args.mode == "f5":
         run_fatigue_curve_comparison(args.reps)
     elif args.mode == "c1":

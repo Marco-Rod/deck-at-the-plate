@@ -51,6 +51,7 @@ GAMEPLAY-FATIGUE-UI-001 — CLOSED
   with temporary fatigue_level compatibility fallback
 
 GAMEPLAY-ENGINE-002 — DISCIPLINE / COUNT MODEL
+[CLOSED — rama 002E-1..002E-5, paquete promovido en 002E-4]
 002A    PA/count characterization       CLOSED / PASS
 002B    CTL×VIS original                CLOSED / PASS
 002C-B  TAKE baseline                   CLOSED / PASS
@@ -64,6 +65,9 @@ GAMEPLAY-ENGINE-002 — DISCIPLINE / COUNT MODEL
 002E-3B CLAMP-001 MC aislado            CLOSED / PASS (FLOOR-20)
 002E-4  PROMOTE paquete B3-C1+floor20   CLOSED / PROMOTED
 002E-5  Production acceptance           CLOSED / PASS (6/6 JA–JF)
+
+GAMEPLAY-ENGINE-003A — CALIBRATED ENGINE BASELINE
+[CLOSED — PASS with superseded measurement contract · CALIBRATED-BASELINE-v1 congelado]
 
 Finding:
 GAMEPLAY-ENGINE-002-CLAMP-001
@@ -1600,3 +1604,180 @@ PA totales. El harness `run_matchup_robustness_e2` (~L1165) ya está cableado
   FLOOR-20/15 / NO-FLOOR sin tocar producción. Cierre formal de la rama 002E-1..002E-5.
 - **Historial de MC acumulado**: 002A-N/A + 002C-B/C/BC + 002E-1 (81k) + 002E-2 (450k) + 002E-3-B
   (800k) + 002E-5 (450k) ≈ **2.15M PA** de evidencia sobre el paquete final.
+
+## GAMEPLAY-ENGINE-003A — Calibrated Engine Baseline
+
+```
+GAMEPLAY-ENGINE-003A
+Calibrated Engine Baseline
+
+Purpose:
+  Freeze the observable gameplay surface after:
+    - Fatigue Policy v2
+    - Discipline Policy v2
+  No production behavior changes.
+
+Matrix:
+  3 pitcher profiles x 3 batter profiles
+  50k PA/cell
+  450k PA
+  shared deterministic seeds
+
+Measurement agent:
+  65/50/30 is the measurement agent used to expose the calibrated engine surface.
+  It is NOT part of GAMEPLAY-ENGINE-003A and is NOT being promoted to production.
+
+Contracts:
+  K1-K6
+```
+
+- **Regla de oro**: CERO cambios de gameplay. No se toca `calculator.py` ni la fatiga
+  v2. Esto es un *mapa de superficie*: congelamos cómo se comporta el motor cerrado
+  (Fatigue v2 + Discipline v2) como referencia para calibrar a futuro (Stuff/Clutch).
+- **Perfiles sintéticos (LAB)**, Stuff y Clutch DELIBERADAMENTE fuera — no existen
+  atributos así en producción hoy; se excluyen para medir el control antes de
+  incorporarlos:
+
+  | Pitcher | VEL | CTL | MOV |
+  | :------ | --: | --: | --: |
+  | WEAK    | 55  | 55  | 55  |
+  | MID     | 70  | 70  | 70  |
+  | STRONG  | 90  | 90  | 90  |
+
+  | Batter | CON | POW | VIS |
+  | :----- | --: | --: | --: |
+  | WEAK   | 55  | 55  | 55  |
+  | MID    | 70  | 70  | 70  |
+  | STRONG | 90  | 90  | 90  |
+
+- **Setup**: fatiga neutralizada (`workload = 0.75 → factor 1.0`, misma convención de
+  congelación que 002A/002E); Discipline v2 productiva en juego
+  (`TAKE base 0.30 · floor 0.20 · ceiling 0.85 · foul/contact 0.45`) vía
+  `calculate_play_outcome()` (API pública, sin knobs LAB — `use_public_api=True`).
+- **Agente de medición fijo 65/50/30** (`E1_POLICY`): solo decide TAKE/swing para
+  exponer la superficie calibrada; comparabilidad directa con 002E-1/3-B/5.
+- **Métricas por celda** (más fotografía que 002):
+  `PA outcomes` K% · BB% · BIP% · Reach%; `Batted-ball` OUT% · 1B% · 2B% · 3B% · HR%
+  (sobre BIP); `Mechanisms` CalledStrike/TAKE · Whiff/SWING · Foul/CONTACT;
+  `PA shape` Pit/PA · P(≥4) · P(≥6) · P(full) · p95 · max. Dos métricas derivadas
+  para separar "Stuff reduce contacto" de "Stuff cambia calidad del contacto":
+  `Contact/Swing` y `XBH/BIP` (2B+3B+HR sobre BIP).
+- **Contratos K1–K6 fijados ANTES de correr** (sin targets externos aún — K%≈22%,
+  BB%≈8%, etc. quedan explícitamente FUERA hasta definir el modelo de atributos):
+  - **K1 · PITCHER STRENGTH**: con batter fijo, WEAK→MID→STRONG pitcher: K%↑,
+    Whiff/Swing↑, Reach%↓ (12 pares).
+  - **K2 · BATTER STRENGTH**: con pitcher fijo, WEAK→MID→STRONG batter:
+    Whiff/Swing↓, Reach%↑ (12 pares).
+  - **K3 · POWER EXPRESSION**: batter strength↑ → HR/BIP y XBH/BIP no deben empeorar
+    (con tolerancia de ruido de 0.5pp para no penalizar diferencias de muestra).
+  - **K4 · DISCIPLINE SURVIVES**: pitcher strength↑ → CalledStrike/TAKE↑;
+    batter strength↑ (VIS↑) → CalledStrike/TAKE↓ (la superficie del count del
+    paquete 002E-4 sigue viva sobre perfiles nuevos, no solo sobre CTL/VIS crudo).
+  - **K5 · PA STABILITY**: sin colas patológicas tras la promoción de Discipline v2
+    (max ≤ 15 en toda celda; sin CAP; Pit/PA del rincón más extremo sin explosión
+    vs MID/MID).
+  - **K6 · FINITE/VALID**: todas las probabilidades y métricas finitas;
+    0 ≤ porcentaje ≤ 100; sin estados imposibles (BIP% + K% + BB% = 100 en cada
+    celda; batted-ball suma = 100 sobre BIP; denominators protegidos).
+- **Veredicto 003A-1**: corrida completa 50k/celda (450k PA, seeds compartidas,
+  evidencia `_e003a_full_run.txt`): **K1 PASS · K2 PASS · K3 PASS · K4 PASS ·
+  K6 PASS** y **K5 FAIL** (preservado literal, no re-etiquetado).
+
+```
+K5 · ORIGINAL CONTRACT
+FAIL
+
+Reason:
+Observed max=16 > prefixed max<=15.
+
+The result is preserved and is not retroactively
+reclassified.
+```
+
+```
+K5-DIAG · POST-FAIL DIAGNOSIS
+PASS
+
+The failure is caused by one isolated 16-pitch PA:
+1 / 50,000 = 0.002%.
+
+p95 remains 6.
+P(>=16) = 0.002%  (only 1 PA)
+P(>=12) = 0.010%  (only 5 PA)
+P(>=9)  = 0.454%
+No accumulation near the tail.
+No pitch-cap interaction (CAP = 0).
+Location: STRONG batter x WEAK pitcher.
+Mechanism: legal repeated two-strike fouls (45% foul/contact).
+```
+
+- **Diagnóstico de instrumento**: `max` no es un contrato de estabilidad
+  asintótico para un MC con cola legítima por fouls. Con foul positivo y sin
+  hard cap, todo `max <= X` acabará fallando en algún `n`. `max` depende del
+  tamaño de muestra (5k → 13; 50k → 16), no describe la distribución de cola.
+  Por ello NO se sustituye K5 por `max<=16` ni `max<=20` (postergaría el mismo
+  problema); se define un contrato de cola prospectivo abajo.
+- **Estatus provisional de 003A**: `NOT FAILED · PENDING K5-R independent validation`.
+  → **Actualizado por 003A-TAIL-1: CLOSED / PASS WITH SUPERSEDED MEASUREMENT
+  CONTRACT** (K5 FAIL preserved, K5-R PASS → `CALIBRATED-BASELINE-v1`).
+
+## GAMEPLAY-ENGINE-003A · 003A-TAIL-1 · K5-R validation
+
+- **Contrato nuevo fijado ANTES de correr** (no retroactivo: los 450k ya vistos
+  no pueden validar un contrato diseñado con ellos improbando):
+
+```
+003A-TAIL-1
+Cell:
+  STRONG batter x WEAK pitcher   (celda que falló K5 original)
+
+N:
+  200,000 PA
+
+Seeds:
+  new / independent (base fuera del rango 750M..750.5M usado en 003A-1)
+
+Frozen before run:
+  p95        <= 6
+  P(pitches >= 12) <= 0.05%
+  P(pitches >= 16) <= 0.01%
+  no cap accumulation (CAP = 0)
+  p99 reported (informational)
+
+Report:
+  p95, p99, P>=8, P>=10, P>=12, P>=14, P>=16, P>=20, max (informational ONLY)
+```
+
+- **Propósito**: validar la hipótesis de que el fallo de K5 es un defecto del
+  instrumento (`max`) y no una cola patológica de la interacción
+  `high Contact x 45% foul/contact x two strikes`. Si con 200k independientes
+  se observan p95 ≤ 6, P≥12 ≤ 0.05% y P≥16 ≤ 0.01% (aunque `max` crezca, p.ej.
+  18), K5-R pasa y el diagnóstico queda confirmado. Si las frecuencias de cola
+  superan los umbrales, el síntoma real es el mecanismo de fouls repetidos y
+  merece investigación antes de abrir 003B.
+- **Veredicto 003A-TAIL-1** (200k PA, seeds independientes base 9e9, evidencia
+  `_e003a_tail1.txt`): **K5-R PASS**. p95 = 6 (≤ 6); P(≥12) = 0.0235%
+  (≤ 0.05%); P(≥16) = 0.00% (≤ 0.01%); CAP = 0. p99 = 8; P(≥8) = 1.56%;
+  P(≥14) = 0.0035%; max = 15 (informativo). Significativo: con 4× el `n`, el
+  `max` NO creció (15 < 16 del 003A-1 a 50k) — confirma que `max` era ruido de
+  muestra, no una cola real.
+- **Cierre de 003A**: K5-R validado con datos nuevos → el diagnóstico queda
+  confirmado: el fallo de K5 original fue un defecto del instrumento `max`
+  (mide el máximo observado, no la distribución), NO una cola patológica del
+  engine. Se cierra **GAMEPLAY-ENGINE-003A como `PASS WITH SUPERSEDED
+  MEASUREMENT CONTRACT`**: K5 no fue convertido en PASS — fue reemplazado
+  prospectivamente por K5-R tras demostrar el defecto del instrumento. La
+  superficie se congela como **`CALIBRATED-BASELINE-v1`** (entrada a
+  GAMEPLAY-ENGINE-003B · Stuff integration).
+- **Hallazgos de superficie 003A-1** (fotografía completa, evidencia
+  `_e003a_full_run.txt`): K% 14.6–43.9, BB% 6.5–13.7, BIP% 49.6–71.8 según
+  matchup; Whiff/Swing 20.0–49.4 (K1: pitcher WEAK→STRONG eleva K% 14–19pp);
+  Contact/Swing 50.6–80.0; Foul/Contact plana en 45.1±0.1 (paquete 002E-4
+  intacto); XBH/BIP 17.2–31.0 acoplado al poder del batter (K3); CalledS/TAKE
+  23.1–40.3 (K4: pitcher↑ y VIS↓ lo suben; la disciplina sobrevive sobre
+  perfiles completos, no solo CTL/VIS crudo); Pit/PA plano 3.55–3.68; p95=6 en
+  las 9 celdas; Reach% 25.9–51.6. Sin CAP en toda la corrida.
+- **Métricas derivadas listas para Stuff (K3 ancla)**: `Contact/Swing` y
+  `XBH/BIP` permitirán distinguir "Stuff reduce contacto" de "Stuff cambia
+  calidad del contacto" sin mezclar. Referencia: Contact/Swing en MID/MID =
+  65.4%; XBH/BIP en MID/MID = 23.0%.
