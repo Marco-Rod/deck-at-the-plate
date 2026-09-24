@@ -484,7 +484,8 @@ def _simulate_pa_diag(take_probs: dict, seed: int,
                       stuff_level: int = None,
                       stuff_arm: str = None,
                       stuff_k_qty: float = None,
-                      power_log: list = None) -> dict:
+                      power_log: list = None,
+                      workload: float = None) -> dict:
     """PA 0-0 → K/BB/BIP con diagnóstico de count y de disciplinas, SIN fatiga.
 
     Args:
@@ -521,12 +522,18 @@ def _simulate_pa_diag(take_probs: dict, seed: int,
                     (003B-3 · coefficient sweep). None → STUFF_K_QTY.
         power_log: lista externa que recibe el power_score de cada contacto
                     (003B-3 · distribución). None → sin captura.
+        workload:  factor de fatiga a aplicar (003B-5A · semántica Stuff×fatigue).
+                    None → DISCIPLINE_WORKLOAD congelado (0.75 → factor 1.0,
+                    comportamiento 003B-1..4 exacto). Cuando se pasa, es el
+                    workload productivo (1.00/1.20/1.35/1.50 → f vía la curva
+                    SMOOTH-0.55-F35) y VEL/CTL/MOV se fatigan normalmente por PROD.
     """
     random.seed(seed)
     balls = 0
     strikes = 0
     pitches = 0
-    pitch_count = int(DISCIPLINE_WORKLOAD * THRESHOLD)  # congelado → factor 1.0
+    eff_workload = DISCIPLINE_WORKLOAD if workload is None else workload
+    pitch_count = int(eff_workload * THRESHOLD)  # congelado → factor 1.0 (o w.prod)
 
     # Overrides 002B (factorial Control × Vision) + 002E-2 (perfil ofensivo
     # del batter) + 003A (perfil completo del pitcher); resto MID fijo.
@@ -563,7 +570,7 @@ def _simulate_pa_diag(take_probs: dict, seed: int,
             pitches_at_2s += 1
 
         fatigued_pitcher, pitch_eff = effective_attrs(
-            DISCIPLINE_CURVE, pitch_count, workload=DISCIPLINE_WORKLOAD,
+            DISCIPLINE_CURVE, pitch_count, workload=eff_workload,
             pitcher_raw=pitcher_raw, pitch_raw=pitch_raw,
         )
         pitch = get_cpu_pitch_action(DIFFICULTY)
@@ -3671,6 +3678,353 @@ def run_matchup_robustness_e003b4(reps: int) -> None:
 
 
 # ---------------------------------------------------------------------------
+# 003B-5A · Semántica Stuff × Fatigue (políticas F0-F3, LAB, 2.4M PA)
+# ---------------------------------------------------------------------------
+# Pregunta A: ¿debe Stuff degradarse con fatiga? Pregunta B (intensidad α) se
+# responde en 003B-5B. Aquí se comparan 4 políticas SOLO en LAB:
+#   F0 NONE      effective_stuff = raw_stuff                     (control)
+#   F1 FULL      effective_stuff = raw_stuff * fatigue_factor
+#   F2 HALF      effective_stuff = raw_stuff * (1 - 0.5*(1-f))   (representante
+#                                                                de la familia
+#                                                                multiplicativa
+#                                                                parcial)
+#   F3 ANCHORED  effective_stuff = 70 + (raw_stuff - 70)*f       (ancla identidad)
+# El factor f se obtiene del PRODUCTIVO get_fatigue_factor() (SMOOTH-0.55-F35);
+# NO se duplica la curva en el harness. F1 usa eff=raw*f → a w≈1.5 (f≈.634)
+# ST95≈60 → posible colapso del élite frente a un MID fresco; F3 en ST45 tiende
+# hacia la identidad 70 al fatigarse → posible "mejora" (violación de P4).
+# El diagnóstico "Stuff-added fatigue cost" = metric(política)(w) - metric(F0)(w)
+# aísla el deterioro NUEVO causado por Stuff del PROD de VEL/CTL/MOV.
+STUFF_FATIGUE_POLICIES_003B5A = {
+    "F0 NONE": lambda raw, f: raw,
+    "F1 FULL": lambda raw, f: raw * f,
+    "F2 HALF": lambda raw, f: raw * (1.0 - 0.5 * (1.0 - f)),
+    "F3 ANCHORED": lambda raw, f: 70.0 + (raw - 70.0) * f,
+}
+STUFF_FATIGUE_WORKLOADS_003B5A = (1.00, 1.20, 1.35, 1.50)
+PROD_THRESHOLD_003B5A = get_pitch_threshold(9)  # 100 (Fatigue Policy v2)
+P1_SPAN_PP = 0.2    # P1: span entre políticas en w=1.00 (bit-exacto: mismas seeds)
+P1_REF_PP = 0.2     # P1: cotejo XBH/BIP vs 003B-4 fresco (30.49/23.03/15.77).
+                    #   A 50k es BIT-EXACTO (mismas seeds 750M + mismo code path):
+                    #   F0/w1.00 ≡ 003B-4/POW70 → |Δ|=0.0. (Smoke a 3k no valida
+                    #   esta cláusula: compara 3k contra referencia 50k.)
+P2_STAB_PP = 1.5    # P2: span de XBH/BIP de F0 entre workloads. Incluye el drift
+                    #   real de 2º orden de composición VEL/MOV (menos whiff ⇒
+                    #   contactos menos seleccionados hacia zone+pitch match ⇒
+                    #   menos +15 ⇒ XBH/BIP baja ~0.5-1pp; ES efecto PROD
+                    #   conocido, no Stuff) + ruido 50k (SE 0.26pp). Los
+                    #   desplazamientos Stuff-driving son ≥+5pp → 1.5 discrimina
+                    #   limpio "control plano" vs "Stuff moviéndose".
+P2_PROD_PP = 0.5    # P2: señal PROD mínima Whiff/CalledS↓ de w1.0→w1.5.
+P3_MONO_PP = 0.7    # P3/P4: tol de no-descenso del Stuff-added cost por paso de w.
+                    #   El cost es pareado (mismas seeds → mismo trayecto de PA,
+                    #   solo difiere el bucket de power_score) → ruido ≈0.2pp;
+                    #   0.7 es holgura. ANCHORED/ST45 cae ~-1pp/paso → caza.
+P5_ORD_PP = 0.5     # P5: tol de orden en cada workload (márgenes ~7pp, ruidoso)
+P6_MAT_PP = 1.0     # P6: ventaja material ST95 sobre ST70 a w=1.50
+P7_P95_MAX = 6      # P7: K5-R (p95 ≤ 6, CAP 0), P≥12 ≤0.05%, P≥16 ≤0.01%
+P7_P12_MAX = 0.05
+P7_P16_MAX = 0.01
+
+
+def run_stuff_fatigue_policies_e003b5a(reps: int) -> None:
+    """003B-5A · semántica Stuff×fatigue, 4 políticas, 2.4M PA."""
+    n = reps
+    k = 0.30
+    batter = BATTER_PROFILES_003A["MID"]
+    pitcher = PITCHER_PROFILES_003A["MID"]
+    stuffs = [45, 70, 95]
+    workloads = list(STUFF_FATIGUE_WORKLOADS_003B5A)
+    cells = {}
+
+    def fresh_agg():
+        return {"pitches": 0, "take_attempts": 0, "called_strikes_on_take": 0,
+                "swing_attempts": 0, "whiffs": 0, "outcome": Counter(),
+                "lengths": [], "power": [], "bips": 0, "len12": 0, "len16": 0}
+
+    factors = {w: get_fatigue_factor(
+        int(w * PROD_THRESHOLD_003B5A), PROD_THRESHOLD_003B5A)
+        for w in workloads}
+    eff = {}
+    for pol_name, pol_fn in STUFF_FATIGUE_POLICIES_003B5A.items():
+        for w in workloads:
+            f = factors[w]
+            for st in stuffs:
+                e = pol_fn(float(st), f)
+                eff[(pol_name, w, st)] = e
+                agg = fresh_agg()
+                for rep in range(reps):
+                    seed = int(DISCIPLINE_WORKLOAD * 1000) * 10**6 + rep  # compartidas
+                    d = _simulate_pa_diag(E1_POLICY, seed,
+                                          batter_attrs=batter,
+                                          pitcher_attrs=pitcher,
+                                          stuff_level=e,
+                                          stuff_arm="S2",
+                                          stuff_k_qty=k,
+                                          workload=w)
+                    agg["pitches"] += d["pitches"]
+                    agg["take_attempts"] += d["take_attempts"]
+                    agg["called_strikes_on_take"] += d["called_strikes_on_take"]
+                    agg["swing_attempts"] += d["swing_attempts"]
+                    agg["whiffs"] += d["whiffs"]
+                    agg["bips"] += d["bips"]
+                    agg["outcome"][d["outcome"]] += 1
+                    agg["lengths"].append(d["pitches"])
+                    if d["pitches"] >= 12:
+                        agg["len12"] += 1
+                    if d["pitches"] >= 16:
+                        agg["len16"] += 1
+                agg["lengths"].sort()
+                agg["p95"] = agg["lengths"][int(len(agg["lengths"]) * 0.95) - 1]
+                agg["power"].sort()
+                cells[(pol_name, w, st)] = agg
+
+    rows = {(pol_name, w, st): _metric_row(cells[(pol_name, w, st)], n)
+            for pol_name in STUFF_FATIGUE_POLICIES_003B5A
+            for w in workloads for st in stuffs}
+
+    def r(pol, w, st, key):
+        return rows[(pol, w, st)][key]
+
+    print("=" * 150)
+    print("GAMEPLAY-ENGINE-003B-5A · SEMÁNTICA STUFF × FATIGUE (F0-F3, LAB)")
+    print(f"4 policies × 4 workloads × 3 Stuff × {reps:,} PA = {reps*48:,} PA | "
+          "factor = get_fatigue_factor() productivo (SMOOTH-0.55-F35) | k=.30 ")
+    print("MID pitcher/batter (VEL/CTL/MOV=70) | agent 65/50/30 | PROD discipline")
+    print("Contratos P1–P7 FIJADOS ANTES de correr. calculator.py UNCHANGED.")
+    print("=" * 150)
+
+    for pol_name in STUFF_FATIGUE_POLICIES_003B5A:
+        print()
+        print(f"---- POLÍTICA {pol_name} --------------------------------------")
+        print("   w     f    | eff ST45   ST70   ST95 | XBH 45    70    95 | "
+              "HR 45     70    95")
+        print("-" * 100)
+        for w in workloads:
+            f = factors[w]
+            print(f" {w:>5.2f} {f:>5.3f} | "
+                  f"{eff[(pol_name, w, 45)]:>8.2f} {eff[(pol_name, w, 70)]:>6.2f} "
+                  f"{eff[(pol_name, w, 95)]:>6.2f} | "
+                  f"{r(pol_name, w, 45, 'xbh'):>7.2f} {r(pol_name, w, 70, 'xbh'):>6.2f} "
+                  f"{r(pol_name, w, 95, 'xbh'):>6.2f} | "
+                  f"{r(pol_name, w, 45, 'hr'):>7.2f} {r(pol_name, w, 70, 'hr'):>6.2f} "
+                  f"{r(pol_name, w, 95, 'hr'):>6.2f}")
+
+    # ------ Stuff-added fatigue cost (aisla el deterioro nuevo de Stuff) ------
+    print()
+    print("-- STUFF-ADDED FATIGUE COST · XBH/BIP (pp): metric(Fi)(w) − metric(F0)(w) --")
+    for pol_name in ("F1 FULL", "F2 HALF", "F3 ANCHORED"):
+        print(f"  {pol_name}:")
+        for w in workloads:
+            c45 = r(pol_name, w, 45, "xbh") - r("F0 NONE", w, 45, "xbh")
+            c70 = r(pol_name, w, 70, "xbh") - r("F0 NONE", w, 70, "xbh")
+            c95 = r(pol_name, w, 95, "xbh") - r("F0 NONE", w, 95, "xbh")
+            print(f"    w={w:.2f}: ST45 {c45:+6.2f} | ST70 {c70:+6.2f} | "
+                  f"ST95 {c95:+6.2f}")
+    print()
+    print("-- STUFF-ADDED FATIGUE COST · HR/BIP (pp) --")
+    for pol_name in ("F1 FULL", "F2 HALF", "F3 ANCHORED"):
+        print(f"  {pol_name}:")
+        for w in workloads:
+            c45 = r(pol_name, w, 45, "hr") - r("F0 NONE", w, 45, "hr")
+            c70 = r(pol_name, w, 70, "hr") - r("F0 NONE", w, 70, "hr")
+            c95 = r(pol_name, w, 95, "hr") - r("F0 NONE", w, 95, "hr")
+            print(f"    w={w:.2f}: ST45 {c45:+6.2f} | ST70 {c70:+6.2f} | "
+                  f"ST95 {c95:+6.2f}")
+
+    # ------ Diagnóstico: élite fatigado vs MID fresco (compound penalty) ------
+    ref_mid_fresh = r("F0 NONE", 1.00, 70, "xbh")
+    print()
+    print("-- DIAGNÓSTICO · ÉLITE (ST95) A w=1.50 vs MID (ST70) FRESCO --")
+    print(f"  ref MID fresco (XBH/BIP ST70 w=1.00) = {ref_mid_fresh:.2f}")
+    for pol_name in STUFF_FATIGUE_POLICIES_003B5A:
+        elite_w150 = r(pol_name, 1.50, 95, "xbh")
+        delta = elite_w150 - ref_mid_fresh
+        word = "PEOR (permite más XBH que un MID fresco)" if delta > P6_MAT_PP else \
+               ("equivalente" if abs(delta) <= P6_MAT_PP else "MEJOR")
+        print(f"  {pol_name} ST95 w=1.50: XBH {elite_w150:.2f} → Δ {delta:+.2f} "
+              f"vs MID fresco → {word}")
+
+    # ------ Contratos P1–P7 ------
+    print()
+    print("-- CONTRATOS (P1–P7, fijados antes) --")
+
+    # P1 · FRESH IDENTITY en w=1.00 (todas las políticas colapsan a 003B-4).
+    p1_ok = True
+    refs = {45: 30.49, 70: 23.03, 95: 15.77}  # 003B-4 fresco (matriz XBH, k=.30)
+    for st in stuffs:
+        vals = [r(pol_name, 1.00, st, "xbh")
+                for pol_name in STUFF_FATIGUE_POLICIES_003B5A]
+        span = max(vals) - min(vals)
+        ref_d = max(abs(v - refs[st]) for v in vals)
+        ok = span <= P1_SPAN_PP and ref_d <= P1_REF_PP
+        p1_ok &= ok
+        print(f"  P1 w=1.00 ST{st}: span entre políticas {span:.2f} "
+              f"(≤{P1_SPAN_PP}), |Δ vs 003B-4| máx {ref_d:.2f} (≤{P1_REF_PP}): "
+              f"{'PASS' if ok else 'FAIL'}")
+    print(f"  P1 FRESH IDENTITY (todos): {'PASS' if p1_ok else 'FAIL'}")
+
+    # P2 · NONE CONTROL (F0): eff=raw en todo w + solo señal PROD conocida.
+    # La estabilidad de XBH/BIP tolera el drift PROD de 2º orden (composición
+    # de canales VEL/MOV), NO es señal de supresión de Stuff.
+    p2_ok = True
+    for st in stuffs:
+        seq = [r("F0 NONE", w, st, "xbh") for w in workloads]
+        span = max(seq) - min(seq)
+        ok = span <= P2_STAB_PP
+        p2_ok &= ok
+        print(f"  P2 F0 ST{st}: XBH span {span:.2f} entre workloads "
+              f"(≤{P2_STAB_PP}): {'PASS' if ok else 'FAIL'}")
+    wf0 = [r("F0 NONE", w, 70, "whiff") for w in workloads]
+    csf0 = [r("F0 NONE", w, 70, "called_tk") for w in workloads]
+    wf_d = wf0[0] - wf0[-1]
+    cs_d = csf0[0] - csf0[-1]
+    p2_prod = wf_d >= P2_PROD_PP and cs_d >= P2_PROD_PP
+    p2_ok &= p2_prod
+    print(f"  P2 F0 señal PROD: Whiff↓ {wf_d:.2f} y CalledS↓ {cs_d:.2f} "
+          f"de w1.00→w1.50 (cada ≥{P2_PROD_PP}): "
+          f"{'PASS' if p2_prod else 'FAIL'}")
+    print(f"  P2 NONE CONTROL (todos): {'PASS' if p2_ok else 'FAIL'}")
+
+    def stuff_cost(pol_name, w, st, key):
+        return r(pol_name, w, st, key) - r("F0 NONE", w, st, key)
+
+    # P3 · MONOTONIC DEGRADATION (Stuff≥70): el Stuff-added cost de supresión
+    # no debe volverse negativo (más supresión) con w creciente. Evaluado sobre
+    # el cost aislado del canal Stuff (F0 resta la deriva de composición
+    # VEL/MOV); en Stuff≥70 ninguna de las 4 políticas debería mejorar.
+    p3_ok = True
+    p3_by_pol = {}
+    for pol_name in STUFF_FATIGUE_POLICIES_003B5A:
+        pol_ok = True
+        for st in (70, 95):
+            cseq = [stuff_cost(pol_name, w, st, "xbh") for w in workloads]
+            ok = all(cseq[i + 1] + P3_MONO_PP >= cseq[i]
+                     for i in range(len(cseq) - 1))
+            pol_ok &= ok
+            p3_ok &= ok
+            print(f"  P3 {pol_name} ST{st} cost XBH "
+                  f"{['%+.2f' % v for v in cseq]} no-mejora (Stuff≥70): "
+                  f"{'PASS' if ok else 'FAIL'}")
+        p3_by_pol[pol_name] = pol_ok
+    print(f"  P3 MONOTONIC DEGRADATION (todos): {'PASS' if p3_ok else 'FAIL'}")
+
+    # P4 · NO FATIGUE IMPROVEMENT (todo Stuff, incl. 45): mismo check sobre el
+    # cost. F0 es trivialmente PASS (cost ≡ 0). ANCHORED/ST45 → cost se vuelve
+    # negativo (45→54: más supresión al fatigarse) → FAIL por semántica.
+    p4_ok = True
+    p4_by_pol = {}
+    for pol_name in STUFF_FATIGUE_POLICIES_003B5A:
+        pol_ok = True
+        for st in stuffs:
+            cseq = [stuff_cost(pol_name, w, st, "xbh") for w in workloads]
+            ok = all(cseq[i + 1] + P3_MONO_PP >= cseq[i]
+                     for i in range(len(cseq) - 1))
+            pol_ok &= ok
+            p4_ok &= ok
+            print(f"  P4 {pol_name} ST{st} cost XBH "
+                  f"{['%+.2f' % v for v in cseq]} no-mejora: "
+                  f"{'PASS' if ok else 'FAIL'}")
+        p4_by_pol[pol_name] = pol_ok
+    print(f"  P4 NO FATIGUE IMPROVEMENT (todos): {'PASS' if p4_ok else 'FAIL'}")
+
+    # P5 · ORDER PRESERVATION en cada workload.
+    p5_ok = True
+    for pol_name in STUFF_FATIGUE_POLICIES_003B5A:
+        for w in workloads:
+            x45 = r(pol_name, w, 45, "xbh")
+            x70 = r(pol_name, w, 70, "xbh")
+            x95 = r(pol_name, w, 95, "xbh")
+            ok = x45 > x70 - P5_ORD_PP and x70 > x95 - P5_ORD_PP
+            p5_ok &= ok
+            print(f"  P5 {pol_name} w={w:.2f} ST95({x95:.2f}) < ST70({x70:.2f}) "
+                  f"< ST45({x45:.2f}): {'PASS' if ok else 'FAIL'}")
+    print(f"  P5 ORDER PRESERVATION (todos): {'PASS' if p5_ok else 'FAIL'}")
+
+    # P6 · NON-COLLAPSE a w=1.50 (ST95 conserva ventaja material sobre ST70).
+    p6_ok = True
+    for pol_name in STUFF_FATIGUE_POLICIES_003B5A:
+        x70 = r(pol_name, 1.50, 70, "xbh")
+        x95 = r(pol_name, 1.50, 95, "xbh")
+        margin = x70 - x95
+        ok = margin >= P6_MAT_PP
+        p6_ok &= ok
+        print(f"  P6 {pol_name} w=1.50: XBH70 − XBH95 = {margin:+.2f} "
+              f"(≥{P6_MAT_PP}): {'PASS' if ok else 'FAIL'}")
+    print(f"  P6 NON-COLLAPSE (todos): {'PASS' if p6_ok else 'FAIL'}")
+
+    # P7 · SYSTEM STABILITY (K5-R + colas + CAP por celda).
+    p7_ok = True
+    max_p95 = 0
+    caps = 0
+    violations = []
+    for pol_name in STUFF_FATIGUE_POLICIES_003B5A:
+        for w in workloads:
+            for st in stuffs:
+                c = cells[(pol_name, w, st)]
+                p95 = c["p95"]
+                cap = c["outcome"]["CAP"]
+                p12 = c["len12"] / n * 100
+                p16 = c["len16"] / n * 100
+                max_p95 = max(max_p95, p95)
+                caps += cap
+                if not (p95 <= P7_P95_MAX and cap == 0
+                        and p12 <= P7_P12_MAX and p16 <= P7_P16_MAX):
+                    p7_ok = False
+                    violations.append((pol_name, w, st, p95, cap, p12, p16))
+    print(f"  P7 max p95 {max_p95}≤{P7_P95_MAX}, CAP {caps}, violaciones "
+          f"{len(violations)}: {'PASS' if p7_ok else 'FAIL'}")
+    if violations:
+        for v in violations[:8]:
+            print("    ", v)
+    print(f"  P7 SYSTEM STABILITY: {'PASS' if p7_ok else 'FAIL'}")
+
+    # ------ Decisión 003B-5A ------
+    print("-" * 150)
+    # Matriz de contratos por política (F0 evalúa P1+P2+estabilidad; las
+    # políticas de degradación evalúan P1+P3/P4 (cost-based)+P5-P7).
+    spec = {
+        "F0 NONE": {"P1": p1_ok, "P2": p2_ok, "P7": p7_ok},
+        "F1 FULL": {"P1": p1_ok, "P3": p3_by_pol["F1 FULL"],
+                    "P4": p4_by_pol["F1 FULL"], "P5": p5_ok, "P6": p6_ok,
+                    "P7": p7_ok},
+        "F2 HALF": {"P1": p1_ok, "P3": p3_by_pol["F2 HALF"],
+                    "P4": p4_by_pol["F2 HALF"], "P5": p5_ok, "P6": p6_ok,
+                    "P7": p7_ok},
+        "F3 ANCHORED": {"P1": p1_ok, "P3": p3_by_pol["F3 ANCHORED"],
+                        "P4": p4_by_pol["F3 ANCHORED"], "P5": p5_ok,
+                        "P6": p6_ok, "P7": p7_ok},
+    }
+    print("Resultado por política:")
+    for pol_name in STUFF_FATIGUE_POLICIES_003B5A:
+        fails = [cname for cname, ok in spec[pol_name].items() if not ok]
+        status = "TODO PASS" if not fails else f"FAIL en {', '.join(fails)}"
+        print(f"  {pol_name}: {status}")
+
+    # Semántica por política (P4 es el check falsable clave).
+    p4_anchored = spec["F3 ANCHORED"]["P4"]
+    p4_full = spec["F1 FULL"]["P4"]
+    print()
+    if not p4_anchored:
+        print("F3 ANCHORED → VIOLA P4 (semántica): low Stuff mejora su "
+              "supresión al fatigarse (45→~54: se acerca a la identidad 70). "
+              "RECHAZADO por semántica, aunque los agregados parezcan buenos.")
+    else:
+        print("F3 ANCHORED → P1..P7 PASS: pendiente de decisión.")
+    if not p4_full:
+        print("F1 FULL → VIOLA P4 (semántica): alguna Stuff MEJORA al fatigarse. "
+              "RECHAZADO por semántica.")
+    if spec["F2 HALF"]["P4"] and spec["F2 HALF"]["P3"] and p2_ok:
+        print("F2 HALF → comportamiento sano (P1, P3, P4, P5-P7 PASS + F0 "
+              "control OK). FAMILIA MULTIPLICATIVA PARCIAL GANA como semántica.")
+        print("Conclusión → abrir 003B-5B para calibrar α "
+              "(0.25/0.40/0.50/0.60/0.75/1.00 + NONE como control). α=.50 NO es "
+              "definitivo. Sin promoción a producción hasta 003B-6.")
+    else:
+        print("F2 HALF NO confirmado → revisar diagnóstico antes de decidir familia.")
+
+
+# ---------------------------------------------------------------------------
 # 002C-B · TAKE calibration · baseline sweep (intercept de strike_chance)
 # ---------------------------------------------------------------------------
 # Mantiene coefs CTL/VIS actuales (0.003 / -0.002 con (attr-50)); solo varía
@@ -5450,7 +5804,7 @@ def run_pa_level(reps: int) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Monte Carlo de fatiga (GAMEPLAY-ENGINE-001B)")
-    parser.add_argument("--mode", choices=["pa", "pitch", "discipline", "cv", "take", "foul", "bc", "d2", "cv2", "f5", "c1", "c3", "c4", "c5", "d1", "d3", "d4", "e1", "e2", "e3", "e3b", "e5", "e003a", "e003a-tail", "e003b", "e003b2", "e003b3", "e003b4"], default="pa",
+    parser.add_argument("--mode", choices=["pa", "pitch", "discipline", "cv", "take", "foul", "bc", "d2", "cv2", "f5", "c1", "c3", "c4", "c5", "d1", "d3", "d4", "e1", "e2", "e3", "e3b", "e5", "e003a", "e003a-tail", "e003b", "e003b2", "e003b3", "e003b4", "e003b5a"], default="pa",
                         help="pa = PA completo (001B-4); pitch = pitch suelto (001B-3); "
                              "discipline = diagnóstico de count/disciplina sin fatiga (002A); "
                              "cv = factorial Control×Vision (002B); "
@@ -5476,6 +5830,7 @@ def main() -> None:
                               "e003b2 = stuff vs VEL/MOV sensitivity: 5 sweeps × 5 niveles, contratos M1–M6 + geometría de vectores (003B-2); "
                               "e003b3 = S2 coefficient sweep: 7 coefs × 5 Stuff + power reference, contratos N1–N7, suppression_ratio diagnóstico (003B-3); "
                               "e003b4 = Power×Stuff matchup robustness: k=.30, 5 Powers × 3 Stuffs, contratos O1–O7 + matrices XBH/HR + pendientes (003B-4); "
+                              "e003b5a = Semántica Stuff×fatigue: F0 NONE / F1 FULL / F2 HALF / F3 ANCHORED, 4 workloads × 3 Stuff, contratos P1–P7 + stuff-added fatigue cost (003B-5A); "
                               "d3 = comparación de estrategias CPU workload-based por matchup (001D-3); "
                              "d4 = barrido ampliado + coste marginal de esperar (001D-4A/B)")
     parser.add_argument("--reps", type=int, default=REPS, help="réplicas por escenario")
@@ -5519,6 +5874,8 @@ def main() -> None:
         run_stuff_coefficient_e003b3(args.reps)
     elif args.mode == "e003b4":
         run_matchup_robustness_e003b4(args.reps)
+    elif args.mode == "e003b5a":
+        run_stuff_fatigue_policies_e003b5a(args.reps)
     elif args.mode == "f5":
         run_fatigue_curve_comparison(args.reps)
     elif args.mode == "c1":

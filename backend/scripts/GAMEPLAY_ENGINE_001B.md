@@ -70,7 +70,7 @@ GAMEPLAY-ENGINE-003A — CALIBRATED ENGINE BASELINE
 [CLOSED — PASS with superseded measurement contract · CALIBRATED-BASELINE-v1 congelado]
 
 GAMEPLAY-ENGINE-003B — STUFF
-[IN PROGRESS — 003B-1..4 CLOSE (S1/S2/S3 PASS → M1–M6 PASS → N1–N7 PASS → O1–O7 PASS, k=.30 ROBUSTNESS-VALIDATED CANDIDATE); 003B-5 fatiga de Stuff en curso]
+[IN PROGRESS — 003B-1..4 CLOSE (S1/S2/S3 PASS → M1–M6 PASS → N1–N7 PASS → O1–O7 PASS, k=.30 ROBUSTNESS-VALIDATED CANDIDATE); 003B-5A CLOSED (semántica Stuff×fatigue: familia multiplicativa parcial gana, ANCHORED rechazada por P4); 003B-5B calibración α pendiente]
 
 Finding:
 GAMEPLAY-ENGINE-002-CLAMP-001
@@ -2294,3 +2294,143 @@ shared seeds (750M+rep) · S2 arm · calculator.py UNCHANGED
 - **Sigue SIN promover a producción**: k=.30 pasa a 003B-5 como el coeficiente
   cuyo comportamiento ante la fatiga hay que determinar (¿se fatiga Stuff?,
   ¿cuánto, misma curva física que VEL/CTL/MOV o transformación distinta?).
+
+## GAMEPLAY-ENGINE-003B-5A · Semántica Stuff × Fatigue
+
+```text
+Pregunta A)  ¿Debe Stuff degradarse con fatiga?
+Pregunta B)  ¿Con qué intensidad?  → se responde en 003B-5B, NO aquí.
+```
+
+Separar A (semántica, qué política) de B (magnitud α). Este bloque compara 4
+políticas SOLO en LAB — ninguna promueve aún a producción.
+
+### Setup 003B-5A
+
+```text
+Políticas de degradación (factor de fatiga productivo f = get_fatigue_factor):
+  F0 NONE       effective_stuff = raw_stuff
+  F1 FULL       effective_stuff = raw_stuff * f
+  F2 HALF       effective_stuff = raw_stuff * (1 - 0.5 * (1 - f))
+  F3 ANCHORED   effective_stuff = 70 + (raw_stuff - 70) * f
+
+Stuff:           45 / 70 / 95
+Workload:        1.00 / 1.20 / 1.35 / 1.50   (f: 1.000 / 0.920 / 0.784 / 0.634)
+Power:           70
+VEL/CTL/MOV:     70 base, fatigados normalmente por PROD (misma curva f)
+k Stuff:         0.30   (S2 · contact-quality suppression, 003B-3)
+PA/cell:         50k    4 policies × 4 workloads × 3 Stuff = 2.4M PA
+```
+
+- El factor `f` se obtiene del PRODUCTIVO `get_fatigue_factor()` (SMOOTH-0.55-F35
+  de `app.engine.fatigue_manager`); NO se duplica la curva en el harness. F2 es
+  de antemano solo un REPRESENTANTE de la familia multiplicativa parcial — si la
+  familia gana, 003B-5B calibra α. F3 ancla en STUFF_IDENTITY=70: baja Stuff
+  (45) tiende hacia 70 al fatigarse → posible "mejora" de supresión (candidata a
+  violar P4).
+- F0 es CONTROL: en w=1.00 reproduce 003B-4 (stuff efectiva = raw, VEL/CTL/MOV
+  frescos); en w>1 solo muestra la huella PROD conocida de VEL/CTL/MOV fatigados.
+- Métricas por celda: `effective_stuff`, Contact/Swing, Whiff/Swing, CalledS/Take,
+  XBH/BIP, HR/BIP, OUT/BIP, K%, BB%, Reach%, Pit/PA, p95, P≥12, P≥16.
+- **Stuff-added fatigue cost** (diagnóstico clave): `metric(F1/F2/F3)(w) -
+  metric(F0)(mismo w)`. Separa el deterioro NUEVO causado por Stuff del deterioro
+  que Fatigue v2 ya provoca en VEL/CTL/MOV.
+
+### Contratos P1–P7 (fijados ANTES de correr)
+
+- **P1 · FRESH IDENTITY**: en w=1.00 las 4 políticas colapsan exactamente al
+  comportamiento Stuff de 003B-4 (factor=1.0 → effective_stuff=raw en las 4;
+  VEL/CTL/MOV frescos). Verificable: span entre políticas ≤0.2pp en w=1.00 y
+  |Δ|≤0.2pp vs 003B-4 fresco (30.49/23.03/15.77). A 50k es BIT-EXACTO (mismas
+  seeds 750M + mismo code path en F0/w1.00 ≡ 003B-4/POW70).
+- **P2 · NONE CONTROL**: F0 no añade degradación de Stuff (effective_stuff=raw en
+  todo w). Solo aparecen los efectos PROD ya conocidos: Whiff↓ y CalledS/Take↓
+  conforme VEL/MOV/CTL se fatigan (cada ≥0.5pp de w1.00→w1.50), y XBH/BIP
+  permanece acotado (span entre workloads ≤1.5pp). El span tolera el drift de
+  2º orden de composición de canales VEL/MOV (menos whiff ⇒ contactos menos
+  seleccionados hacia zone+pitch match ⇒ menos +15 ⇒ XBH/BIP baja ~0.5-1pp; ES
+  efecto PROD conocido, NO supresión de Stuff). Los desplazamientos esperados
+  por Stuff son ≥+5pp → 1.5 discrimina "control plano" vs "Stuff moviéndose".
+- **P3 · MONOTONIC DEGRADATION**: para Stuff≥70, workload creciente NUNCA
+  incrementa la capacidad de supresión. Se evalúa sobre el **Stuff-added
+  fatigue cost** (canal Stuff aislado de F0), no sobre XBH crudo: `cost(w) =
+  XBH(política)(w) − XBH(F0)(w)` debe ser no-decreciente en w (tol 0.7pp por
+  paso). F0 resta la deriva de composición VEL/MOV → el cost mide solo la
+  supresión de Stuff. Cost negativo y creciente en magnitud = mejora.
+- **P4 · NO FATIGUE IMPROVEMENT**: ningún raw Stuff puede MEJORAR su capacidad de
+  supresión por estar más fatigado: `cost(w)` no-decreciente en w para TODO
+  Stuff, incl. 45 (tol 0.7pp por paso). **Hipótesis falsable: F3 ANCHORED en
+  Stuff=45 → 45→~54 (tiende a la identidad 70) → cost se vuelve negativo y crece
+  → viola P4.** F0 es trivialmente PASS cost≡0.
+- **P5 · ORDER PRESERVATION**: en cada workload, ST95 > ST70 > ST45 en capacidad
+  de suprimir calidad de contacto (XBH/BIP 95 < 70 < 45; tol 0.5pp).
+- **P6 · NON-COLLAPSE**: a w=1.50, ST95 conserva ventaja material sobre ST70
+  (XBH95 < XBH70 − 1.0pp). El élite al borde del outing no se disuelve hasta
+  quedar peor que un MID.
+- **P7 · SYSTEM STABILITY**: K5-R sano (max p95 ≤ 6), sin CAP, colas P≥12 ≤
+  0.05% y P≥16 ≤ 0.01% por celda, probabilidades válidas, sin discontinuidades.
+
+### Resultados (evidencia `scripts/_e003b5a_full_run.txt`, 2.4M PA)
+
+Matrices XBH/BIP por política (50k/celda, p95 máx = 6 en todos, sin CAP):
+
+| Política | w | f | eff 45/70/95 | XBH 45 | XBH 70 | XBH 95 | HR 45 | HR 70 | HR 95 |
+| :------- | -: | --: | :---------- | -----: | -----: | -----: | ----: | ----: | ----: |
+| F0 NONE  | 1.00 | 1.000 | 45/70/95 | 30.49 | 23.03 | 15.77 | 19.74 | 12.10 | 4.53 |
+| F0 NONE  | 1.20 | 0.919 | 45/70/95 | 30.36 | 22.91 | 15.73 | 19.66 | 12.06 | 4.49 |
+| F0 NONE  | 1.35 | 0.784 | 45/70/95 | 30.54 | 22.98 | 15.67 | 19.65 | 12.02 | 4.50 |
+| F0 NONE  | 1.50 | 0.634 | 45/70/95 | 30.51 | 23.02 | 15.78 | 19.70 | 12.20 | 4.61 |
+| F1 FULL  | 1.20 | 0.919 | 41/64/87 | 31.47 | 24.66 | 18.01 | 20.70 | 13.85 | 6.79 |
+| F1 FULL  | 1.35 | 0.784 | 35/55/74 | 33.45 | 27.49 | 21.73 | 22.44 | 16.65 | 10.60 |
+| F1 FULL  | 1.50 | 0.634 | 29/44/60 | 35.46 | 30.66 | 25.98 | 24.50 | 19.88 | 15.25 |
+| F2 HALF  | 1.20 | 0.919 | 43/67/91 | 30.85 | 23.81 | 16.77 | 20.21 | 12.93 | 5.67 |
+| F2 HALF  | 1.35 | 0.784 | 40/62/85 | 32.09 | 25.36 | 18.75 | 21.07 | 14.45 | 7.50 |
+| F2 HALF  | 1.50 | 0.634 | 37/57/78 | 32.97 | 26.87 | 20.85 | 22.06 | 16.05 | 9.77 |
+| F3 ANCH  | 1.20 | 0.919 | 47/70/93 | 29.74 | 22.91 | 16.24 | 19.05 | 12.06 | 5.08 |
+| F3 ANCH  | 1.35 | 0.784 | 50/70/90 | 28.84 | 22.98 | 17.27 | 18.05 | 12.02 | 6.11 |
+| F3 ANCH  | 1.50 | 0.634 | 54/70/86 | 27.70 | 23.02 | 18.46 | 16.99 | 12.20 | 7.32 |
+
+Precio XBH por Stuff-fatiga (Stuff-added cost, pp): F1 a w=1.50 → ST45 +4.95,
+ST70 +7.64, ST95 +10.20; F2 → +2.46/+3.85/+5.07; F3 → **ST45 −2.81 (¡negativo!)**
+y ST70 +0.00 (ancla ≡ identidad). Diagnóstico élite-vs-MID (XBH ST95 w=1.50 vs
+MID ST70 fresco 23.03): F0 15.78 (Δ −7.24), F1 25.98 (Δ **+2.95, PEOR que MID
+fresco**), F2 20.85 (Δ −2.18), F3 18.46 (Δ −4.57).
+
+**Contratos — veredicto (50k):**
+
+| Contrato | Resultado |
+| :------- | :-------- |
+| P1 FRESH IDENTITY | PASS — span 0.00 y |Δ vs 003B-4| 0.00 (BIT-EXACTO, todas las políticas colapsan en w=1.00) |
+| P2 NONE CONTROL | PASS — span F0 XBH 0.18/0.12/0.11 (≤1.5); señal PROD Whiff↓ 13.18 y CalledS↓ 7.50 (~serios) |
+| P3 MONOTONIC DEGRADATION | PASS — cost no-decreciente en todas las políticas para ST70/ST95 |
+| P4 NO FATIGUE IMPROVEMENT | **FAIL — F3 ANCHORED ST45** (cost −0.62→−1.70→−2.81); F0/F1/F2 PASS |
+| P5 ORDER PRESERVATION | PASS — ST95<ST70<ST45 en todas las celdas |
+| P6 NON-COLLAPSE | PASS — mínimo gap ST70−ST95 a w=1.50 = +4.56 (F3), ≥1.0 |
+| P7 SYSTEM STABILITY | PASS — max p95 6≤6, CAP 0, violaciones 0 |
+
+Resultado por política: F0 TODO PASS · F1 TODO PASS · F2 TODO PASS ·
+F3 **FAIL en P4**.
+
+### 003B-5A SEMANTIC DECISION
+
+```text
+Pregunta A) ¿Debe Stuff degradarse con fatiga?  → SÍ, familia MULTIPLICATIVA
+   PARCIAL (F2 representante). ANCHORED RECHAZADA por semántica.
+Pregunta B) ¿Con qué intensidad?  → 003B-5B calibra α. α=.50 NO es definitivo.
+```
+
+- **F3 ANCHORED – RECHAZADA por P4 (falsable confirmado)**: `effective_stuff =
+  70 + (raw−70)·f` tira de Stuff 45 hacia 54 al fatigarse → **mejora su
+  supresión** (cost XBH −0.62 → −2.81; HR −0.61 → −2.72). Prohibido por
+  semántica: la fatiga no puede hacer a nadie mejor. F1 (FULL) la `raw·f` a
+  w=1.50 hace colapsar ST95 a 60 (el élite queda PEOR que un MID fresco,
+  Δ +2.95) — demasiado destructiva para el tope.
+- **F2 HALF – GANA la familia multiplicativa parcial**: degrada en proporción
+  al Stuff propio (el 95 pierde más que el 70, el 70 más que el 45), conserva
+  P1–P7 sanos, y a w=1.50 ST95 mantiene ventaja material sobre un MID fresco
+  (Δ −2.18). Suficiente evidencia (LAB, 2.4M PA) para promover la FAMILIA a
+  calibración; α=.50 es SOLO el representante ya medido.
+- **Siguiente: GAMEPLAY-ENGINE-003B-5B** · calibrar α ∈ {0.25, 0.40, 0.50,
+  0.60, 0.75, 1.00} + NONE como control (misma matriz, contratos P1–P7). Tras
+  ganadora estable → 003B-6 Production Acceptance y cierre de
+  GAMEPLAY-RATING-001. Harness y ADR al día; `calculator.py` UNCHANGED.
