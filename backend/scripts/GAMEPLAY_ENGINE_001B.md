@@ -70,7 +70,7 @@ GAMEPLAY-ENGINE-003A — CALIBRATED ENGINE BASELINE
 [CLOSED — PASS with superseded measurement contract · CALIBRATED-BASELINE-v1 congelado]
 
 GAMEPLAY-ENGINE-003B — STUFF
-[IN PROGRESS — 003B-1 CLOSE (S1/S2/S3 L1–L6 PASS); 003B-2 M1–M6 PASS, S2 promote, Stuff=Contact-Quality; pendiente 003B-3 coefficient sweep]
+[IN PROGRESS — 003B-1 CLOSE (S1/S2/S3 L1–L6 PASS); 003B-2 CLOSE (M1–M6 PASS, S2 promote, Stuff=Contact-Quality); 003B-3 CLOSE (N1–N7 PASS, k=0.30 candidato primario v1); pendiente 003B-4 matchup Power×Stuff]
 
 Finding:
 GAMEPLAY-ENGINE-002-CLAMP-001
@@ -2058,3 +2058,141 @@ Sweeps independientes (25 puntos):
 - **PENDIENTE para 003B-3**: harness `--mode e003b3` con sweep de k sobre S2
   (0.02 → 0.16), contratos de magnitud contra objetivo de XBH/BIP por bin, y
   elección del k v1. Hasta que 003B-3 cierre, NO se toca `calculator.py`.
+
+## GAMEPLAY-ENGINE-003B-3 · S2 coefficient sweep (calibración de magnitud)
+
+```
+GAMEPLAY-ENGINE-003B-3
+S2 coefficient sweep — Stuff = contact-quality suppression
+
+Objective:
+  ¿Cuánto debe modificar Stuff el power_score para ser MATERIAL sin dominar
+  Power ni deformar el baseline? Ya NO se discute semántica (cerrada en
+  003B-2: S2 promote). Solo magnitud.
+
+Mecánica del modulador (igual que la promovida en 003B-2):
+  stuff_delta = stuff - 70
+  effective_power_score = power_score - stuff_delta * coefficient
+
+  Stuff = 70 → identidad exacta
+  Stuff > 70 → suprime calidad
+  Stuff < 70 → permite mejor contacto
+
+Punto MID congelado:
+  Pitcher   VEL=70 / CTL=70 / MOV=70, Stuff variable
+  Batter    CON=70 / POW=70 / VIS=70
+  Fatigue=1.0 · Discipline=PROD · Agent=65/50/30 LAB-only · S2 arm.
+
+Mesh de coeficientes (primer usuario, + exacto 0.064):
+  coefficient ∈ {0.00, 0.064, 0.10, 0.20, 0.30, 0.40, 0.50}
+  (0.064 = valor experimental usado en f0584aa/003B-2; se conserva EXACTO
+   como candidato, no se re-interpola por el rango [0.10, 0.50]).
+  Stuff ∈ {45 / 55 / 70 / 85 / 95}
+  7 coef × 5 stuff × 50k PA = 1.75M PA      ← coefficient sweep
+  + Power reference 5×50k = 0.25M PA        ← sweep de POWER del batter
+  Total = 2.0M PA.
+
+MÉTRICA por celda (más allá de XBH/BIP):
+  Contact/Swing · OUT/BIP · 1B/BIP · 2B/BIP · 3B/BIP · HR/BIP · XBH/BIP
+  Reach% · K% · BB% · mean power_score · p10/p50/p90 power_score.
+  HR/BIP es ESENCIAL: power_score usa thresholds discretos, así que un k
+  pequeño puede desplazar masa entre HR→2B→1B→OUT.
+```
+
+- **Contratos N1–N7 fijados ANTES de correr**:
+  - **N1 · IDENTITY**: Stuff=70 reproduce CALIBRATED-BASELINE-v1 bit-for-bit
+    para TODOS los coeficientes (Contact/Swing 65.41, XBH/BIP 23.03; tol
+    ruido ≤ 0.3pp; con seeds compartidas se espera ≈0.00).
+  - **N2 · MECHANISM ISOLATION**: Stuff no modifica Contact/Swing, Whiff/Swing
+    ni CalledS/Take fuera del ruido compartido esperado (span ≤ 0.5pp por
+    canal). S2 solo toca power_score → esperado ≈0.00.
+  - **N3 · MONOTONIC QUALITY**: con coefficient > 0, Stuff↑ ⇒ XBH/BIP↓
+    monótono (tol ≤ 0.2pp), HR/BIP no aumenta, OUT/BIP no disminuye.
+  - **N4 · COEFFICIENT ORDERING**: para el mismo Stuff extremo (45 y 95),
+    coefficient↑ ⇒ magnitud del efecto↑ (monotonía no-decreciente del |Δ| al
+    subir k, con tol de ruido 0.2pp por comparación consecutiva).
+  - **N5 · MATERIAL BUT NON-DOMINANT**: existe al menos un coeficiente con
+    separación material Stuff45→95 SIN que Stuff se vuelva el determinante
+    casi exclusivo del contacto. NO se fija % arbitrario: se reporta la curva
+    Δ Stuff45→95 y se decide con los resultados.
+  - **N6 · DISTRIBUTION HEALTH**: sin acumulación artificial extrema en un
+    único resultado de BIP (ningún componente concentra >85% del BIP, y todos
+    los BIP-components en [0,100]) ni discontinuidades extrañas entre niveles
+    de Stuff (|Δ componente entre niveles consecutivos| ≤ 10.0pp; no aplica
+    red flags por la redistribución natural que causan los umbrales discretos
+    de power_score en k altos).
+  - **N7 · PA STABILITY**: K5-R sigue sano en toda celda — p95 ≤ 6,
+    P≥12 ≤ 0.05%, P≥16 ≤ 0.01%, sin CAP accumulation.
+- **Comparación fundamental con Power** (diagnóstico, decisión de 003B-2 lo
+  pide): sweep de POWER del batter 45/55/70/85/95 con pitcher MID/Stuff=70 para
+  medir `Δ XBH/BIP / 10 Power` y compararlo con `Δ XBH/BIP / 10 Stuff` por
+  coeficiente. Se busca que Power = capacidad ofensiva de daño y Stuff =
+  capacidad defensiva de suprimir ese daño, NO necesariamente 1:1:1; se
+  reporta `suppression_ratio = |Δ XBH/BIP /10 Stuff| / |Δ XBH/BIP /10 Power|`
+  como diagnóstico (no PASS/FAIL).
+- **Modelo de decisión (si N1–N7 se cumplen en tres+ coefs)**:
+  calificar candidato por magnitud → elegir el k que produzca separación
+  material-stable sin dominar. Salidas tipo: k=0.10 demasiado débil, 0.20
+  débil, 0.30 material/estable, 0.40 material/fuerte, 0.50 empieza a dominar
+  (NO se anticipa que 0.30 gane). El ganador NO se promueve a producción aquí
+  (falta 003B-4 matchup Power×Stuff → 003B-5 fatigue → 003B-6 prod acceptance).
+- **Veredicto 003B-3**: [PENDIENTE — corrida 2.0M PA tras `--mode e003b3`].
+
+### RESULTADOS · 003B-3 (evidencia `scripts/_e003b3_full_run.txt`, 2.0M PA)
+
+- **N1 · IDENTITY · PASS**: Stuff=70 reproduce CALIBRATED-BASELINE-v1 bit-por-bit
+  para los 7 coeficientes (Contact/Swing 65.41, XBH/BIP 23.03, K%/BB% 28.07/9.97,
+  Pit/PA 3.64 — mismo bloque en TODAS las celdas; k no toca el RNG de disciplina).
+- **N2 · MECHANISM ISOLATION · PASS**: perfil de Stuff=45/55/85/95 idéntico
+  (spans 0.00/0.00/0.00 en Contact/Sw, Whiff/Sw, CalledS/Tk): S2 solo recalcula
+  el power_score al llegar al BIP, sin tocar whiff ni strike_chance.
+- **N3 · MONOTONIC QUALITY · PASS** en los 6 k>0: Stuff↑ ⇒ XBH/BIP↓, HR/BIP no
+  sube, OUT/BIP no baja. La jerarquía de umbrales degrada primero HR, luego XBH,
+  sin invertir nada.
+- **N4 · COEFFICIENT ORDERING · PASS**: |Δ XBH@45→@95| crece con k: 0.00 → 3.04
+  (0.064) → 4.87 (0.10) → 9.67 (0.20) → 14.72 (0.30) → 19.84 (0.40) → 25.04
+  (0.50)pp.
+- **N5 · MATERIAL BUT NON-DOMINANT · PASS** (reportado, decisión con curva):
+  todos los k≥0.064 superan el piso (≥1.5pp); XBH@95>0 y OUT<100 en todos. La
+  curva de HR/BIP marca el límite de dominación.
+- **N6 · DISTRIBUTION HEALTH · PASS**: componentes del BIP en [0,100], sin
+  componente >85%, pasos ≤10pp. Sano incluso en k=0.50 (HR/BIP 24.56@Stuff45 →
+  0.03@Stuff95 sin cliff ni inversión).
+- **N7 · PA STABILITY · PASS**: max p95=6 en las 35 celdas, P≥12=0.002%,
+  P≥16=0.000%, sin CAP. K5-R intacto.
+- **Power reference** (diagnóstico): Δ XBH/BIP /10 Power = **3.968** (POW45→95 →
+  XBH/BIP 13.11→32.95; HR/BIP 2.01→22.12). pwr mean 48.05→68.05 (cambio 4.0/10,
+  coherente con el `(pwr-50)*0.4` del power_score).
+- **suppression_ratio por k** (diagnóstico, no contrato):
+
+  | k | Δ XBH/10 Stuff | ratio vs Power |
+  |------:|--------------:|---------------:|
+  | 0.000 | +0.000 | — |
+  | 0.064 | −0.609 | 0.153 |
+  | 0.100 | −0.974 | 0.245 |
+  | 0.200 | −1.935 | 0.488 |
+  | 0.300 | −2.945 | 0.742 |
+  | 0.400 | **−3.968** | **1.000** |
+  | 0.500 | −5.008 | 1.262 |
+
+  **k=0.400 = −Power exacto**: power_score ≈ (pwr−50)·0.4, y k·10 = 4.0 pp por
+  10 Stuff → idéntica sensibilidad. Precisamente el caso que se quería evitar
+  ("dos caras del mismo atributo"). k>0.40 ya lo supera (Stuff domina Power).
+- **Lectura de magnitud**: k=0.064 y 0.10 débiles (ratio <0.25, Δ<5pp) ·
+  k=0.20 material moderado (ratio ~0.5, HR/BIP@Stuff95 aún 7.02) ·
+  k=0.30 material con margen sin dominar (ratio 0.74, HR/BIP@Stuff95 4.5pp) ·
+  k=0.40 ≡ −Power (frontera) · k=0.50 domina (HR/BIP colapsa a 0.03).
+
+### 003B-3 COEFFICIENT DECISION (reportado, sin promover a producción)
+
+- **Candidato primario v1 → k = 0.30**: separación material y estable
+  (Δ XBH@45→@95 = 14.72pp, ratio 0.742) con margen claro de no-dominación:
+  Stuff95 deja XBH/BIP en 15.77 (mitad de la mejora que da Stuff45) y HR/BIP en
+  4.53 — Stuff suprime lo que Power concede sin anularlo ni pisar su canal.
+- **Alternativo conservador → k = 0.20** (ratio 0.49, Δ 9.67pp): si en 003B-4
+  el matchup POW95×Stuff95 se vuelve demasiado severo, es el respaldo.
+- **Fuera**: k=0.40/0.50 (Stuff ≡ −Power / dominancia) y k<0.15 (sub-material).
+- **No se toca `calculator.py`**: el candidato k=0.30 se lleva a 003B-4 como
+  propuesta de magnitud, NO como cambio de producción. 003B-4 cruza
+  Power×Stuff (POW45/55/70/85/95 × Stuff45/70/95) para confirmar que un POW95
+  aún expresa poder frente a Stuff95 y que Stuff45 no dispara extremos.

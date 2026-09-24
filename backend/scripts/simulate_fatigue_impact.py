@@ -345,19 +345,23 @@ STUFF_K_QTY = 0.064    # S2 / S3 → power_score += delta * k (quality, supresi�
 STUFF_ARMS = ("S1", "S2", "S3")
 
 
-def _stuff_modifiers(stuff_arm: str, delta: float) -> tuple:
+def _stuff_modifiers(stuff_arm: str, delta: float, k_qty: float = None) -> tuple:
     """Moduladores (whiff_add, power_add) del brazo semántico.
 
     Signo documentado: en S2/S3 la quality del lanzador es supresión → Stuff
     alto REDUCE power_score (XBH/BIP baja). Si la corrida observara lo
     contrario, se REVIERTE el signo en el contrato, no se re-etiqueta la rama.
+
+    k_qty: override del coeficiente de quality (003B-3 · coefficient sweep).
+    None → STUFF_K_QTY (conserva el comportamiento 003B-1/2 exacto).
     """
+    k = STUFF_K_QTY if k_qty is None else k_qty
     if stuff_arm == "S1":
         return delta * STUFF_K_WIFF, 0.0
     if stuff_arm == "S2":
-        return 0.0, -delta * STUFF_K_QTY
+        return 0.0, -delta * k
     if stuff_arm == "S3":
-        return delta * STUFF_K_WIFF / 2.0, -delta * STUFF_K_QTY / 2.0
+        return delta * STUFF_K_WIFF / 2.0, -delta * k / 2.0
     raise ValueError(f"stuff_arm desconocido: {stuff_arm!r}")
 
 
@@ -369,6 +373,8 @@ def _resolve_play_outcome_stuff(
     tactics_modifiers: dict = None,
     stuff_level: int = STUFF_IDENTITY,
     stuff_arm: str = "S1",
+    stuff_k_qty: float = None,
+    power_log: list = None,
 ):
     """Réplica LAB de la resolución de jugada con modulador de Stuff (003B-1).
 
@@ -378,9 +384,15 @@ def _resolve_play_outcome_stuff(
       (mismo orden de draws y constantes) + moduladores S1/S2/S3.
     - delta = stuff_level - 70 → en stuff=70 los moduladores valen 0 y la
       réplica es bit-por-bit el engine (identidad exacta).
+
+    stuff_k_qty: override del coeficiente de quality de S2/S3
+            (003B-3 · coefficient sweep). None → STUFF_K_QTY.
+    power_log: lista externa a la que se anexa el power_score resultante de
+            CADA contacto (BIP) → distribución p10/p50/p90/mean en 003B-3.
+            None → no captura (comportamiento 003B-1/2 exacto).
     """
     delta = stuff_level - STUFF_IDENTITY
-    whiff_add, power_add = _stuff_modifiers(stuff_arm, delta)
+    whiff_add, power_add = _stuff_modifiers(stuff_arm, delta, k_qty=stuff_k_qty)
 
     tactics = tactics_modifiers or {
         "batter_con": 1.0,
@@ -444,6 +456,8 @@ def _resolve_play_outcome_stuff(
     if zone_matched and pitch_matched:
         power_score += 15.0
     power_score += power_add
+    if power_log is not None:
+        power_log.append(power_score)
 
     if power_score > 96.0:
         return Event.HOME_RUN, "¡HOME RUN!"
@@ -468,7 +482,9 @@ def _simulate_pa_diag(take_probs: dict, seed: int,
                       pitcher_attrs: dict = None,
                       use_public_api: bool = False,
                       stuff_level: int = None,
-                      stuff_arm: str = None) -> dict:
+                      stuff_arm: str = None,
+                      stuff_k_qty: float = None,
+                      power_log: list = None) -> dict:
     """PA 0-0 → K/BB/BIP con diagnóstico de count y de disciplinas, SIN fatiga.
 
     Args:
@@ -501,6 +517,10 @@ def _simulate_pa_diag(take_probs: dict, seed: int,
                     la disciplina (TAKE) se delega al engine sin knobs.
         stuff_arm:  brazo semántico en {"S1", "S2", "S3"} (003B-1):
                     S1=whiff, S2=contact quality, S3=hybrid.
+        stuff_k_qty: override del coeficiente de quality de S2/S3
+                    (003B-3 · coefficient sweep). None → STUFF_K_QTY.
+        power_log: lista externa que recibe el power_score de cada contacto
+                    (003B-3 · distribución). None → sin captura.
     """
     random.seed(seed)
     balls = 0
@@ -561,6 +581,8 @@ def _simulate_pa_diag(take_probs: dict, seed: int,
                 tactics_modifiers=None,
                 stuff_level=stuff_level,
                 stuff_arm=stuff_arm,
+                stuff_k_qty=stuff_k_qty,
+                power_log=power_log,
             )
         elif use_public_api:
             event, _description = calculate_play_outcome(
@@ -3145,6 +3167,317 @@ def run_stuff_vs_vel_mov_sensitivity_e003b2(reps: int) -> None:
 
 
 # ---------------------------------------------------------------------------
+# 003B-3 · S2 coefficient sweep (calibración de magnitud, no de semántica)
+# ---------------------------------------------------------------------------
+# Pregunta: ¿cuánto debe modificar Stuff el power_score para ser material sin
+# dominar Power ni deformar el baseline? effective_power_score =
+# power_score - stuff_delta * coefficient. El mesh conserva el 0.064 exacto de
+# f0584aa (no re-interpolado). S1/S3 ya no participan (cerradas en 003B-2).
+# V/M sweeps NO: solo S2 con k variable + power reference del batter (producción
+# pura, réplica bit-idéntica en stuff=70). CERO cambios en calculator.py.
+STUFF_COEFFS_003B3 = (0.0, 0.064, 0.10, 0.20, 0.30, 0.40, 0.50)
+STUFF_POWERSWEEP_003B3 = [45, 55, 70, 85, 95]
+N2_SPAN_PP = 0.5    # N2: span por canal aislado (Contact/Sw, Whiff/Sw, CalledS/tk)
+N3_MONO_PP = 0.2    # N3: tol de monotonía por paso (XBH/BIP, HR/BIP, OUT/BIP)
+N4_MONO_PP = 0.2    # N4: monotonía del |Δ| vs coefficient (no-decreciente, tol ruido)
+N5_MAT_PP = 1.5     # N5: piso de materialidad Stuff45→95 (misma regla que L4/003B-1)
+N6_STEP_PP = 10.0   # N6: tope de discontinuidad por componente entre niveles
+N6_DOM_PP = 85.0    # N6: un componente no puede concentrar >85% del BIP
+N7_P95_MAX = 6      # N7: K5-R tail (p95 ≤ 6, además con la granularidad de 003B)
+N7_P12_MAX = 0.05   # N7: P(longitud ≥ 12) ≤ 0.05%
+N7_P16_MAX = 0.01   # N7: P(longitud ≥ 16) ≤ 0.01%
+
+
+def _pct_quantile(sorted_values, q):
+    if not sorted_values:
+        return 0.0
+    return sorted_values[int(len(sorted_values) * q) - 1]
+
+
+def _metric_row(agg, n):
+    """Fila compacta de métricas por celda (BIP/PA-shape/contacto/power)."""
+    out = agg["outcome"]
+    bip = (out["OUT"] + out["1B"] + out["2B"] + out["3B"] + out["HR"])
+    bs = max(1, bip)
+    sw = max(1, agg["swing_attempts"])
+    tk = max(1, agg["take_attempts"])
+    return {
+        "k": out["K"] / n * 100,
+        "bb": out["BB"] / n * 100,
+        "bip": bip / n * 100,
+        "reach": (out["BB"] + out["1B"] + out["2B"] + out["3B"] + out["HR"]) / n * 100,
+        "called_tk": agg["called_strikes_on_take"] / tk * 100,
+        "whiff": agg["whiffs"] / sw * 100,
+        "cnt": (sw - agg["whiffs"]) / sw * 100,
+        "out_bip": out["OUT"] / bs * 100,
+        "x1": out["1B"] / bs * 100,
+        "x2": out["2B"] / bs * 100,
+        "x3": out["3B"] / bs * 100,
+        "hr": out["HR"] / bs * 100,
+        "xbh": (out["2B"] + out["3B"] + out["HR"]) / bs * 100,
+        "pmean": sum(agg["power"]) / len(agg["power"]) if agg["power"] else 0.0,
+        "p10": _pct_quantile(agg["power"], 0.10),
+        "p50": _pct_quantile(agg["power"], 0.50),
+        "p90": _pct_quantile(agg["power"], 0.90),
+        "p95": agg["p95"],
+        "paus": agg["pitches"] / n,
+        "t12": agg["len12"] / n * 100,
+        "t16": agg["len16"] / n * 100,
+    }
+
+
+def run_stuff_coefficient_e003b3(reps: int) -> None:
+    """003B-3 · sweep de coefficient de S2 + power reference (2.0M PA)."""
+    n = reps
+    batter = BATTER_PROFILES_003A["MID"]
+    pitcher = PITCHER_PROFILES_003A["MID"]
+    levels = list(STUFF_LEVELS)
+    cells = {}
+
+    def fresh_agg():
+        return {"pitches": 0, "take_attempts": 0, "called_strikes_on_take": 0,
+                "swing_attempts": 0, "whiffs": 0, "outcome": Counter(),
+                "lengths": [], "power": [], "len12": 0, "len16": 0}
+
+    for coef in STUFF_COEFFS_003B3:
+        for lvl in levels:
+            agg = fresh_agg()
+            for rep in range(reps):
+                seed = int(DISCIPLINE_WORKLOAD * 1000) * 10**6 + rep  # seeds compartidas
+                d = _simulate_pa_diag(E1_POLICY, seed,
+                                      batter_attrs=batter,
+                                      pitcher_attrs=pitcher,
+                                      stuff_level=lvl,
+                                      stuff_arm="S2",
+                                      stuff_k_qty=coef,
+                                      power_log=agg["power"])
+                agg["pitches"] += d["pitches"]
+                agg["take_attempts"] += d["take_attempts"]
+                agg["called_strikes_on_take"] += d["called_strikes_on_take"]
+                agg["swing_attempts"] += d["swing_attempts"]
+                agg["whiffs"] += d["whiffs"]
+                agg["outcome"][d["outcome"]] += 1
+                agg["lengths"].append(d["pitches"])
+                if d["pitches"] >= 12:
+                    agg["len12"] += 1
+                if d["pitches"] >= 16:
+                    agg["len16"] += 1
+            agg["lengths"].sort()
+            agg["p95"] = agg["lengths"][int(len(agg["lengths"]) * 0.95) - 1]
+            agg["power"].sort()
+            cells[(coef, lvl)] = agg
+
+    # Power reference: bater POW variable 45→95, pitcher MID/Stuff70, k=0.0.
+    power_ref = {}
+    for p in STUFF_POWERSWEEP_003B3:
+        batter_ref = {"contacto": 70, "poder": p, "vision": 70}
+        agg = fresh_agg()
+        for rep in range(reps):
+            seed = int(DISCIPLINE_WORKLOAD * 1000) * 10**6 + rep
+            d = _simulate_pa_diag(E1_POLICY, seed,
+                                  batter_attrs=batter_ref,
+                                  pitcher_attrs=pitcher,
+                                  stuff_level=STUFF_IDENTITY,
+                                  stuff_arm="S2",
+                                  stuff_k_qty=0.0,
+                                  power_log=agg["power"])
+            agg["pitches"] += d["pitches"]
+            agg["take_attempts"] += d["take_attempts"]
+            agg["called_strikes_on_take"] += d["called_strikes_on_take"]
+            agg["swing_attempts"] += d["swing_attempts"]
+            agg["whiffs"] += d["whiffs"]
+            agg["outcome"][d["outcome"]] += 1
+            agg["lengths"].append(d["pitches"])
+        agg["lengths"].sort()
+        agg["p95"] = agg["lengths"][int(len(agg["lengths"]) * 0.95) - 1]
+        agg["power"].sort()
+        power_ref[p] = agg
+
+    rows = {}
+    for coef in STUFF_COEFFS_003B3:
+        rows[coef] = {lvl: _metric_row(cells[(coef, lvl)], n) for lvl in levels}
+
+    print("=" * 150)
+    print("GAMEPLAY-ENGINE-003B-3 · S2 COEFFICIENT SWEEP (calibración de magnitud)")
+    print(f"7 coefs × 5 Stuff × {reps:,} PA = {reps*35:,} PA | Power ref 5 × {reps:,} "
+          f"= {reps*5:,} PA | Total {reps*40:,} PA")
+    print("effective_power_score = power_score - stuff_delta * coefficient | "
+          "S2 arm | seeds compartidas (750M+rep) | MID all")
+    print("Contratos N1–N7 FIJADOS ANTES de correr. suppression_ratio = "
+          "diagnóstico (no PASS/FAIL).")
+    print("=" * 150)
+
+    # Tabla compacta por coeficiente
+    for coef in STUFF_COEFFS_003B3:
+        print()
+        print(f"-- COEFFICIENT {coef:.3f} --")
+        print(f"{'Stuff':>5} | {'K%':>6} {'BB%':>6} {'BIP%':>6} {'Reach%':>7} | "
+              f"{'Cnt/Sw':>7} | {'OUT/B':>6} {'1B/B':>6} {'2B/B':>6} {'3B/B':>6} "
+              f"{'HR/B':>6} {'XBH/B':>6} | {'pwr mean':>8} {'p10':>6} {'p50':>6} "
+              f"{'p90':>6} | {'Pit/PA':>6} {'p95':>4} {'>=12':>6} {'>=16':>6}")
+        print("-" * 150)
+        for lvl in levels:
+            r = rows[coef][lvl]
+            print(f"{lvl:>5} | {r['k']:>6.2f} {r['bb']:>6.2f} {r['bip']:>6.2f} "
+                  f"{r['reach']:>7.2f} | {r['cnt']:>7.2f} | {r['out_bip']:>6.2f} "
+                  f"{r['x1']:>6.2f} {r['x2']:>6.2f} {r['x3']:>6.2f} "
+                  f"{r['hr']:>6.2f} {r['xbh']:>6.2f} | {r['pmean']:>8.2f} "
+                  f"{r['p10']:>6.2f} {r['p50']:>6.2f} {r['p90']:>6.2f} | "
+                  f"{r['paus']:>6.2f} {r['p95']:>4} {r['t12']:>6.3f} {r['t16']:>6.3f}")
+        print("-" * 150)
+
+    # Power reference
+    print()
+    print("-- POWER REFERENCE (batter POW variable, pitcher MID/Stuff=70, k=0) --")
+    print(f"{'POW':>5} | {'XBH/BIP':>8} {'HR/BIP':>8} {'pwr mean':>8} {'p50':>6}")
+    print("-" * 50)
+    for p in STUFF_POWERSWEEP_003B3:
+        r = _metric_row(power_ref[p], n)
+        print(f"{p:>5} | {r['xbh']:>8.2f} {r['hr']:>8.2f} {r['pmean']:>8.2f} "
+              f"{r['p50']:>6.2f}")
+    print("-" * 50)
+    dx_pow = (_metric_row(power_ref[95], n)["xbh"]
+              - _metric_row(power_ref[45], n)["xbh"]) / 5.0
+    print(f"Δ XBH/BIP /10 Power = {dx_pow:.3f}")
+
+    # N1–N7
+    print()
+    print("-- CONTRATOS (N1–N7, fijados antes) --")
+
+    # N1 · IDENTITY: Stuff=70 vs CALIBRATED-BASELINE-v1 → en k cualquiera.
+    n1_ok = True
+    for coef in STUFF_COEFFS_003B3:
+        r = rows[coef][70]
+        ok = abs(r["cnt"] - 65.41) <= 0.3 and abs(r["xbh"] - 23.03) <= 0.3
+        n1_ok &= ok
+        print(f"  N1 IDENTITY k={coef:.3f}@70 (≈65.41/23.03): "
+              f"{'PASS' if ok else 'FAIL'} (Cnt/Sw {r['cnt']:.2f}, XBH/BIP {r['xbh']:.2f})")
+    print(f"  N1 IDENTITY (todos): {'PASS' if n1_ok else 'FAIL'}")
+
+    # N2 · MECHANISM ISOLATION: span de canales aislados por coeficiente.
+    n2_ok = True
+    for coef in STUFF_COEFFS_003B3:
+        seq_c = [rows[coef][l]["cnt"] for l in levels]
+        seq_w = [rows[coef][l]["whiff"] for l in levels]
+        seq_ct = [rows[coef][l]["called_tk"] for l in levels]
+        ok = (max(seq_c) - min(seq_c) <= N2_SPAN_PP
+              and max(seq_w) - min(seq_w) <= N2_SPAN_PP
+              and max(seq_ct) - min(seq_ct) <= N2_SPAN_PP)
+        n2_ok &= ok
+        print(f"  N2 ISOLATION k={coef:.3f} (span Cnt/Sw≤{N2_SPAN_PP}, Whiff, "
+              f"CRs/Tk): {'PASS' if ok else 'FAIL'} "
+              f"(spans {max(seq_c)-min(seq_c):.2f}/{max(seq_w)-min(seq_w):.2f}/"
+              f"{max(seq_ct)-min(seq_ct):.2f})")
+    print(f"  N2 MECHANISM ISOLATION (todos): {'PASS' if n2_ok else 'FAIL'}")
+
+    # N3 · MONOTONIC QUALITY (solo k > 0).
+    n3_ok = True
+    for coef in STUFF_COEFFS_003B3:
+        if coef <= 0:
+            continue
+        seq_x = [rows[coef][l]["xbh"] for l in levels]
+        seq_h = [rows[coef][l]["hr"] for l in levels]
+        seq_o = [rows[coef][l]["out_bip"] for l in levels]
+
+        def mono_dec(s):
+            return all(s[i] + N3_MONO_PP >= s[i + 1] for i in range(len(s) - 1))
+
+        def mono_inc(s):
+            return all(s[i] <= s[i + 1] + N3_MONO_PP for i in range(len(s) - 1))
+
+        ok = mono_dec(seq_x) and mono_dec(seq_h) and mono_inc(seq_o)
+        n3_ok &= ok
+        print(f"  N3 MONO k={coef:.3f} (XBH↓, HR no↑, OUT no↓): "
+              f"{'PASS' if ok else 'FAIL'} "
+              f"(XBH {seq_x[0]:.2f}→{seq_x[-1]:.2f}, HR {seq_h[0]:.2f}→{seq_h[-1]:.2f}, "
+              f"OUT {seq_o[0]:.2f}→{seq_o[-1]:.2f})")
+    print(f"  N3 MONOTONIC QUALITY: {'PASS' if n3_ok else 'FAIL'}")
+
+    # N4 · COEFFICIENT ORDERING: |Δ Stuff45→95| crece con coefficient (monótono
+    # no-decreciente; el check exige que cada coeficiente superior tenga
+    # magnitud ≥ la anterior, con tol de ruido).
+    deltas = []
+    for coef in STUFF_COEFFS_003B3:
+        d = rows[coef][45]["xbh"] - rows[coef][95]["xbh"]
+        deltas.append(abs(d))
+    n4_ok = all(deltas[i + 1] + N4_MONO_PP >= deltas[i]
+                for i in range(len(deltas) - 1))
+    print(f"  N4 ORDERING |Δ XBH@45→@95| vs k "
+          f"({' · '.join(f'{d:.2f}' for d in deltas)}): "
+          f"{'PASS' if n4_ok else 'FAIL'}")
+
+    # N5 · MATERIAL BUT NON-DOMINANT: reportar curva, decidir con resultados.
+    d45_95 = {coef: rows[coef][45]["xbh"] - rows[coef][95]["xbh"]
+              for coef in STUFF_COEFFS_003B3}
+    material = {coef: d for coef, d in d45_95.items() if d >= N5_MAT_PP}
+    n5_ok = bool(material)
+    nondominant = all(rows[c][95]["xbh"] > 0 and rows[c][95]["out_bip"] < 100
+                      for c in STUFF_COEFFS_003B3)
+    print(f"  N5 Δ Stuff45→95 (XBH/BIP, material ≥{N5_MAT_PP}pp): "
+          + " · ".join(f"k={c:.3f} {d:+.2f}" for c, d in d45_95.items()))
+    print(f"      Materiales: {sorted(material.items())} | XBH@95>0 & OUT<100 "
+          f"(no dominante): {'OK' if nondominant else 'FALLA'}")
+    print(f"  N5 MATERIAL BUT NON-DOMINANT: {'PASS' if n5_ok and nondominant else 'FAIL'}")
+
+    # N6 · DISTRIBUTION HEALTH (BIP components entorno sano, sin cliffs).
+    n6_ok = True
+    for coef in STUFF_COEFFS_003B3:
+        for key in ("out_bip", "x1", "x2", "x3", "hr"):
+            seq = [rows[coef][l][key] for l in levels]
+            if not all(0 <= v <= 100 for v in seq):
+                n6_ok = False
+            if any(abs(seq[i] - seq[i + 1]) > N6_STEP_PP
+                   for i in range(len(seq) - 1)):
+                n6_ok = False
+            if any(v > N6_DOM_PP for v in seq):
+                n6_ok = False
+    print(f"  N6 DISTRIBUTION HEALTH (componentes en [0,100], |Δ pasos|≤{N6_STEP_PP}, "
+          f"ninguno >{N6_DOM_PP:.0f}% del BIP): "
+          f"{'PASS' if n6_ok else 'FAIL'}")
+
+    # N7 · PA STABILITY (K5-R).
+    n7_ok = True
+    for coef in STUFF_COEFFS_003B3:
+        for lvl in levels:
+            agg = cells[(coef, lvl)]
+            ok = (agg["p95"] <= N7_P95_MAX
+                  and agg["len12"] / n * 100 <= N7_P12_MAX
+                  and agg["len16"] / n * 100 <= N7_P16_MAX
+                  and agg["outcome"]["CAP"] == 0)
+            n7_ok &= ok
+    p95s = {c: max(cells[(c, l)]["p95"] for l in levels)
+            for c in STUFF_COEFFS_003B3}
+    print(f"  N7 PA STABILITY (max p95/t12/t16/CAP ±): "
+          f"{'PASS' if n7_ok else 'FAIL'} "
+          f"(max p95 por k: " + " · ".join(f"{c:.3f}→{p}" for c, p in p95s.items()) + ")")
+
+    # suppression_ratio (diagnóstico)
+    print()
+    print("-- suppression_ratio = |Δ XBH/10 Stuff| / |Δ XBH/10 Power| "
+          "(DIAGNÓSTICO, no PASS/FAIL) --")
+    print(f"  Δ XBH/10 Power = {dx_pow:.3f}")
+    for coef in STUFF_COEFFS_003B3:
+        dx_stuff = (rows[coef][95]["xbh"] - rows[coef][45]["xbh"]) / 5.0
+        ratio = abs(dx_stuff) / abs(dx_pow) if abs(dx_pow) > 1e-9 else float("inf")
+        print(f"  k={coef:.3f}: Δ XBH/10 Stuff = {dx_stuff:+.3f} | ratio = {ratio:.3f}")
+
+    # Veredicto
+    print("-" * 150)
+    print(f"Veredicto 003B-3: N1 {'PASS' if n1_ok else 'FAIL'} · "
+          f"N2 {'PASS' if n2_ok else 'FAIL'} · N3 {'PASS' if n3_ok else 'FAIL'} · "
+          f"N4 {'PASS' if n4_ok else 'FAIL'} · N5 {'PASS' if n5_ok and nondominant else 'FAIL'} · "
+          f"N6 {'PASS' if n6_ok else 'FAIL'} · N7 {'PASS' if n7_ok else 'FAIL'}")
+    if material:
+        print("Coeficientes con separación material Stuff45→95: "
+              + ", ".join(f"k={c:.3f} (Δ {d:+.2f}pp)" for c, d in
+                          sorted(material.items())))
+        print("Decisión de magnitud se reporta; candidato NO se promueve a "
+              "producción hasta 003B-4 (matchup) → 003B-5 (fatigue) → 003B-6.")
+    else:
+        print("Sin coeficiente material: reevaluar mesh/regla antes de decidir.")
+
+
+# ---------------------------------------------------------------------------
 # 002C-B · TAKE calibration · baseline sweep (intercept de strike_chance)
 # ---------------------------------------------------------------------------
 # Mantiene coefs CTL/VIS actuales (0.003 / -0.002 con (attr-50)); solo varía
@@ -4924,7 +5257,7 @@ def run_pa_level(reps: int) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Monte Carlo de fatiga (GAMEPLAY-ENGINE-001B)")
-    parser.add_argument("--mode", choices=["pa", "pitch", "discipline", "cv", "take", "foul", "bc", "d2", "cv2", "f5", "c1", "c3", "c4", "c5", "d1", "d3", "d4", "e1", "e2", "e3", "e3b", "e5", "e003a", "e003a-tail", "e003b", "e003b2"], default="pa",
+    parser.add_argument("--mode", choices=["pa", "pitch", "discipline", "cv", "take", "foul", "bc", "d2", "cv2", "f5", "c1", "c3", "c4", "c5", "d1", "d3", "d4", "e1", "e2", "e3", "e3b", "e5", "e003a", "e003a-tail", "e003b", "e003b2", "e003b3"], default="pa",
                         help="pa = PA completo (001B-4); pitch = pitch suelto (001B-3); "
                              "discipline = diagnóstico de count/disciplina sin fatiga (002A); "
                              "cv = factorial Control×Vision (002B); "
@@ -4948,6 +5281,7 @@ def main() -> None:
                               "e003a-tail = K5-R: validación de cola de PA (STRONG×WEAK, 200k, seeds nuevas) (003A-TAIL-1); "
                               "e003b = stuff semantic candidates: 3 brazos × 5 niveles (45/55/70/85/95), LAB, contratos L1–L6 (003B-1); "
                               "e003b2 = stuff vs VEL/MOV sensitivity: 5 sweeps × 5 niveles, contratos M1–M6 + geometría de vectores (003B-2); "
+                              "e003b3 = S2 coefficient sweep: 7 coefs × 5 Stuff + power reference, contratos N1–N7, suppression_ratio diagnóstico (003B-3); "
                               "d3 = comparación de estrategias CPU workload-based por matchup (001D-3); "
                              "d4 = barrido ampliado + coste marginal de esperar (001D-4A/B)")
     parser.add_argument("--reps", type=int, default=REPS, help="réplicas por escenario")
@@ -4987,6 +5321,8 @@ def main() -> None:
         run_stuff_semantic_candidates_e003b(args.reps)
     elif args.mode == "e003b2":
         run_stuff_vs_vel_mov_sensitivity_e003b2(args.reps)
+    elif args.mode == "e003b3":
+        run_stuff_coefficient_e003b3(args.reps)
     elif args.mode == "f5":
         run_fatigue_curve_comparison(args.reps)
     elif args.mode == "c1":
