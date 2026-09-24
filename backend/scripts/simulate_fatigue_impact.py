@@ -34,7 +34,12 @@ from collections import Counter
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.core.enums import Event, PitchType, SwingType
-from app.engine.calculator import _resolve_play_outcome, calculate_play_outcome
+from app.engine.calculator import (
+    _resolve_play_outcome,
+    _contact_foul_probability,
+    calculate_play_outcome,
+    FOUL_ON_CONTACT_CHANCE,
+)
 from app.engine.cpu_ai import (
     get_cpu_pitch_action,
     get_cpu_swing_action,
@@ -320,6 +325,140 @@ DISCIPLINE_POLICIES = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Subbloque 003B-1 · Stuff semantic candidates
+# ---------------------------------------------------------------------------
+# Stuff es una dimensión EXPERIMENTAL (no existe en PitcherAttrs de producción).
+# Se registra vía `_resolve_play_outcome_stuff`, que replica bit-a-bit la FASE
+# 1/2/3 del engine (mismo orden de draws de RNG, mismas constantes) con un
+# modulador de Stuff que vale EXACTAMENTE 0 en stuff=70 (delta=0) → identidad
+# con CALIBRATED-BASELINE-v1 garantizada por construcción. NO toca calculator.py.
+STUFF_IDENTITY = 70
+STUFF_LEVELS = [45, 55, 70, 85, 95]
+
+# Coeficientes de forma, NO de calibración (003B-1 compara formas; 003B-3 hará
+# el coefficient sweep). k=0.064/pp → Δdelta total (50pp) mueve la dimensión
+# ~3.2pp (L4 ≥1.5pp con holgura) y el paso consecutivo mayor (15pp) mueve
+# ≤0.96pp (L6 ≤1.0pp). S3 usa exactamente la mitad de cada.
+STUFF_K_WIFF = 0.064   # S1 / S3 → whiff_base += delta * k
+STUFF_K_QTY = 0.064    # S2 / S3 → power_score += delta * k (quality, supresión)
+STUFF_ARMS = ("S1", "S2", "S3")
+
+
+def _stuff_modifiers(stuff_arm: str, delta: float) -> tuple:
+    """Moduladores (whiff_add, power_add) del brazo semántico.
+
+    Signo documentado: en S2/S3 la quality del lanzador es supresión → Stuff
+    alto REDUCE power_score (XBH/BIP baja). Si la corrida observara lo
+    contrario, se REVIERTE el signo en el contrato, no se re-etiqueta la rama.
+    """
+    if stuff_arm == "S1":
+        return delta * STUFF_K_WIFF, 0.0
+    if stuff_arm == "S2":
+        return 0.0, -delta * STUFF_K_QTY
+    if stuff_arm == "S3":
+        return delta * STUFF_K_WIFF / 2.0, -delta * STUFF_K_QTY / 2.0
+    raise ValueError(f"stuff_arm desconocido: {stuff_arm!r}")
+
+
+def _resolve_play_outcome_stuff(
+    pitcher_attrs: dict,
+    batter_attrs: dict,
+    pitch_selected: dict,
+    swing_selected: dict,
+    tactics_modifiers: dict = None,
+    stuff_level: int = STUFF_IDENTITY,
+    stuff_arm: str = "S1",
+):
+    """Réplica LAB de la resolución de jugada con modulador de Stuff (003B-1).
+
+    - FASE 1 (IBB / TAKE) → delega en `_resolve_play_outcome` del engine con
+      knobs = None (producción): Stuff NO afecta disciplina; dibuja el mismo RNG.
+    - FASE 2/3 (SWING → whiff / foul / BABIP) → réplica idéntica del engine
+      (mismo orden de draws y constantes) + moduladores S1/S2/S3.
+    - delta = stuff_level - 70 → en stuff=70 los moduladores valen 0 y la
+      réplica es bit-por-bit el engine (identidad exacta).
+    """
+    delta = stuff_level - STUFF_IDENTITY
+    whiff_add, power_add = _stuff_modifiers(stuff_arm, delta)
+
+    tactics = tactics_modifiers or {
+        "batter_con": 1.0,
+        "batter_pwr": 1.0,
+        "batter_vis": 1.0,
+        "pitcher_mov": 1.0,
+        "pitcher_vel": 1.0,
+        "pitcher_ctl": 1.0,
+    }
+
+    con = batter_attrs.get("contacto", 50) * tactics.get("batter_con", 1.0)
+    pwr = batter_attrs.get("poder", 50) * tactics.get("batter_pwr", 1.0)
+    vis = batter_attrs.get("vision", 50) * tactics.get("batter_vis", 1.0)
+
+    vel = pitch_selected.get("velocity",
+                             pitcher_attrs.get("velocidad", 50)) * tactics.get("pitcher_vel", 1.0)
+    ctl = pitch_selected.get("control",
+                             pitcher_attrs.get("control", 50)) * tactics.get("pitcher_ctl", 1.0)
+    mov = pitch_selected.get("movement",
+                             pitcher_attrs.get("movimiento", 50)) * tactics.get("pitcher_mov", 1.0)
+
+    swing_type = swing_selected.get("swing_type", "NORMAL")
+    guessed_zone = swing_selected.get("guessed_zone")
+    guessed_pitch = swing_selected.get("guessed_pitch")
+
+    actual_zone = pitch_selected["zone"]
+    actual_pitch = pitch_selected["pitch_type"]
+
+    if actual_pitch == PitchType.IBB:
+        return Event.BALL, "Base por bolas intencional."
+
+    zone_matched = (guessed_zone == actual_zone)
+    pitch_matched = (guessed_pitch == actual_pitch)
+
+    if swing_type == SwingType.TAKE:
+        return _resolve_play_outcome(
+            pitcher_attrs, batter_attrs, pitch_selected, swing_selected,
+            tactics_modifiers,
+        )
+
+    # --- FASE 2/3: réplica de _calculate_contact_outcome + modulador Stuff ---
+    whiff_base = 24.5 + (vel * 0.25 + mov * 0.25) - (con * 0.35) + whiff_add
+    if zone_matched:
+        whiff_base -= 10.0
+    if pitch_matched:
+        whiff_base -= 8.0
+    if swing_type == SwingType.POWER:
+        whiff_base += 8.0
+        pwr *= 1.20
+
+    whiff_chance = max(5.0, min(65.0, whiff_base))
+
+    if random.uniform(0, 100) < whiff_chance:
+        return Event.STRIKE_SWINGING, "Swing abanicado. ¡Strike!"
+
+    if random.random() < _contact_foul_probability(
+            FOUL_ON_CONTACT_CHANCE, zone_matched, pitch_matched):
+        return Event.FOUL, "Batazo de foul."
+
+    power_score = (pwr - 50) * 0.4 + random.uniform(0, 100)
+    if zone_matched and pitch_matched:
+        power_score += 15.0
+    power_score += power_add
+
+    if power_score > 96.0:
+        return Event.HOME_RUN, "¡HOME RUN!"
+    elif power_score > 93.0:
+        return Event.HIT_3B, "Triple."
+    elif power_score > 85.0:
+        return Event.HIT_2B, "Doble base."
+    elif power_score > 63.0:
+        return Event.HIT_1B, "Hit sencillo."
+    elif power_score > 25.0:
+        return Event.OUT_GROUND, "Roletazo al cuadro para out."
+    else:
+        return Event.OUT_FLY, "Elevado de rutina."
+
+
 def _simulate_pa_diag(take_probs: dict, seed: int,
                       control: int = None, vision: int = None,
                       take_bias: float = None,
@@ -327,7 +466,9 @@ def _simulate_pa_diag(take_probs: dict, seed: int,
                       take_floor: float = None,
                       batter_attrs: dict = None,
                       pitcher_attrs: dict = None,
-                      use_public_api: bool = False) -> dict:
+                      use_public_api: bool = False,
+                      stuff_level: int = None,
+                      stuff_arm: str = None) -> dict:
     """PA 0-0 → K/BB/BIP con diagnóstico de count y de disciplinas, SIN fatiga.
 
     Args:
@@ -351,6 +492,15 @@ def _simulate_pa_diag(take_probs: dict, seed: int,
         use_public_api: True → resuelve la jugada con calculate_play_outcome()
                     (producción pura, sin knobs LAB) en vez de
                     _resolve_play_outcome (002E-5 · production acceptance).
+        stuff_level: stuff del pitcher (003B-1 · semantic candidates). Cuando
+                    es None → comportamiento previo. Cuando se pasa, TODO el
+                    PA se resuelve vía _resolve_play_outcome_stuff, cuya
+                    réplica es bit-por-bit el engine en stuff=70 (delta=0 →
+                    moduladores en cero) → identidad EXACTA por construcción.
+                    Solo afecta la FASE 2/3 del swing (whiff / power_score);
+                    la disciplina (TAKE) se delega al engine sin knobs.
+        stuff_arm:  brazo semántico en {"S1", "S2", "S3"} (003B-1):
+                    S1=whiff, S2=contact quality, S3=hybrid.
     """
     random.seed(seed)
     balls = 0
@@ -402,7 +552,17 @@ def _simulate_pa_diag(take_probs: dict, seed: int,
         pitch["control"] = pitch_eff["control"]
         pitch["movement"] = pitch_eff["movement"]
 
-        if use_public_api:
+        if stuff_level is not None:
+            event, _description = _resolve_play_outcome_stuff(
+                pitcher_attrs=fatigued_pitcher,
+                batter_attrs=batter_attrs,
+                pitch_selected=pitch,
+                swing_selected=swing,
+                tactics_modifiers=None,
+                stuff_level=stuff_level,
+                stuff_arm=stuff_arm,
+            )
+        elif use_public_api:
             event, _description = calculate_play_outcome(
                 pitcher_attrs=fatigued_pitcher,
                 batter_attrs=batter_attrs,
@@ -2484,6 +2644,227 @@ def run_tail_stability_k5r(reps: int) -> None:
 
 
 # ---------------------------------------------------------------------------
+# 003B-1 · Stuff semantic candidates (harness LAB, identity en Stuff=70)
+# ---------------------------------------------------------------------------
+# Stuff NO existe en PitcherAttrs de producción; se registra en el harness vía
+# _resolve_play_outcome_stuff (replica bit-for-bit del engine, delta=0 en 70).
+# Setup: pitcher base VEL70/CTL70/MOV70 (MID profile 003A), batter MID, agente
+# E1_POLICY (65/50/30, LAB), disciplina producción, fatiga factor 1.0.
+# Niveles 45/55/70/85/95 × brazos S1/S2/S3, 50k PA/celda, seeds compartidas
+# con 003A (750M+rep) → Stuff=70 reproduce CALIBRATED-BASELINE-v1 bit-por-bit.
+STUFF_L1_TOL_PP = 0.3      # L1: |Contact/Swing−65.41| y |XBH/BIP−23.03| ≤ 0.3
+STUFF_L3_SPAN_PP = 0.5     # L3: dimensión no afectada estable (span)
+STUFF_L4_MIN_PP = 1.5      # L4: |Δ| 45→95 ≥ 1.5pp
+STUFF_L6_STEP_PP = 1.0     # L6: |Δ| entre niveles consecutivos ≤ 1.0pp
+STUFF_L6_P95_MAX = 8       # L6: p95 ≤ 8 en toda celda
+
+
+def run_stuff_semantic_candidates_e003b(reps: int) -> None:
+    """003B-1 · 3 brazos × 5 niveles de Stuff, harness LAB, contratos L1–L6."""
+    n = reps
+    batter = BATTER_PROFILES_003A["MID"]
+    pitcher = PITCHER_PROFILES_003A["MID"]
+    cells = {}
+    for arm in STUFF_ARMS:
+        for stuff in STUFF_LEVELS:
+            agg = {k: 0 for k in ("pitches", "reached_3balls", "reached_full",
+                                  "take_attempts", "balls_on_take",
+                                  "called_strikes_on_take", "swing_attempts",
+                                  "whiffs", "fouls", "bips", "depth4", "depth6")}
+            agg["outcome"] = Counter()
+            agg["lengths"] = []
+            for rep in range(reps):
+                seed = int(DISCIPLINE_WORKLOAD * 1000) * 10**6 + rep
+                d = _simulate_pa_diag(E1_POLICY, seed,
+                                      batter_attrs=batter,
+                                      pitcher_attrs=pitcher,
+                                      stuff_level=stuff,
+                                      stuff_arm=arm)
+                for k in ("pitches", "reached_3balls", "reached_full",
+                          "take_attempts", "balls_on_take",
+                          "called_strikes_on_take", "swing_attempts", "whiffs",
+                          "fouls", "bips"):
+                    agg[k] += d[k]
+                agg["outcome"][d["outcome"]] += 1
+                agg["lengths"].append(d["pitches"])
+                if d["pitches"] >= 4:
+                    agg["depth4"] += 1
+                if d["pitches"] >= 6:
+                    agg["depth6"] += 1
+            lengths = sorted(agg["lengths"])
+            agg["p95"] = lengths[int(len(lengths) * 0.95) - 1]
+            agg["max"] = lengths[-1]
+            cells[(arm, stuff)] = agg
+
+    def pct(x, k):
+        return x / k * 100 if k else 0.0
+
+    def called_s(o):
+        return pct(o["called_strikes_on_take"], max(1, o["take_attempts"]))
+
+    def whiff_s(o):
+        return pct(o["whiffs"], max(1, o["swing_attempts"]))
+
+    def foul_c(o):
+        return pct(o["fouls"], max(1, o["fouls"] + o["bips"]))
+
+    def contact_swing(o):
+        sw = max(1, o["swing_attempts"])
+        return pct(sw - o["whiffs"], sw)
+
+    def bip(o):
+        return o["outcome"]["OUT"] + o["outcome"]["1B"] + o["outcome"]["2B"] + \
+               o["outcome"]["3B"] + o["outcome"]["HR"]
+
+    def xbh(o):
+        return o["outcome"]["2B"] + o["outcome"]["3B"] + o["outcome"]["HR"]
+
+    def xbh_bip(o):
+        return pct(xbh(o), max(1, bip(o)))
+
+    print("=" * 150)
+    print("GAMEPLAY-ENGINE-003B · STUFF SEMANTIC CANDIDATES (003B-1)")
+    print(f"{len(STUFF_ARMS)} brazos × {len(STUFF_LEVELS)} niveles de Stuff | "
+          f"{reps:,} PA/celda | {reps*len(STUFF_ARMS)*len(STUFF_LEVELS):,} PA total")
+    print("Setup: pitcher VEL70/CTL70/MOV70 (== CALIBRATED-BASELINE-v1 y Stuff")
+    print("independiente de VEL/CTL/MOV), batter MID, agente E1_POLICY 65/50/30, ")
+    print("disciplina producción (0.30/0.20/0.85, foul/contacto 0.45), fatiga 1.0.")
+    print("Moduladores de forma (NO calibración), identidad EXACTA en Stuff=70:")
+    for arm in STUFF_ARMS:
+        print(f"  {arm}: whiff_add, power_add = {_stuff_modifiers(arm, 10)} (por 10 Stuff)")
+    print("Coeficientes: k_wiff=0.064 (S1), k_qty=0.064 (S2, supresión), "
+          "S3 = mitad de cada uno. Contratos L1–L6 fijados ANTES de correr.")
+    print("=" * 150)
+
+    # Fotografía de superficie por brazo
+    for arm in STUFF_ARMS:
+        print()
+        print(f"-- BRAZO {arm} · fotografía de superficie --")
+        print(f"{'Stuff':>5} | {'K%':>6} {'BB%':>6} {'BIP%':>6} {'Reach%':>7} | "
+              f"{'CalledS/tk':>10} {'Whiff/Sw':>8} {'Foul/Cnt':>8} {'Cnt/Sw':>7} | "
+              f"{'Pit/PA':>6} {'p95':>4} {'max':>4} | {'Contact/Sw':>10} {'XBH/BIP':>8}")
+        print("-" * 150)
+        for stuff in STUFF_LEVELS:
+            o = cells[(arm, stuff)]
+            sw = max(1, o["swing_attempts"])
+            out = o["outcome"]
+            k = n
+            bb = out["BB"]
+            bipn = bip(o)
+            reach = bb + out["1B"] + out["2B"] + out["3B"] + out["HR"]
+            print(
+                f"{stuff:>5} | {pct(out['K'], k):>6.2f} {pct(bb, k):>6.2f} "
+                f"{pct(bipn, k):>6.2f} {pct(reach, k):>7.2f} | "
+                f"{called_s(o):>10.2f} {whiff_s(o):>8.2f} {foul_c(o):>8.2f} "
+                f"{pct(sw - o['whiffs'], sw):>7.2f} | "
+                f"{o['pitches'] / n:>6.2f} {o['p95']:>4} {o['max']:>4} | "
+                f"{contact_swing(o):>10.2f} {xbh_bip(o):>8.2f}"
+            )
+        print("-" * 150)
+
+    # Deltas por 10 Stuff (para comparar contra VEL/MOV en 003B-2 sin depender
+    # de extremos): (valor(95) − valor(45)) / 5 = pendiente por 10 Stuff.
+    print()
+    print("-- DELTAS POR 10 STUFF (pendiente 45→95 ÷ 5) --")
+    print(f"{'Brazo':>5} | {'Δ Cnt/Sw /10':>14} {'Δ XBH/BIP /10':>15}")
+    print("-" * 40)
+    for arm in STUFF_ARMS:
+        lo = cells[(arm, 45)]
+        hi = cells[(arm, 95)]
+        print(f"{arm:>5} | {(contact_swing(hi) - contact_swing(lo)) / 5:>14.2f} "
+              f"{(xbh_bip(hi) - xbh_bip(lo)) / 5:>15.2f}")
+    print("-" * 40)
+
+    # CONTRATOS L1–L6
+    print()
+    print("-- CONTRATOS (L1–L6, fijados antes) --")
+
+    for arm in STUFF_ARMS:
+        print(f"  -- Brazo {arm} --")
+
+        # L1 · IDENTITY: Stuff=70 reproduce CALIBRATED-BASELINE-v1 (MID/MID).
+        o70 = cells[(arm, 70)]
+        cs70 = contact_swing(o70)
+        xb70 = xbh_bip(o70)
+        l1_ok = abs(cs70 - 65.41) <= STUFF_L1_TOL_PP and abs(xb70 - 23.03) <= STUFF_L1_TOL_PP
+        print(f"  L1 IDENTITY (Stuff=70 ≈ baseline 65.41/23.03, tol ±{STUFF_L1_TOL_PP}pp): "
+              f"{'PASS' if l1_ok else 'FAIL'} (Cnt/Sw {cs70:.2f}, XBH/BIP {xb70:.2f})")
+
+        # L2 · MONOTONICITY: Stuff↑ nunca mejora la ofensiva en la dimensión del brazo.
+        cs_seq = [contact_swing(cells[(arm, s)]) for s in STUFF_LEVELS]
+        xb_seq = [xbh_bip(cells[(arm, s)]) for s in STUFF_LEVELS]
+        ws_seq = [whiff_s(cells[(arm, s)]) for s in STUFF_LEVELS]
+        if arm == "S1":
+            l2_ok = all(ws_seq[i] <= ws_seq[i + 1] + 0.05 for i in range(len(ws_seq) - 1))
+        elif arm == "S2":
+            l2_ok = all(xb_seq[i] >= xb_seq[i + 1] - 0.05 for i in range(len(xb_seq) - 1))
+        else:  # S3
+            l2_ok = all(ws_seq[i] <= ws_seq[i + 1] + 0.05 for i in range(len(ws_seq) - 1)) and \
+                    all(xb_seq[i] >= xb_seq[i + 1] - 0.05 for i in range(len(xb_seq) - 1))
+        print(f"  L2 MONOTONICITY (Stuff↑ no mejora la ofensiva del brazo): "
+              f"{'PASS' if l2_ok else 'FAIL'}")
+
+        # L3 · ORTHOGONALITY: brazo cambia UNA dimensión, la otra ~estable.
+        if arm == "S1":
+            l3_ok = (max(cs_seq) - min(cs_seq)) >= STUFF_L4_MIN_PP and \
+                    (max(xb_seq) - min(xb_seq)) <= STUFF_L3_SPAN_PP
+        elif arm == "S2":
+            l3_ok = (max(xb_seq) - min(xb_seq)) >= STUFF_L4_MIN_PP and \
+                    (max(cs_seq) - min(cs_seq)) <= STUFF_L3_SPAN_PP
+        else:  # S3 → ambas cambian
+            l3_ok = (max(cs_seq) - min(cs_seq)) >= STUFF_L4_MIN_PP and \
+                    (max(xb_seq) - min(xb_seq)) >= STUFF_L4_MIN_PP
+        print(f"  L3 ORTHOGONALITY (dimensión del brazo cambia, otra estable): "
+              f"{'PASS' if l3_ok else 'FAIL'} "
+              f"(span Cnt/Sw {max(cs_seq) - min(cs_seq):.2f}, "
+              f"span XBH/BIP {max(xb_seq) - min(xb_seq):.2f})")
+
+        # L4 · MATERIALITY: |Δ| 45→95 en la(s) dimensión(es) del brazo.
+        if arm in ("S1", "S3"):
+            l4_cs = abs(contact_swing(cells[(arm, 95)]) - contact_swing(cells[(arm, 45)]))
+        else:
+            l4_cs = 0.0
+        if arm in ("S2", "S3"):
+            l4_xb = abs(xbh_bip(cells[(arm, 95)]) - xbh_bip(cells[(arm, 45)]))
+        else:
+            l4_xb = 0.0
+        l4_ok = (l4_cs >= STUFF_L4_MIN_PP or arm == "S2") and \
+                (l4_xb >= STUFF_L4_MIN_PP or arm == "S1")
+        print(f"  L4 MATERIALITY (|Δ45→95| ≥ {STUFF_L4_MIN_PP}pp): "
+              f"{'PASS' if l4_ok else 'FAIL'} "
+              f"(Σ|ΔCnt/Sw| {l4_cs:.2f}, |ΔXBH/BIP| {l4_xb:.2f})")
+
+        # L5 · MECHANISM ISOLATION: verificado por construcción del harness
+        # (S1 solo whiff_add, S2 solo power_add, S3 descompone en ambos).
+        w5, p5 = _stuff_modifiers(arm, 10)  # por 10 Stuff (no 0 en 70)
+        l5_ok = (arm in ("S1", "S3") or abs(w5) < 1e-12) and \
+                (arm in ("S2", "S3") or abs(p5) < 1e-12)
+        print(f"  L5 MECHANISM ISOLATION (por construcción + reporte de "
+              f"moduladores whiff_add={w5:+.3f}, power_add={p5:+.3f}): "
+              f"{'PASS' if l5_ok else 'FAIL'}")
+
+        # L6 · STABILITY: sin clamp rotos, sin CAP, p95 ≤ 8, |Δ consecutivo| ≤ 1pp.
+        caps = sum(cells[(arm, s)]["outcome"]["CAP"] for s in STUFF_LEVELS)
+        p95s = [cells[(arm, s)]["p95"] for s in STUFF_LEVELS]
+        l6_cs = max(abs(cs_seq[i + 1] - cs_seq[i]) for i in range(len(cs_seq) - 1))
+        l6_xb = max(abs(xb_seq[i + 1] - xb_seq[i]) for i in range(len(xb_seq) - 1))
+        l6_ok = caps == 0 and max(p95s) <= STUFF_L6_P95_MAX and \
+                l6_cs <= STUFF_L6_STEP_PP and l6_xb <= STUFF_L6_STEP_PP
+        print(f"  L6 STABILITY (no CAP, p95≤{STUFF_L6_P95_MAX}, "
+              f"|Δ consecutivo|≤{STUFF_L6_STEP_PP}pp): "
+              f"{'PASS' if l6_ok else 'FAIL'} "
+              f"(CAP={caps}, p95={max(p95s)}, max|ΔCnt/Sw|={l6_cs:.2f}, "
+              f"max|ΔXBH/BIP|={l6_xb:.2f})")
+
+        l_all = l1_ok and l2_ok and l3_ok and l4_ok and l5_ok and l6_ok
+        print(f"  -> Brazo {arm}: L1–L6 {'PASS' if l_all else 'FAIL'}")
+
+    print("-" * 150)
+    print("003B-1 NO elige candidato: documenta la FORMA de cada brazo. La")
+    print("decisión conceptual llega en 003B-2 (Stuff vs VEL vs MOV sensitivity).")
+
+
+# ---------------------------------------------------------------------------
 # 002C-B · TAKE calibration · baseline sweep (intercept de strike_chance)
 # ---------------------------------------------------------------------------
 # Mantiene coefs CTL/VIS actuales (0.003 / -0.002 con (attr-50)); solo varía
@@ -4263,7 +4644,7 @@ def run_pa_level(reps: int) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Monte Carlo de fatiga (GAMEPLAY-ENGINE-001B)")
-    parser.add_argument("--mode", choices=["pa", "pitch", "discipline", "cv", "take", "foul", "bc", "d2", "cv2", "f5", "c1", "c3", "c4", "c5", "d1", "d3", "d4", "e1", "e2", "e3", "e3b", "e5", "e003a", "e003a-tail"], default="pa",
+    parser.add_argument("--mode", choices=["pa", "pitch", "discipline", "cv", "take", "foul", "bc", "d2", "cv2", "f5", "c1", "c3", "c4", "c5", "d1", "d3", "d4", "e1", "e2", "e3", "e3b", "e5", "e003a", "e003a-tail", "e003b"], default="pa",
                         help="pa = PA completo (001B-4); pitch = pitch suelto (001B-3); "
                              "discipline = diagnóstico de count/disciplina sin fatiga (002A); "
                              "cv = factorial Control×Vision (002B); "
@@ -4285,6 +4666,7 @@ def main() -> None:
 "e5 = producción acceptance: calculate_play_outcome() sin knobs, grid 3×3 CTL×VIS, contratos JA–JF (002E-5); "
                               "e003a = calibrated engine baseline: 3×3 pitcher×batter, producción pura, contratos K1–K6 (003A); "
                               "e003a-tail = K5-R: validación de cola de PA (STRONG×WEAK, 200k, seeds nuevas) (003A-TAIL-1); "
+                              "e003b = stuff semantic candidates: 3 brazos × 5 niveles (45/55/70/85/95), LAB, contratos L1–L6 (003B-1); "
                               "d3 = comparación de estrategias CPU workload-based por matchup (001D-3); "
                              "d4 = barrido ampliado + coste marginal de esperar (001D-4A/B)")
     parser.add_argument("--reps", type=int, default=REPS, help="réplicas por escenario")
@@ -4320,6 +4702,8 @@ def main() -> None:
         run_calibrated_baseline_e003a(args.reps)
     elif args.mode == "e003a-tail":
         run_tail_stability_k5r(args.reps)
+    elif args.mode == "e003b":
+        run_stuff_semantic_candidates_e003b(args.reps)
     elif args.mode == "f5":
         run_fatigue_curve_comparison(args.reps)
     elif args.mode == "c1":

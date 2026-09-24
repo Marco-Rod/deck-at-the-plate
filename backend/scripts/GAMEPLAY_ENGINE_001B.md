@@ -69,6 +69,9 @@ GAMEPLAY-ENGINE-002 — DISCIPLINE / COUNT MODEL
 GAMEPLAY-ENGINE-003A — CALIBRATED ENGINE BASELINE
 [CLOSED — PASS with superseded measurement contract · CALIBRATED-BASELINE-v1 congelado]
 
+GAMEPLAY-ENGINE-003B — STUFF
+[IN PROGRESS — 003B-1 PASS (S1/S2/S3 L1–L6); pendiente 003B-2 sensitivity]
+
 Finding:
 GAMEPLAY-ENGINE-002-CLAMP-001
   TAKE strike chance floor (antes 0.25) causa saturación para
@@ -1781,3 +1784,123 @@ Report:
   `XBH/BIP` permitirán distinguir "Stuff reduce contacto" de "Stuff cambia
   calidad del contacto" sin mezclar. Referencia: Contact/Swing en MID/MID =
   65.4%; XBH/BIP en MID/MID = 23.0%.
+
+## GAMEPLAY-ENGINE-003B-1 · Stuff Semantic Candidates
+
+```
+GAMEPLAY-ENGINE-003B-1
+Stuff Semantic Candidates
+
+Objective:
+  Determine qué dimensión aporta Stuff que no esté ya representada por
+  Velocity, Movement o Control. Comparar la FORMA de los efectos, no
+  calibrar coeﬁcientes.
+
+Setup congelado:
+  Pitcher base    Vel=70 / Ctl=70 / Mov=70
+  Stuff levels    45 / 55 / 70 / 85 / 95
+  Batter          Con=70 / Pow=70 / Vis=70
+  Fatigue         factor = 1.0
+  Discipline      producción (.30 / .20 / .85 / .45)
+  Agent           65/50/30 · LAB ONLY
+  50,000 PA / level · shared seeds
+
+Arms:
+  S1 — WHIFF          Stuff sólo modiﬁca la probabilidad de whiff.
+  S2 — CONTACT QUALITY  Stuff sólo modiﬁca power_score tras el contacto.
+  S3 — HYBRID         Stuff modiﬁca ambas con menor intensidad.
+
+Contracts (frozen before run):
+  L1–L6
+```
+
+- **Mapa actual del engine** (`calculator.py:_calculate_contact_outcome`):
+  la FASE 2/3 de un swing incluye `whiff_base = 24.5 + (vel·0.25 + mov·0.25)
+  − con·0.35` (VEL y MOV aportan presión de whiff) y, tras el foul, la FASE
+  BABIP construye `power_score = (pwr−50)·0.4 + random.uniform(0,100)` + bono
+  de adivinación. Por tanto **hoy VEL/MOV → whiff; CTL → TAKE/called strike; y
+  el pitcher NO tiene ninguna dimensión que suprima la calidad de contacto del
+  bateador (power_score)**. S2 explora exactamente ese hueco.
+- **Integralmente LAB en el harness (`--mode e003b`)**: NO se toca
+  `calculator.py` ni `PitcherAttrs`. Los moduladores se aplican en
+  `_simulate_pa_diag` vía registros de pivote (stuff → whiff_base / power_score)
+  implementados dentro del harness. El engine productivo sigue en
+  `CALIBRATED-BASELINE-v1`.
+- **Identidad EXACTA en Stuff=70**: `stuff_delta = stuff − 70`; todo modulador
+  matemático vale cero en 70 (`whiff_modifier = delta·k_wiff`,
+  `quality_modifier = delta·k_qty`, con `k_w = k_q = 0` efectivo en delta=0).
+  Con shared seeds, Stuff=70 de cada brazo debe reproducir
+  `CALIBRATED-BASELINE-v1` hasta ruido MC residual.
+- **Coeﬁcientes iniciales deliberadamente pequeños** (forma, no calibración):
+  `S1 k_wiff`, `S2 k_qty`, `S3` mitad de cada uno. Suficientes para un efecto
+  material visible en la forma, sin pretender el valor ﬁnal. No aﬁnar aquí.
+- **Métricas avanzadas por nivel** (misma fotografía que 003A + derivadas):
+  K% · BB% · BIP% · Reach%; batted-ball OUT/1B/2B/3B/HR sobre BIP; CalledS/TAKE
+  · Whiff/Swing · Foul/Contact; Pit/PA · P(≥4) · P(≥6) · P(full) · p95 · max;
+  **Contact/Swing** y **XBH/BIP**; y las pendientes **Δ Contact/Swing por 10
+  Stuff** y **Δ XBH/BIP por 10 Stuff** para comparar Stuff vs VEL/MOV sin
+  depender solo de los extremos 45/95.
+
+- **Contratos L1–L6 fijados ANTES de correr**:
+  - **L1 · IDENTITY**: Stuff=70 reproduce CALIBRATED-BASELINE-v1:
+    Contact/Swing ≈ 65.4% y XBH/BIP ≈ 23.0% (tolerancia de ruido MC ≤ 0.3pp).
+  - **L2 · MONOTONICITY**: Stuff↑ nunca mejora la ofensiva del bateador en la
+    dimensión que cada candidato pretende afectar: S1 → Whiff/Swing no baja
+    (strike/whiff no desciende); S2 → XBH/BIP no sube (calidad de contacto no
+    empeora para el lanzador); S3 → ambas por rama. (Nota de signo: en S2/S3
+    la `quality` del lanzador se interpreta como supresión — Stuff alto reduce
+    XBH/BIP; si se observara lo contrario se REVIERTE el signo documentado, no
+    se re-etiqueta el contrato.)
+  - **L3 · ORTHOGONALITY**: S1 → Contact/Swing cambia mientras XBH/BIP queda
+    ~estable (span ≤ 0.5pp); S2 → XBH/BIP cambia mientras Contact/Swing queda
+    ~estable (span ≤ 0.5pp); S3 → ambas cambian.
+  - **L4 · MATERIALITY**: Stuff45→95 produce un efecto observable:
+    |Δ Contact/Swing| ≥ 1.5pp en S1/S3 y |Δ XBH/BIP| ≥ 1.5pp en S2/S3 (no
+    cosmético).
+  - **L5 · MECHANISM ISOLATION**: S1 no altera power_score; S2 no altera
+    whiff_chance; S3 se descompone en ambos efectos (la suma de S1+S2
+    escalados): veriﬁcado por construcción del harness + reporte de
+    moduladores por brazo.
+  - **L6 · STABILITY**: sin probabilidades inválidas (clamps intactos), sin CAP,
+    colas de PA sanas (p95 ≤ 8 en toda celda), sin discontinuidades
+    (|Δ métrica entre niveles consecutivos| ≤ 1.0pp).
+- **No se elige candidato aún**: 003B-1 compara formas; la decisión conceptual
+  llega en 003B-2 (Stuff vs VEL vs MOV sensitivity), el bloque decisivo para
+  saber si S1 es un segundo Movement o S2/S3 aportan una dimensión nueva.
+  Pipeline posterior: 003B-2 sensitivity → 003B-3 coefﬁcient sweep → 003B-4
+  matchup robustness → 003B-5 fatigue interaction → 003B-6 production
+  acceptance.
+- **Veredicto 003B-1**: **L1–L6 PASS en los tres brazos** (evidencia
+  `scripts/_e003b1_full_run.txt`, 750k PA = 3 brazos × 5 niveles × 50k).
+  Seed compartida con 003A (750M+rep) → identidad bit-for-bit en Stuff=70.
+  - **L1 IDENTITY** · PASS en S1/S2/S3: Stuff=70 reproduce exactamente
+    Contact/Swing 65.41 y XBH/BIP 23.03 (cero drift).
+  - **L2 MONOTONICITY** · PASS en S1/S2/S3: Stuff↑ empeora la dimensión del
+    brazo (S1 → Whiff/Swing↑; S2 → XBH/BIP↓; S3 → ambas).
+  - **L3 ORTHOGONALITY** · PASS: S1 mueve solo Contact/Swing (span 3.14pp,
+    XBH/BIP estable en 0.11pp); S2 mueve solo XBH/BIP (span 3.04pp,
+    Contact/Swing en 0.00pp); S3 mueve ambas (spans 1.54/1.59pp).
+  - **L4 MATERIALITY** · PASS: |Δ45→95| ≥ 1.5pp en las dimensiones objetivo
+    (S1 Contact/Swing 3.14 · S2 XBH/BIP 3.04 · S3 1.54/1.59).
+  - **L5 MECHANISM ISOLATION** · PASS por construcción: S1 whiff_add=+0.640,
+    power_add=0.000; S2 whiff_add=0.000, power_add=-0.640; S3 = +0.320/-0.320
+    (por 10 Stuff). No se toca `calculator.py`.
+  - **L6 STABILITY** · PASS: sin CAP, p95=6 en toda celda, max 11–12,
+    |Δ consecutivo| ≤ 0.98pp.
+  - **Pendientes Δ/10 Stuff** (para comparar contra VEL/MOV en 003B-2):
+    | Brazo | Δ Contact/Swing /10 | Δ XBH/BIP /10 |
+    |-------|--------------------:|---------------:|
+    | S1    | −0.63 | −0.00 |
+    | S2    | +0.00 | −0.61 |
+    | S3    | −0.31 | −0.32 |
+  - **Conclusión de FORMA**: S1 se comporta como un segundo vector whiff
+    (idéntico al rol de MOV hoy), S2 es la única que introduce la dimensión
+    hoy ausente (supresión de la calidad de contacto → XBH/BIP sin tocar
+    Contact/Swing), S3 es la suma escalada de ambas. Suficiente para abrir
+    003B-2 (Stuff vs VEL vs MOV sensitivity) sin elegir candidato aún.
+- **No se elige candidato aún**: 003B-1 compara formas; la decisión conceptual
+  llega en 003B-2 (Stuff vs VEL vs MOV sensitivity), el bloque decisivo para
+  saber si S1 es un segundo Movement o S2/S3 aportan una dimensión nueva.
+  Pipeline posterior: 003B-2 sensitivity → 003B-3 coefﬁcient sweep → 003B-4
+  matchup robustness → 003B-5 fatigue interaction → 003B-6 production
+  acceptance.
