@@ -70,7 +70,7 @@ GAMEPLAY-ENGINE-003A — CALIBRATED ENGINE BASELINE
 [CLOSED — PASS with superseded measurement contract · CALIBRATED-BASELINE-v1 congelado]
 
 GAMEPLAY-ENGINE-003B — STUFF
-[IN PROGRESS — 003B-1 PASS (S1/S2/S3 L1–L6); pendiente 003B-2 sensitivity]
+[IN PROGRESS — 003B-1 CLOSE (S1/S2/S3 L1–L6 PASS); 003B-2 M1–M6 PASS, S2 promote, Stuff=Contact-Quality; pendiente 003B-3 coefficient sweep]
 
 Finding:
 GAMEPLAY-ENGINE-002-CLAMP-001
@@ -1904,3 +1904,157 @@ Contracts (frozen before run):
   Pipeline posterior: 003B-2 sensitivity → 003B-3 coefﬁcient sweep → 003B-4
   matchup robustness → 003B-5 fatigue interaction → 003B-6 production
   acceptance.
+
+## GAMEPLAY-ENGINE-003B-2 · Stuff vs VEL vs MOV sensitivity
+
+```
+GAMEPLAY-ENGINE-003B-2
+Stuff vs VEL vs MOV sensitivity
+
+Objective:
+  ¿Qué tan ortogonal es cada semántica de Stuff respecto a Velocity y Movement
+  dentro del engine actual? S1 parece redundante con el vector de whiff
+  existente, S2 introduce una dimensión ausente y S3 combina ambas — pero NO
+  se elige S2 hasta cuantificar esa redundancia aparente.
+
+Setup congelado (mismo punto MID que 003B-1):
+  Pitcher baseline    VEL=70 / CTL=70 / MOV=70
+  Batter              CON=70 / POW=70 / VIS=70
+  Fatigue             factor = 1.0
+  Discipline          PROD (.30 / .20 / .85 / .45)
+  Agent               65/50/30 · LAB ONLY
+  CTL=70 siempre.
+
+Sweeps independientes (25 puntos):
+  V-SWEEP:  VEL = 45/55/70/85/95, MOV=70,  Stuff neutral → producción pura
+  M-SWEEP:  MOV = 45/55/70/85/95, VEL=70,  Stuff neutral → producción pura
+  S1-SWEEP: Stuff = 45/55/70/85/95 (arm S1, moduladores f0584aa intactos)
+  S2-SWEEP: Stuff = 45/55/70/85/95 (arm S2)
+  S3-SWEEP: Stuff = 45/55/70/85/95 (arm S3)
+
+  50,000 PA / punto × 25 puntos = 1.25M PA · shared seeds (750M+rep)
+```
+
+- **Preservación de S1/S2/S3**: los tres brazos se usan EXACTAMENTE como en
+  `f0584aa` (`_stuff_modifiers` sin cambios) para que la comparación contra
+  VEL/MOV sea limpia: S1 `whiff_add=+0.640/10, power_add=0`; S2
+  `whiff_add=0, power_add=-0.640/10`; S3 `+0.320/-0.320/10`.
+- **V/M sweeps = producción pura** (`use_public_api=True`): VEL y MOV viven en
+  `PitcherAttrs`, así que se varían los atributos y la jugada se resuelve con
+  `calculate_play_outcome()` sin knobs — CERO cambios de producción, igual que
+  003A/003B-1.
+- **Vector de sensibilidad por atributo** (Δ/10 = pendiente 45→95 ÷ 5):
+  | atributo | Δ Contact/Swing /10 | Δ XBH/BIP /10 |
+  |----------|--------------------:|---------------:|
+  | VEL      | ? | ? |
+  | MOV      | ? | ? |
+  | S1       | ? | ? |
+  | S2       | ? | ? |
+  | S3       | ? | ? |
+  Hace visible la geometría del problema. Hipótesis (NO conclusión) basada en
+  003B-1 y en que el engine enruta VEL/MOV → whiff_base:
+  VEL→(−,0) · MOV→(−,0) · S1→(−,0) · S2→(0,−) · S3→(−,−).
+- **Similitud de vectores (diAGNÓSTICO, NO contrato PASS/FAIL)**: cosine
+  similarity sobre el par (ΔContact/Swing, ΔXBH/BIP) normalizado,
+  `cos(S1,MOV)`, `cos(S1,VEL)`, `cos(S2,MOV)`, `cos(S2,VEL)` (y de S3 contra
+  la combinación S1+S2 esperada). Si `cos(S1,MOV) ≈ 1.0` y `cos(S2,MOV) ≈ 0.0`
+  → evidencia cuantitativa fuerte de que S1 duplica una dimensión existente y
+  S2 añade una nueva. NO se elige por magnitud (eso es 003B-3).
+- **Contratos M1–M6 fijados ANTES de correr**:
+  - **M1 · IDENTITY**: los cinco sweeps en 70 reproducen exactamente
+    CALIBRATED-BASELINE-v1 con shared seeds: Contact/Swing ≈ 65.41 y
+    XBH/BIP ≈ 23.03 (tol ruido MC ≤ 0.3pp; con seeds compartidas se espera
+    ≈0.00 de drift).
+  - **M2 · EXISTING VECTORS**: en V-SWEEP y M-SWEEP, VEL↑ y MOV↑ reducen
+    Contact/Swing de forma MONOTÓNICA (paso a paso, tol ≤ 0.2pp), y su efecto
+    directo sobre XBH/BIP es aproximadamente nulo (span ≤ 0.5pp).
+  - **M3 · S1 REDUNDANCY**: S1-SWEEP comparte esencialmente el mismo vector
+    observable que VEL/MOV: Contact/Swing ↓ monótono (tol ≤ 0.2pp) y
+    XBH/BIP ≈ estable (span ≤ 0.5pp).
+  - **M4 · S2 ORTHOGONALITY**: S2-SWEEP: Contact/Swing ≈ estable
+    (span ≤ 0.5pp) y XBH/BIP ↓ monótono (tol ≤ 0.2pp). Su vector debe ser
+    materialmente distinto de VEL y MOV (diagnóstico cos ≈ 0 vs VEL/MOV).
+  - **M5 · S3 DECOMPOSITION**: S3-SWEEP permanece como combinación de ambos:
+    Contact/Swing ↓ Y XBH/BIP ↓ (ambos monótonos, tol ≤ 0.2pp), sin crear una
+    tercera conducta inesperada ni discontinuidades.
+  - **M6 · STABILITY** (universal a los 25 puntos): sin probabilidades
+    inválidas (Whiff∈[5,65] clamps intactos; todas las % finitas en [0,100]),
+    sin CAP en ninguna celda, colas sanas (p95 ≤ 8 en todas las celdas). El
+    límite de continuidad ≤1.0pp de 003B-1 L6 era específico del modulador de
+    Stuff (k pequeño); NO se transfiere a VEL/MOV, cuya pendiente de whiff
+    nativa es +0.25/pp (la suavidad allí la cubre M2 monótono).
+- **Decisión semántica objetivo (si M1–M6 lo confirman)**: cerrar
+  GAMEPLAY-ENGINE-003B como bloque semántico con:
+  - **S1 → reject** — redundante con la dimensión whiff existente.
+  - **S3 → reserve/reject para v1** — duplica parcialmente la dimensión whiff.
+  - **S2 → promote como candidato semántico** — Stuff = contact-quality
+    suppression (dimensión hoy ausente en el engine).
+  Y el duelo quedaría conceptualmente: Velocity+Movement → capacidad de
+  generar whiff · Control → dominio de zona/called strikes · Stuff → calidad
+  del contacto permitido. Después 003B-3 se dedica SOLO a calibrar cuánto debe
+  mover Stuff el power_score, sin re-discutir qué significa.
+- **Veredicto 003B-2**: [PENDIENTE — corrida 25 puntos × 50k tras `--mode
+  e003b2`].
+
+### RESULTADOS · 003B-2 (evidencia `scripts/_e003b2_full_run.txt`, 1.25M PA)
+
+- **M1 · IDENTITY · PASS**: los cinco sweeps en 70 reproducen exactamente
+  CALIBRATED-BASELINE-v1 (Contact/Swing 65.41 / XBH/BIP 23.03, también K%
+  28.07 / BB% 9.97), bit-por-bit vía seeds compartidas. Cero drift en el
+  harness.
+- **M2 · EXISTING VECTORS · PASS**: en V-SWEEP y M-SWEEP, VEL↑ y MOV↓ reducen
+  Contact/Swing monótonamente (65.41@70 → 71.67@45 → 59.47@95 en ambos) con
+  XBH/BIP ≈ plano (span 0.15pp). VEL y MOV producen curvas PRÁCTICAMENTE
+  IDÉNTICAS: en este engine ambos entran a `whiff_base` con +0.25/pp
+  (Δ/10 VEL = −2.441 = Δ/10 MOV), coherente con 003A cuando se compararon los
+  perfiles.
+- **M3 · S1 REDUNDANCY · PASS**: S1 reproduce la MISMA forma que VEL/MOV con
+  pendiente menor: Contact/Swing↓ monótono (67.02@45 → 63.88@95), XBH/BIP plano
+  (span 0.11pp). Peak K% va 28.07→29.15; no crea conducta nueva.
+- **M4 · S2 ORTHOGONALITY · PASS**: Contact/Swing IDÉNTICO a las 5 niveles
+  (65.41, span exacto 0.00 — S2 nunca toca whiff_base), XBH/BIP↓ monótono
+  (24.64@45 → 21.60@95). Su vector es ortogonal a VEL y MOV: cos(S2,MOV) =
+  cos(S2,VEL) = −0.008.
+- **M5 · S3 DECOMPOSITION · PASS**: Contact/Swing↓ Y XBH/BIP↓ ambas
+  monótonas (66.21/23.79@45 → 64.67/22.20@95); S3 se comporta como la suma
+  escalada S1+S2: cos(S3,S1)=0.698, cos(S3,S2)=0.718 (dos aristas del mismo
+  plano a ~45°).
+- **M6 · STABILITY · PASS**: sin CAP, p95=6 en las 25 celdas, max 11–12, sin
+  probabilidades fuera de rango; Pit/PA 3.59–3.70 sano.
+- **Vector de sensibilidad Δ/10 (matriz de geometría)**:
+  | atributo | Δ Contact/Swing /10 | Δ XBH/BIP /10 | rol |
+  |----------|--------------------:|---------------:|-----|
+  | VEL      | −2.441 | +0.020 | whiff (producción) |
+  | MOV      | −2.441 | +0.020 | whiff (producción) |
+  | S1       | −0.628 | −0.002 | segundo whiff (redundante) |
+  | S2       | +0.000 | −0.609 | calidad de contacto (NUEVA) |
+  | S3       | −0.308 | −0.318 | suma parcial de ambas |
+- **Cosines (diagnóstico)**: cos(S1,MOV)=1.000 · cos(S1,VEL)=1.000 ·
+  cos(S2,MOV)=−0.008 · cos(S2,VEL)=−0.008 → S1 está COMPLETAMENTE colineal con
+  la dimensión whiff existente; S2 es ortogonal a ella.
+
+### 003B-2 SEMANTIC DECISION
+
+- **S1 → REJECT.** cos=1.000 contra VEL/MOV lo demuestra cuantitativamente:
+  S1 es un segundo Movement con pendiente 0.628/10 (≈1/4 de la producción).
+  Añadir Stuff así solo duplicaría el rol de VEL/MOV y recompraría el mismo
+  efecto a coste de una dimensión nueva sin ganancia semántica. Fuera de la
+  mesa para v1.
+- **S3 → RESERVE / REJECT para v1.** Es exactamente la suma parcial escalada
+  de S1+S2 (cos 0.70/0.72), así que no introduce dimensión nueva: mezcla la
+  redundancia de S1 con el efecto real de S2. Se reserva como textura
+  alternativa si algún día el engine necesita "Stuff dominante doble-efecto",
+  pero NO para v1.
+- **S2 → PROMOTE como semántica de Stuff = contact-quality suppression.**
+  Única opción con vector ortogonal a VEL/MOV/CTL: mueve lo que el engine hoy
+  no puede mover (cantidad de XBH por contacto) sin tocar whiff ni zona. La
+  dimensión deja de ser un espacio vacío.
+- **Modelo conceptual resultante del duelo** (FACT-003): Velocity+Movement →
+  capacidad de generar whiff · Control → dominio de zona/called strikes ·
+  Stuff → **calidad del contacto permitido** (supresión de XBH). No calibrado
+  aún: la magnitud de S2 para producir ~un bin de diferencia en XBH/BIP va al
+  slot 003B-3 (coefficient sweep SOLO de S2 sobre `power_score`), donde se fija
+  cuánto Stuff mueve el power_score sin re-discutir qué significa.
+- **PENDIENTE para 003B-3**: harness `--mode e003b3` con sweep de k sobre S2
+  (0.02 → 0.16), contratos de magnitud contra objetivo de XBH/BIP por bin, y
+  elección del k v1. Hasta que 003B-3 cierre, NO se toca `calculator.py`.

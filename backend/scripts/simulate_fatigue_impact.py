@@ -2865,6 +2865,286 @@ def run_stuff_semantic_candidates_e003b(reps: int) -> None:
 
 
 # ---------------------------------------------------------------------------
+# 003B-2 · Stuff vs VEL vs MOV sensitivity (harness LAB, identidad en 70)
+# ---------------------------------------------------------------------------
+# 5 sweeps independientes × 5 niveles = 25 puntos × 50k PA = 1.25M PA.
+#   V-SWEEP: VEL 45/55/70/85/95, MOV=70, Stuff neutral → producción pura.
+#   M-SWEEP: MOV 45/55/70/85/95, VEL=70, Stuff neutral → producción pura.
+#   S1/S2/S3-SWEEP: Stuff 45/55/70/85/95, arm S1/S2/S3 (moduladores f0584aa
+#   intactos), VEL=MOV=CTL=70.
+# Contratos M1–M6 fijados ANTES de correr. Seeds compartidas (750M+rep) → en
+# todos los sweeps el nivel 70 reproduce CALIBRATED-BASELINE-v1 bit-por-bit.
+M_MONO_TOL_PP = 0.2      # M2–M5: tolerancia de no-monotonía entre niveles
+M_SPAN_TOL_PP = 0.5      # M2–M4: span de la dimensión no afectada
+M1_TOL_PP = 0.3          # M1: drift de identity en 70
+M6_P95_MAX = 8           # M6: cola de PA
+
+SWEEP_003B2 = {
+    "VEL": {"attr": "velocidad", "arm": None,
+            "fix": {"control": 70, "movimiento": 70}, "levels": [45, 55, 70, 85, 95]},
+    "MOV": {"attr": "movimiento", "arm": None,
+            "fix": {"velocidad": 70, "control": 70}, "levels": [45, 55, 70, 85, 95]},
+    "S1":  {"attr": None, "arm": "S1",
+            "fix": {"velocidad": 70, "control": 70, "movimiento": 70},
+            "levels": [45, 55, 70, 85, 95]},
+    "S2":  {"attr": None, "arm": "S2",
+            "fix": {"velocidad": 70, "control": 70, "movimiento": 70},
+            "levels": [45, 55, 70, 85, 95]},
+    "S3":  {"attr": None, "arm": "S3",
+            "fix": {"velocidad": 70, "control": 70, "movimiento": 70},
+            "levels": [45, 55, 70, 85, 95]},
+}
+SWEEP_ORDER_003B2 = ("VEL", "MOV", "S1", "S2", "S3")
+
+
+def _sweep_base_attrs(sweep: str, level: int) -> dict:
+    """PitcherAttrs para un punto del sweep (attr variable fija incluye CTL=70)."""
+    cfg = SWEEP_003B2[sweep]
+    attrs = dict(cfg["fix"])
+    if cfg["attr"] is not None:
+        attrs[cfg["attr"]] = level
+    return attrs
+
+
+def _cosine(u: tuple, v: tuple) -> float:
+    """Cosine similarity entre dos vectores 2D (float provisto por __import__)."""
+    import math as _m
+    nu = _m.hypot(u[0], u[1])
+    nv = _m.hypot(v[0], v[1])
+    if nu == 0 or nv == 0:
+        return 0.0
+    return (u[0] * v[0] + u[1] * v[1]) / (nu * nv)
+
+
+def run_stuff_vs_vel_mov_sensitivity_e003b2(reps: int) -> None:
+    """003B-2 · 5 sweeps × 5 niveles, contratos M1–M6 + geometría de vectores."""
+    n = reps
+    batter = BATTER_PROFILES_003A["MID"]
+    cells = {}
+    for sweep in SWEEP_ORDER_003B2:
+        for level in SWEEP_003B2[sweep]["levels"]:
+            agg = {k: 0 for k in ("pitches", "reached_2strikes", "reached_3balls",
+                                  "reached_full", "take_attempts", "balls_on_take",
+                                  "called_strikes_on_take", "swing_attempts",
+                                  "whiffs", "fouls", "bips", "depth4", "depth6")}
+            agg["outcome"] = Counter()
+            agg["lengths"] = []
+            arm = SWEEP_003B2[sweep]["arm"]
+            pitcher = _sweep_base_attrs(sweep, level)
+            for rep in range(reps):
+                seed = int(DISCIPLINE_WORKLOAD * 1000) * 10**6 + rep  # seeds compartidas
+                d = _simulate_pa_diag(E1_POLICY, seed,
+                                      batter_attrs=batter,
+                                      pitcher_attrs=pitcher,
+                                      use_public_api=(arm is None),
+                                      stuff_level=level if arm else None,
+                                      stuff_arm=arm)
+                for k in ("pitches", "reached_3balls", "reached_full",
+                          "take_attempts", "balls_on_take",
+                          "called_strikes_on_take", "swing_attempts", "whiffs",
+                          "fouls", "bips"):
+                    agg[k] += d[k]
+                agg["outcome"][d["outcome"]] += 1
+                agg["lengths"].append(d["pitches"])
+                if d["pitches"] >= 4:
+                    agg["depth4"] += 1
+                if d["pitches"] >= 6:
+                    agg["depth6"] += 1
+            lengths = sorted(agg["lengths"])
+            agg["p95"] = lengths[int(len(lengths) * 0.95) - 1]
+            agg["max"] = lengths[-1]
+            cells[(sweep, level)] = agg
+
+    def pct(x, k):
+        return x / k * 100 if k else 0.0
+
+    def called_s(o):
+        return pct(o["called_strikes_on_take"], max(1, o["take_attempts"]))
+
+    def whiff_s(o):
+        return pct(o["whiffs"], max(1, o["swing_attempts"]))
+
+    def foul_c(o):
+        return pct(o["fouls"], max(1, o["fouls"] + o["bips"]))
+
+    def contact_swing(o):
+        sw = max(1, o["swing_attempts"])
+        return pct(sw - o["whiffs"], sw)
+
+    def bip(o):
+        return o["outcome"]["OUT"] + o["outcome"]["1B"] + o["outcome"]["2B"] + \
+               o["outcome"]["3B"] + o["outcome"]["HR"]
+
+    def xbh_bip(o):
+        return pct(o["outcome"]["2B"] + o["outcome"]["3B"] + o["outcome"]["HR"],
+                   max(1, bip(o)))
+
+    print("=" * 150)
+    print("GAMEPLAY-ENGINE-003B-2 · STUFF vs VEL vs MOV SENSITIVITY")
+    print(f"5 sweeps × 5 niveles = 25 puntos | {reps:,} PA/punto | "
+          f"{reps*25:,} PA total | seeds compartidas (750M+rep)")
+    print("V/M sweeps = producción pura (calculate_play_outcome, sin knobs); "
+          "S1/S2/S3 = moduladores f0584aa intactos. CTL=70 siempre.")
+    print("Contratos M1–M6 fijados ANTES de correr. La geometría (Δ/10 + cos) "
+          "es diagnóstico; NO se elige por magnitud.")
+    print("=" * 150)
+
+    # Fotografía por sweep (5 filas: niveles del atributo)
+    for sweep in SWEEP_ORDER_003B2:
+        print()
+        print(f"-- SWEEP {sweep} · {SWEEP_003B2[sweep]['attr'] or SWEEP_003B2[sweep]['arm']} --")
+        print(f"{'Nivel':>5} | {'K%':>6} {'BB%':>6} {'BIP%':>6} {'Reach%':>7} | "
+              f"{'CalledS/tk':>10} {'Whiff/Sw':>8} {'Foul/Cnt':>8} {'Cnt/Sw':>7} | "
+              f"{'Pit/PA':>6} {'p95':>4} {'max':>4} | {'Contact/Sw':>10} {'XBH/BIP':>8}")
+        print("-" * 150)
+        for level in SWEEP_003B2[sweep]["levels"]:
+            o = cells[(sweep, level)]
+            sw = max(1, o["swing_attempts"])
+            out = o["outcome"]
+            bb = out["BB"]
+            reach = bb + out["1B"] + out["2B"] + out["3B"] + out["HR"]
+            print(
+                f"{level:>5} | {pct(out['K'], n):>6.2f} {pct(bb, n):>6.2f} "
+                f"{pct(bip(o), n):>6.2f} {pct(reach, n):>7.2f} | "
+                f"{called_s(o):>10.2f} {whiff_s(o):>8.2f} {foul_c(o):>8.2f} "
+                f"{pct(sw - o['whiffs'], sw):>7.2f} | "
+                f"{o['pitches'] / n:>6.2f} {o['p95']:>4} {o['max']:>4} | "
+                f"{contact_swing(o):>10.2f} {xbh_bip(o):>8.2f}"
+            )
+        print("-" * 150)
+
+    # Vector de sensibilidad por atributo: Δ/10 = pendiente 45→95 ÷ 5.
+    def delta10(sweep, metric_fn):
+        lo = metric_fn(cells[(sweep, 45)])
+        hi = metric_fn(cells[(sweep, 95)])
+        return (hi - lo) / 5.0
+
+    sens = {}
+    for sweep in SWEEP_ORDER_003B2:
+        sens[sweep] = (delta10(sweep, contact_swing), delta10(sweep, xbh_bip))
+
+    print()
+    print("-- VECTOR DE SENSIBILIDAD POR ATRIBUTO (Δ/10 = pendiente 45→95 ÷ 5) --")
+    print(f"{'Atributo':>9} | {'Δ Contact/Swing /10':>18} {'Δ XBH/BIP /10':>14}")
+    print("-" * 50)
+    for sweep in SWEEP_ORDER_003B2:
+        print(f"{sweep:>9} | {sens[sweep][0]:>18.3f} {sens[sweep][1]:>14.3f}")
+    print("-" * 50)
+
+    # Cosine similarity (diAGNÓSTICO, no contrato).
+    print()
+    print("-- COSINE SIMILARITY (diagnóstico, NO contrato PASS/FAIL) --")
+    cos_table = [
+        ("S1 vs MOV", sens["S1"], sens["MOV"]),
+        ("S1 vs VEL", sens["S1"], sens["VEL"]),
+        ("S2 vs MOV", sens["S2"], sens["MOV"]),
+        ("S2 vs VEL", sens["S2"], sens["VEL"]),
+        ("S3 vs S1",  sens["S3"], sens["S1"]),
+        ("S3 vs S2",  sens["S3"], sens["S2"]),
+    ]
+    for label, u, v in cos_table:
+        print(f"{label:>9} | cos = {_cosine(u, v):.3f}")
+    print("Lectura esperada: cos(S1,MOV)≈1.0, cos(S1,VEL)≈1.0, "
+          "cos(S2,MOV)≈0.0, cos(S2,VEL)≈0.0.")
+    print("Si se confirma → S1 duplica dimensión existente, S2 añade una nueva.")
+
+    # CONTRATOS M1–M6
+    print()
+    print("-- CONTRATOS (M1–M6, fijados antes) --")
+
+    # M1 · IDENTITY: todos los sweeps en 70 ≈ CALIBRATED-BASELINE-v1.
+    m1_ok = True
+    for sweep in SWEEP_ORDER_003B2:
+        o = cells[(sweep, 70)]
+        cs, xb = contact_swing(o), xbh_bip(o)
+        ok = abs(cs - 65.41) <= M1_TOL_PP and abs(xb - 23.03) <= M1_TOL_PP
+        m1_ok &= ok
+        print(f"  M1 IDENTITY {sweep}@70 (≈65.41/23.03, tol ±{M1_TOL_PP}pp): "
+              f"{'PASS' if ok else 'FAIL'} (Cnt/Sw {cs:.2f}, XBH/BIP {xb:.2f})")
+    print(f"  M1 IDENTITY (todos): {'PASS' if m1_ok else 'FAIL'}")
+
+    def seq(sweep, fn):
+        return [fn(cells[(sweep, l)]) for l in SWEEP_003B2[sweep]["levels"]]
+
+    def mono_noninc(s, tol):
+        return all(s[i] + tol >= s[i + 1] for i in range(len(s) - 1))
+
+    def span(s):
+        return max(s) - min(s)
+
+    # M2 · EXISTING VECTORS (VEL, MOV).
+    m2_ok = True
+    for sweep in ("VEL", "MOV"):
+        css = seq(sweep, contact_swing)
+        xbs = seq(sweep, xbh_bip)
+        ok = mono_noninc(css, M_MONO_TOL_PP) and span(xbs) <= M_SPAN_TOL_PP
+        m2_ok &= ok
+        print(f"  M2 EXISTING {sweep} (Cnt/Sw↓ monótono, XBH span≤{M_SPAN_TOL_PP}): "
+              f"{'PASS' if ok else 'FAIL'} "
+              f"(mono={mono_noninc(css, M_MONO_TOL_PP)}, XBH span {span(xbs):.2f})")
+    print(f"  M2 EXISTING VECTORS (todos): {'PASS' if m2_ok else 'FAIL'}")
+
+    # M3 · S1 REDUNDANCY.
+    css = seq("S1", contact_swing)
+    xbs = seq("S1", xbh_bip)
+    m3_ok = mono_noninc(css, M_MONO_TOL_PP) and span(xbs) <= M_SPAN_TOL_PP
+    print(f"  M3 S1 REDUNDANCY (Cnt/Sw↓ monótono, XBH span≤{M_SPAN_TOL_PP}): "
+          f"{'PASS' if m3_ok else 'FAIL'} "
+          f"(mono={mono_noninc(css, M_MONO_TOL_PP)}, XBH span {span(xbs):.2f})")
+
+    # M4 · S2 ORTHOGONALITY.
+    css = seq("S2", contact_swing)
+    xbs = seq("S2", xbh_bip)
+    m4_ok = span(css) <= M_SPAN_TOL_PP and mono_noninc(xbs, M_MONO_TOL_PP)
+    print(f"  M4 S2 ORTHOGONALITY (Cnt/Sw span≤{M_SPAN_TOL_PP}, XBH↓ monótono): "
+          f"{'PASS' if m4_ok else 'FAIL'} "
+          f"(Cnt/Sw span {span(css):.2f}, mono XBH={mono_noninc(xbs, M_MONO_TOL_PP)})")
+
+    # M5 · S3 DECOMPOSITION.
+    css = seq("S3", contact_swing)
+    xbs = seq("S3", xbh_bip)
+    m5_ok = mono_noninc(css, M_MONO_TOL_PP) and mono_noninc(xbs, M_MONO_TOL_PP)
+    print(f"  M5 S3 DECOMPOSITION (Cnt/Sw↓ Y XBH↓, ambos monótonos): "
+          f"{'PASS' if m5_ok else 'FAIL'} "
+          f"(mono Cnt/Sw={mono_noninc(css, M_MONO_TOL_PP)}, "
+          f"mono XBH={mono_noninc(xbs, M_MONO_TOL_PP)})")
+
+    # M6 · STABILITY (universal a los 25 puntos).
+    caps = sum(cells[(s, l)]["outcome"]["CAP"]
+               for s in SWEEP_ORDER_003B2 for l in SWEEP_003B2[s]["levels"])
+    m6_max_p95 = max(cells[(s, l)]["p95"]
+                     for s in SWEEP_ORDER_003B2 for l in SWEEP_003B2[s]["levels"])
+    clamps_ok = True
+    for s in SWEEP_ORDER_003B2:
+        for l in SWEEP_003B2[s]["levels"]:
+            o = cells[(s, l)]
+            ws = whiff_s(o)
+            cs, xb = contact_swing(o), xbh_bip(o)
+            if not (0 <= ws <= 100 and 0 <= cs <= 100 and 0 <= xb <= 100):
+                clamps_ok = False
+    m6_ok = caps == 0 and m6_max_p95 <= M6_P95_MAX and clamps_ok
+    print(f"  M6 STABILITY (no CAP, p95≤{M6_P95_MAX}, % en [0,100]): "
+          f"{'PASS' if m6_ok else 'FAIL'} "
+          f"(CAP={caps}, max p95={m6_max_p95}, clamps={'OK' if clamps_ok else 'ROTOS'})")
+
+    print("-" * 150)
+    all_ok = m1_ok and m2_ok and m3_ok and m4_ok and m5_ok and m6_ok
+    print(f"Veredicto 003B-2 (M1–M6): "
+          f"M1 {'PASS' if m1_ok else 'FAIL'} · "
+          f"M2 {'PASS' if m2_ok else 'FAIL'} · "
+          f"M3 {'PASS' if m3_ok else 'FAIL'} · "
+          f"M4 {'PASS' if m4_ok else 'FAIL'} · "
+          f"M5 {'PASS' if m5_ok else 'FAIL'} · "
+          f"M6 {'PASS' if m6_ok else 'FAIL'}")
+    if all_ok:
+        print("Geometría confirmada. Decisión semántica: S1 reject (redundante), "
+              "S3 reserve/reject (parcial), S2 promote (contact-quality "
+              "suppression). 003B-3 calibrará cuánto mueve Stuff el power_score.")
+    else:
+        print("Con fallas: revisar antes de la decisión semántica.")
+
+
+# ---------------------------------------------------------------------------
 # 002C-B · TAKE calibration · baseline sweep (intercept de strike_chance)
 # ---------------------------------------------------------------------------
 # Mantiene coefs CTL/VIS actuales (0.003 / -0.002 con (attr-50)); solo varía
@@ -4644,7 +4924,7 @@ def run_pa_level(reps: int) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Monte Carlo de fatiga (GAMEPLAY-ENGINE-001B)")
-    parser.add_argument("--mode", choices=["pa", "pitch", "discipline", "cv", "take", "foul", "bc", "d2", "cv2", "f5", "c1", "c3", "c4", "c5", "d1", "d3", "d4", "e1", "e2", "e3", "e3b", "e5", "e003a", "e003a-tail", "e003b"], default="pa",
+    parser.add_argument("--mode", choices=["pa", "pitch", "discipline", "cv", "take", "foul", "bc", "d2", "cv2", "f5", "c1", "c3", "c4", "c5", "d1", "d3", "d4", "e1", "e2", "e3", "e3b", "e5", "e003a", "e003a-tail", "e003b", "e003b2"], default="pa",
                         help="pa = PA completo (001B-4); pitch = pitch suelto (001B-3); "
                              "discipline = diagnóstico de count/disciplina sin fatiga (002A); "
                              "cv = factorial Control×Vision (002B); "
@@ -4667,6 +4947,7 @@ def main() -> None:
                               "e003a = calibrated engine baseline: 3×3 pitcher×batter, producción pura, contratos K1–K6 (003A); "
                               "e003a-tail = K5-R: validación de cola de PA (STRONG×WEAK, 200k, seeds nuevas) (003A-TAIL-1); "
                               "e003b = stuff semantic candidates: 3 brazos × 5 niveles (45/55/70/85/95), LAB, contratos L1–L6 (003B-1); "
+                              "e003b2 = stuff vs VEL/MOV sensitivity: 5 sweeps × 5 niveles, contratos M1–M6 + geometría de vectores (003B-2); "
                               "d3 = comparación de estrategias CPU workload-based por matchup (001D-3); "
                              "d4 = barrido ampliado + coste marginal de esperar (001D-4A/B)")
     parser.add_argument("--reps", type=int, default=REPS, help="réplicas por escenario")
@@ -4704,6 +4985,8 @@ def main() -> None:
         run_tail_stability_k5r(args.reps)
     elif args.mode == "e003b":
         run_stuff_semantic_candidates_e003b(args.reps)
+    elif args.mode == "e003b2":
+        run_stuff_vs_vel_mov_sensitivity_e003b2(args.reps)
     elif args.mode == "f5":
         run_fatigue_curve_comparison(args.reps)
     elif args.mode == "c1":
