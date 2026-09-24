@@ -63,7 +63,7 @@ GAMEPLAY-ENGINE-002 — DISCIPLINE / COUNT MODEL
 002E-3  CLAMP-001 fase A (mapa piso)    CLOSED / PASS
 002E-3B CLAMP-001 MC aislado            CLOSED / PASS (FLOOR-20)
 002E-4  PROMOTE paquete B3-C1+floor20   CLOSED / PROMOTED
-002E-5  Production acceptance           IN PROGRESS (contracts JA–JF fixed)
+002E-5  Production acceptance           CLOSED / PASS (6/6 JA–JF)
 
 Finding:
 GAMEPLAY-ENGINE-002-CLAMP-001
@@ -1585,8 +1585,18 @@ PA totales. El harness `run_matchup_robustness_e2` (~L1165) ya está cableado
   - **JF · CLAMP-001 CERRADO (regresión)**: CTL45/VIS95 < CTL45/VIS70 en
     CalledS/tk con pendiente material (≥ 2.0pp) — la meseta de 0.25 está
     sellada por el floor 0.20 de producción.
-- **Resultado (smoke 5k/celda verificado)** → corrida completa 50k en `-e5`
-  (evidencia `_e5_prod_acceptance.txt`).
-- **Veredicto 002E-5**: [PENDIENTE de la corrida completa — se completa tras
-  `--mode e5`]. Si JA–JF PASS → `GAMEPLAY-ENGINE-002 CLOSED / PASS` con paquete
-  definitivo B3-C1 + floor 0.20 + foul 45% + agente LAB no promovido.
+- **Resultado (corrida completa 50k/celda, 450k PA, evidencia `_e5_prod_acceptance.txt`)**: JA PASS |
+  JB PASS | JC PASS | JD PASS | JE PASS | JF PASS — **ACEPTACIÓN: PASS · GAMEPLAY-ENGINE-002 CLOSED**.
+- **Lectura mecánica**: los CalledS/tk del paquete (CTL45: 28.91 → 24.05 → 19.72 en VIS 45→70→95)
+  reproducen bit a bit los de FLOOR-20 del 002E-3-B — la API pública sin knobs ES el piso 0.20
+  experimentado. Monotonicidad estricta en los 12 pares (pendientes ~4.3–7.6pp); Foul/Cnt
+  45.1–45.2% (±0.2pp, tol ±1.5); Whiff/Swing span 0.12pp (tol 1.0); BB% 5.2–16.7 material; extremo
+  CTL45/VIS95 sano (Pit/PA 3.81, p95 6, max 12) sin explosión vs control 10.24; **JF Δ=4.32pp de
+  pendiente en el rincón CLAMP-001** (meseta de 0.25 = 0.00pp). El cambio entró 100% por TAKE.
+- **Veredicto 002E-5**: 6/6 PASS con el PRODUCTO (sin knobs LAB). `GAMEPLAY-ENGINE-002` se declara
+  **CLOSED / PASS** con el paquete definitivo: TAKE base 0.30, floor 0.20, ceiling 0.85,
+  foul/contact 0.45. Agente LAB 65/50/30 NO promovido (vive en el harness). Knobs LAB
+  (`take_bias`/`foul_chance`/`take_floor`) conservados para reproducir PROD histórico / B3-C1 /
+  FLOOR-20/15 / NO-FLOOR sin tocar producción. Cierre formal de la rama 002E-1..002E-5.
+- **Historial de MC acumulado**: 002A-N/A + 002C-B/C/BC + 002E-1 (81k) + 002E-2 (450k) + 002E-3-B
+  (800k) + 002E-5 (450k) ≈ **2.15M PA** de evidencia sobre el paquete final.
