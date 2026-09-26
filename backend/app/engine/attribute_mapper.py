@@ -15,6 +15,7 @@ Mapeo de atributos:
         velocity  → velocidad
         control   → control   (igual en ambos idiomas)
         movement  → movimiento
+        stuff     → stuff      (contact-quality, 003B)
 
     Bateo:
         contact   → contacto
@@ -26,6 +27,7 @@ Mapeo de atributos:
 from typing import TYPE_CHECKING
 
 from app.core.engine_types import BatterAttrs, PitcherAttrs
+from app.engine.stuff_policy import STUFF_BASELINE
 
 if TYPE_CHECKING:
     from app.models.card import PlayerCardModel
@@ -36,16 +38,24 @@ def map_card_to_pitcher_attrs(card: "PlayerCardModel") -> PitcherAttrs:
     Convierte un PlayerCardModel a un diccionario de atributos de pitcheo
     listo para ser consumido por el engine (calculator.py, fatigue_manager.py).
 
+    ``stuff`` sale de la columna persistida (ratings-2.0 vía
+    app/seeds/backfill_cards.py). Antes del backfill, una carta no puede tener
+    NULL — la migración 0042 instala NOT NULL con server_default
+    ``STUFF_BASELINE`` — así que aquí no hay fallback: el que exista es
+    ``getattr(card, "stuff", STUFF_BASELINE)`` para objetos de test/duck-typing
+    construidos a mano, que deben seguir siendo neutros en vez de crashing.
+
     Args:
         card: Instancia de PlayerCardModel obtenida de la base de datos.
 
     Returns:
-        PitcherAttrs con claves: "velocidad", "control", "movimiento"
+        PitcherAttrs con claves: "velocidad", "control", "movimiento", "stuff"
     """
     return {
         "velocidad": card.velocity,
         "control": card.control,
         "movimiento": card.movement,
+        "stuff": getattr(card, "stuff", STUFF_BASELINE),
     }
 
 

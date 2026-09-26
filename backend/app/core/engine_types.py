@@ -17,11 +17,24 @@ from typing import NamedTuple, NotRequired, Optional, TypedDict
 
 
 class PitcherAttrs(TypedDict):
-    """Atributos de lanzamiento. Claves en español (idioma del engine)."""
+    """Atributos de lanzamiento. Claves en español (idioma del engine).
+
+    ``stuff`` es SEMÁNTICA (contact-quality suppression, GAMEPLAY-ENGINE-003B):
+    el mapper publica aquí el Stuff CRUDO de la carta y ``fatigue_manager``
+    sustituye ese valor por el Stuff EFECTIVO ya fatigado. El calculator consume
+    el efectivo y nunca ve ``fatigue_factor`` — la transformación de atributos
+    físicos es responsabilidad de la capawaters upstream (003B-6A).
+
+    Es ``float`` porque el Stuff efectivo es un producto fraccionario
+    (``raw * (1 - 0.50*(1 - factor))``): truncarlo a entero en la frontera
+    rompería la reproducción bit-exacta del LAB que exige el contrato S1. El
+    Stuff crudo es un entero de carta (0-99), compatible con esta anotación.
+    """
 
     velocidad: int
     control: int
     movimiento: int
+    stuff: float
 
 
 class BatterAttrs(TypedDict):

@@ -11,6 +11,14 @@ Pitcher representativo: Velocity=90, Control=80, Movement=85.
 
 ``compute_fatigue_level`` conserva la fórmula legacy (lineal +10%/extra, cap
 100) y sólo comparte el onset con el engine. Deuda: GAMEPLAY-FATIGUE-CPU-001.
+
+003B-6A (Stuff) se sumó a este contrato sin mover la curva
+----------------------------------------------------------
+``apply_pitcher_fatigue`` ahora publica además ``stuff`` (float), con la misma
+curva de factor y α=.50. La tabla exacta de arriba NO cambió: los atributos de
+001C se comparan por nombre de clave para que este archivo siga congelando la
+curva y no el incidental "shape del dict". La semántica de Stuff tiene sus
+propios contratos en tests/test_stuff_policy.py (003B-6B).
 """
 
 import pytest
@@ -25,10 +33,22 @@ from app.engine.fatigue_manager import (
     get_fatigue_factor,
     get_pitch_threshold,
 )
+from app.engine.stuff_policy import STUFF_BASELINE, effective_stuff
 
 REPRESENTATIVE = {"velocidad": 90, "control": 80, "movimiento": 85}
 INNINGS = 9
 THRESHOLD = 100  # get_pitch_threshold(9)
+
+# Atributos físicos de 001C. ``stuff`` se excluye a propósito del fixture: este
+# módulo congela la curva de VEL/CTL/MOV de 001C, y REPRESENTATIVE representa un
+# pitcher de la era 001C (sin Stuff publicado), que es exactamente el caso que
+# debe seguir funcionando con el fallback neutro.
+_PHYSICAL_KEYS = ("velocidad", "control", "movimiento")
+
+
+def _physical(result):
+    """Proyecta el resultado de apply_pitcher_fatigue a los atributos de 001C."""
+    return {key: result[key] for key in _PHYSICAL_KEYS}
 
 
 # ---------------------------------------------------------------------------
@@ -107,7 +127,13 @@ def test_factor_rechaza_threshold_invalido():
 def test_identidad_hasta_threshold():
     for count in (0, 1, 50, 99, 100):
         assert get_fatigue_factor(count, THRESHOLD) == 1.0
-        assert apply_pitcher_fatigue(REPRESENTATIVE, count, INNINGS) == REPRESENTATIVE
+        result = apply_pitcher_fatigue(REPRESENTATIVE, count, INNINGS)
+        # 001C: los tres atributos físicos intactos hasta el threshold.
+        assert _physical(result) == REPRESENTATIVE
+        # 003B-6A: en fresco el Stuff efectivo es la identidad EXACTA del crudo.
+        # Sin esto, "idéntico hasta el threshold" sería cierto sólo para 3 de 4
+        # atributos y el cuarto podría estar degradándose en silencio.
+        assert result["stuff"] == STUFF_BASELINE
 
 
 def test_degradacion_tras_threshold():
@@ -143,7 +169,17 @@ def test_floor_y_monotonia():
 )
 def test_curva_smooth_pitcher_representativo(pitch_count, vel, ctl, mov):
     result = apply_pitcher_fatigue(REPRESENTATIVE, pitch_count, INNINGS)
-    assert result == {"velocidad": vel, "control": ctl, "movimiento": mov}
+    # Se comparan las tres claves físicas por nombre en vez de por igualdad de
+    # dict completo. La igualdad de dict era más estricta, pero la hizo frágil
+    # sin ganar fuerza: cuando 003B-6A añadió ``stuff`` al resultado, dejó de
+    # poder distinguir "la curva cambió" de "el contrato de la política creció".
+    # Nombrando las claves, un fallo señala la clave culpable.
+    assert _physical(result) == {"velocidad": vel, "control": ctl, "movimiento": mov}
+    # El Stuff sigue la MISMA curva (α=.50, misma fórmula que 001C pero sin
+    # truncar): monótono decreciente y estrictamente por debajo del crudo tras
+    # el threshold. En fresco vale exactamente el baseline.
+    expected_stuff = effective_stuff(STUFF_BASELINE, get_fatigue_factor(pitch_count, THRESHOLD))
+    assert result["stuff"] == pytest.approx(expected_stuff)
 
 
 def test_atributos_minimo_1():

@@ -4,11 +4,29 @@ Gate de cierre: "un entorno donde una misma seed/fixture produzca el mismo
 escenario base" y "no cambiar reglas durante la auditoría". Este módulo
 verifica que:
 
-    1. El esquema congelado sigue siendo alembic head ``0041``.
+    1. El esquema congelado sigue siendo alembic head (``0042``).
     2. La identidad del engine (build + rules version) permanece congelada.
     3. Cada escenario canónico F01..F08 es reproducible (dos builds idénticos).
     4. Cada escenario canónico es estructuralmente válido para el engine.
     5. El seed del catálogo publicable es reproducible entre sesiones BD.
+
+Qué se movió en 003B-6A y por qué
+---------------------------------
+``SCHEMA_HEAD`` pasó de ``0041`` a ``0042`` porque 003B-6A instala la columna
+``player_cards.stuff``. Eso es un cambio de ESQUEMA, y el esquema es el
+contenedor: no altera ningún mecanismo del motor, y por eso se mueve.
+
+``ENGINE_BUILD``, ``GAMEPLAY_RULES_VERSION`` y ``BASELINE_COMMIT`` NO se mueven.
+Siguen siendo el ancla de auditoría de CALIBRATED-BASELINE-v1 (003A), que es
+contra lo que el bloque C de 003B-6C compara para demostrar que los mecanismos
+que Stuff no debía alterar siguen byte a byte idénticos. Es además la convención
+que el propio repo aplicó en la promoción de Fatigue v2 (d8c8804) y a lo largo
+de 003B-1..5C: el rótulo de reglas se deja quieto y el cambio de gameplay se
+registra en el commit y en el ADR, no reetiquetando el baseline.
+
+Bump de esquema (0041 → 0042) y bump de reglas son cosas distintas, y confundir
+las dos es exactamente el error que haría que " Stuff no cambió nada" quedara
+sin poder verificarse.
 """
 
 import re
@@ -49,17 +67,21 @@ def _alembic_heads(versions_dir: Path) -> set[str]:
     return {rev for rev in revisions if rev not in parents}
 
 
-def test_schema_head_congelado_es_0041():
+def test_schema_head_congelado_es_0042():
+    # 0042 = 0042_player_cards_stuff (003B-6A). Único head: la cadena de
+    # down_revision sigue siendo lineal, sin ramas.
     versions_dir = Path(__file__).resolve().parent.parent / "alembic" / "versions"
     heads = _alembic_heads(versions_dir)
-    assert heads == {"0041"}, f"heads inesperados: {heads}"
+    assert heads == {"0042"}, f"heads inesperados: {heads}"
 
 
 def test_engine_build_congelado():
+    # Sin cambios desde la Fase 0 — ver la nota de 003B-6A en el docstring del
+    # módulo: el ancla de auditoría no se mueve aunque el esquema sí.
     assert ENGINE_BUILD == "engine-20260913-4ee14a8"
     assert GAMEPLAY_RULES_VERSION == "rules-1.0-lab"
     assert fixtures.BASELINE_COMMIT == "4ee14a8"
-    assert fixtures.SCHEMA_HEAD == "0041"
+    assert fixtures.SCHEMA_HEAD == "0042"
 
 
 def test_escenarios_canonicos_reproducibles():

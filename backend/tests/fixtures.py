@@ -35,8 +35,17 @@ from sqlalchemy.orm import Session, sessionmaker
 import app.models  # noqa: F401
 
 # Identidad del baseline congelado (Fase 0).
+#
+# BASELINE_COMMIT es el ANCLA DE AUDITORÍA y NO se mueve: marca el build previo a
+# Stuff, contra el cual el bloque C de 003B-6C (baseline regression) compara para
+# demostrar que los mecanismos que Stuff no debía alterar siguen idénticos.
+# Moverlo destruiría justamente la referencia que hace posible esa comparación.
+#
+# SCHEMA_HEAD sí se movió 0041 → 0042: la migración 0042_player_cards_stuff es
+# un cambio de esquema físico y declarado (003B-6A), no un cambio de reglas. El
+# esquema es el contenedor; los mecanismos congelados son los de ENGINE_BUILD.
 BASELINE_COMMIT = "4ee14a8"
-SCHEMA_HEAD = "0041"
+SCHEMA_HEAD = "0042"
 
 START = dt.date(2026, 8, 25)
 END = dt.date(2026, 9, 2)

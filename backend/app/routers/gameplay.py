@@ -40,6 +40,7 @@ from app.engine.game_rules import EXTRA_INNINGS_MIN_INNING
 from app.engine.turn_guard import expected_actor, is_player_turn
 from app.engine.cpu_ai import is_cpu_turn
 from app.engine.attribute_mapper import map_card_to_pitcher_attrs
+from app.engine.stuff_policy import STUFF_BASELINE
 from app.engine.fatigue_manager import get_fatigue_band
 from app.engine.game_actions import (
     PendingBroadcast,
@@ -673,7 +674,7 @@ async def steal_base(
     active_pitcher_id = state.get("active_pitcher")
 
     pitcher_card = get_card_by_id(db, active_pitcher_id)
-    pitcher_attrs = map_card_to_pitcher_attrs(pitcher_card) if pitcher_card else {"velocidad": 75, "control": 70, "movimiento": 70}
+    pitcher_attrs = map_card_to_pitcher_attrs(pitcher_card) if pitcher_card else {"velocidad": 75, "control": 70, "movimiento": 70, "stuff": STUFF_BASELINE}
 
     # Lógica de dominio (incluye cambio de media entrada) en el engine
     success, description = steal_attempt(game, state, payload.target_base, pitcher_attrs)

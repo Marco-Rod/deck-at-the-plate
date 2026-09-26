@@ -46,6 +46,7 @@ class PlayerCardModel(Base):
     __table_args__ = (
         CheckConstraint("vision >= 0 AND vision <= 99", name="ck_player_cards_vision_range"),
         CheckConstraint("clutch >= 0 AND clutch <= 99", name="ck_player_cards_clutch_range"),
+        CheckConstraint("stuff >= 0 AND stuff <= 99", name="ck_player_cards_stuff_range"),
         # Catálogo versionado: una misma persona puede tener varias ediciones,
         # pero (player_id, season, edition_type, edition_version) es único.
         UniqueConstraint(
@@ -79,6 +80,11 @@ class PlayerCardModel(Base):
     velocity = Column(Integer, default=50)
     control = Column(Integer, default=50)
     movement = Column(Integer, default=50)  # Movimiento/quiebre del lanzamiento
+    # Stuff del pitcher (0-99): contact-quality suppression (GAMEPLAY-ENGINE-003B).
+    # Columna persistida desde ratings-2.0 (player_ratings.stuff_rating) vía
+    # app/seeds/backfill_cards.py. server_default = STUFF_BASELINE (70) para que
+    # una carta sin Stuff publicado sea exactamente neutra (delta = 0).
+    stuff = Column(Integer, nullable=False, default=70)
 
     # Repertorio de pitcheos (Solo para pitchers y two-way players)
     # Estructura JSON guardada en DB:

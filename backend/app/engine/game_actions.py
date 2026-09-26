@@ -43,6 +43,7 @@ from app.engine.fatigue_manager import (
     get_workload,
 )
 from app.engine.state_manager import process_at_bat_transition
+from app.engine.stuff_policy import STUFF_BASELINE
 from app.engine.tactic_resolver import (
     accumulate_tactic_effects,
     new_default_tactic_modifiers,
@@ -295,7 +296,7 @@ async def resolve_swing(
     pitcher_card = get_card_by_id(db, active_pitcher_id)
     batter_card = get_card_by_id(db, active_batter_id)
 
-    raw_pitcher_attrs = map_card_to_pitcher_attrs(pitcher_card) if pitcher_card else {"velocidad": 75, "control": 70, "movimiento": 70}
+    raw_pitcher_attrs = map_card_to_pitcher_attrs(pitcher_card) if pitcher_card else {"velocidad": 75, "control": 70, "movimiento": 70, "stuff": STUFF_BASELINE}
     batter_attrs = map_card_to_batter_attrs(batter_card) if batter_card else {"contacto": 70, "poder": 70, "vision": 70}
     
     # ⭐ MEJORADO: Pasar total_innings para ajustar dinámicamente el umbral de fatiga

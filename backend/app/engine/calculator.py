@@ -36,6 +36,7 @@ from app.core.engine_types import (
     SwingSelection,
     TacticsModifiers,
 )
+from app.engine.stuff_policy import STUFF_BASELINE, stuff_power_suppression
 
 
 # --- Política de producción del TAKE/contacto (002E-4 · PROMOTE) ---
@@ -53,6 +54,11 @@ CONTROL_TAKE_WEIGHT = 0.003         # Peso del control del pitcher en strike_cha
 VISION_TAKE_WEIGHT = 0.002          # Peso de la visión del bateador en strike_chance
 _ZONE_MATCH_BONUS = 0.12            # Bono por anticipar la zona correcta en TAKE
 FOUL_ON_CONTACT_CHANCE = 0.45       # Foul/contact en los contactos no-limpios (002E-4)
+
+# La política de Stuff (GAMEPLAY-ENGINE-003B: STUFF_BASELINE,
+# STUFF_POWER_SUPPRESSION, α) NO se re-declara aquí. Vive entera en
+# app/engine/stuff_policy.py y este módulo la importa, para que el número
+# congelado tenga una sola definición en todo el código productivo.
 
 
 def calculate_play_outcome(
@@ -138,6 +144,12 @@ def _resolve_play_outcome(
     ctl = pitch_selected.get("control", pitcher_attrs.get("control", 50)) * tactics.get("pitcher_ctl", 1.0)
     mov = pitch_selected.get("movement", pitcher_attrs.get("movimiento", 50)) * tactics.get("pitcher_mov", 1.0)
 
+    # Stuff EFECTIVO (003B-6A). Llega YA fatigado desde fatigue_manager; este
+    # módulo no conoce fatigue_factor ni lo necesita. Si el diccionario no trae
+    # la clave (llamadas legacy, objetos de test) se asume el baseline: supresión
+    # 0 y comportamiento idéntico al previo a 003B.
+    stuff = pitcher_attrs.get("stuff", STUFF_BASELINE)
+
     swing_type = swing_selected.get("swing_type", "NORMAL")
     guessed_zone = swing_selected.get("guessed_zone")
     guessed_pitch = swing_selected.get("guessed_pitch")
@@ -158,7 +170,7 @@ def _resolve_play_outcome(
 
     # --- FASE 2/3: SWING → whiff / foul / bola en juego ---
     return _calculate_contact_outcome(
-        foul_chance, swing_type, con, pwr, vel, mov, zone_matched, pitch_matched,
+        foul_chance, swing_type, con, pwr, vel, mov, zone_matched, pitch_matched, stuff,
     )
 
 
@@ -181,8 +193,15 @@ def _calculate_contact_outcome(
     mov: float,
     zone_matched: bool,
     pitch_matched: bool,
+    effective_stuff: float = STUFF_BASELINE,
 ) -> PlayResult:
-    """FASE 2/3 — SWING: whiff → foul (002C-C) → BABIP."""
+    """FASE 2/3 — SWING: whiff → foul (002C-C) → BABIP.
+
+    ``effective_stuff`` es el Stuff YA fatigado. Stuff sólo actúa sobre el
+    power_score (BABIP): no toca el whiff ni la disciplina, que es exactamente
+    el aislamiento de mecanismo que 003B fijó al elegir el brazo S2 y que el
+    contrato T7 vuelve a verificar.
+    """
     # Base Whiff%: ~24.5% en MLB para un duelo neutro (50 vs 50)
     # Un picheo con alto movimiento (ej. Slider/Sweeper de 95 MOV) incrementa el whiff%
     whiff_base = 24.5 + (vel * 0.25 + mov * 0.25) - (con * 0.35)
@@ -213,6 +232,13 @@ def _calculate_contact_outcome(
 
     if zone_matched and pitch_matched:
         power_score += 15.0
+
+    # --- Stuff: contact-quality suppression (GAMEPLAY-ENGINE-003B, k=.30) ---
+    # El punto de inserción NO es arbitrario: es el último antes de los umbrales,
+    # y es donde el LAB lo tenía. Move el offset antes o después del bono de
+    # zona+pitch y las dos rutas dejan de ser comparables (y la comparación es
+    # justo el contrato S1). Stuff alto resta poder; Stuff bajo lo suma.
+    power_score += stuff_power_suppression(effective_stuff)
 
     if power_score > 96.0:
         return PlayResult(Event.HOME_RUN, "¡Enorme batazo por todo el jardín central! ¡HOME RUN!")

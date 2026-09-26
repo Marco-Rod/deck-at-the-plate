@@ -1,8 +1,9 @@
 import logging
 import math
-from typing import Dict
+from typing import Dict, Union
 
 from app.core.enums import FatigueBand
+from app.engine.stuff_policy import STUFF_BASELINE, effective_stuff
 
 logger = logging.getLogger(__name__)
 
@@ -155,31 +156,53 @@ def apply_pitcher_fatigue(
     pitcher_attrs: Dict[str, int],
     pitch_count: int,
     total_innings: int = STANDARD_GAME_INNINGS
-) -> Dict[str, int]:
+) -> Dict[str, Union[int, float]]:
     """
-    Aplica la degradación SMOOTH-0.55-F35 a Velocidad, Control y Movimiento.
+    Aplica la degradación SMOOTH-0.55-F35 a Velocidad, Control y Movimiento, y la
+    política de Stuff (003B-6A) sobre el atributo ``stuff``.
 
-    Pipeline (Fatigue Policy v2):
+    Pipeline (Fatigue Policy v2 + GAMEPLAY-ENGINE-003B):
         pitch_count
           ↓
         get_pitch_threshold(total_innings)
           ↓
         get_fatigue_factor(pitch_count, threshold)
           ↓
-        attr = max(1, int(attr * factor))
+        VEL/CTL/MOV = max(1, int(attr * factor))          # enteros, sin cambio
+          ↓
+        stuff      = raw * (1 - 0.50 * (1 - factor))     # float, sin truncar
 
-    La fatiga emerge del trabajo acumulado, no del inning. El factor nunca baja
-    de ``FATIGUE_FLOOR`` (0.35) y cada atributo conserva un mínimo de 1.
+    Stuff entra por la MISMA puerta que la velocidad y el control: este módulo
+    es el único que conoce ``fatigue_factor``, y publica un atributo físico ya
+    transformado. El calculator recibe el Stuff efectivo y nunca ve la fatiga
+    (003B-6A), lo que mantiene la dependencia en una sola dirección.
+
+    Asimetría deliberada entre las dos familias, y NO es un descuido:
+
+        VEL/CTL/MOV  →  ``int()``. Se truncan porque siempre lo hicieron (001C) y
+                        su entrada es un entero; el motor los consume enteros.
+        stuff       →  float. La política de 003B es multiplicativa PARCIAL y su
+                        efecto sobre el poder es de escala pequeña (±7.5 en el
+                        rango de carta), así que truncar en esta frontera
+                        cuantizaría la señal justo donde es más fina y rompería
+                        la reproducción bit-exacta del LAB (contrato S1).
+
+    El Stuff crudo entra por ``pitcher_attrs["stuff"]``. Si el diccionario no lo
+    trae (llamadas legacy, o el fallback de una carta sin columna), se asume
+    ``STUFF_BASELINE`` (70): Stuff neutro, supresión 0, comportamiento idéntico
+    al previo a 003B.
 
     Args:
-        pitcher_attrs: Diccionario con velocidad, control, movimiento.
+        pitcher_attrs: Diccionario con velocidad, control, movimiento y stuff.
         pitch_count:   Número de lanzamientos realizados.
         total_innings: Total de innings en la partida (3, 6 o 9).
 
     Returns:
-        Diccionario con atributos modificados por fatiga.
+        Copia del diccionario con los atributos modificados por fatiga. La
+        entrada ``stuff`` es un float; las de velocidad/control/movimiento son
+        enteros.
     """
-    modified_attrs = pitcher_attrs.copy()
+    modified_attrs: Dict[str, Union[int, float]] = pitcher_attrs.copy()
 
     pitch_threshold = get_pitch_threshold(total_innings)
     factor = get_fatigue_factor(pitch_count, pitch_threshold)
@@ -200,5 +223,17 @@ def apply_pitcher_fatigue(
         )
     else:
         logger.debug("No se aplico fatiga (pitch_count <= threshold)")
+
+    # Stuff (003B-6A). Se calcula SIEMPRE, incluso con factor == 1.0: en fresco
+    # la fórmula es exactamente la identidad (1 - 0.50*0 == 1.0), así que no
+    # cambia ningún valor, y evitar la rama deja el invariante "stuff siempre
+    # presente y float" sin un segundo camino que pueda divergir.
+    raw_stuff = modified_attrs.get("stuff", STUFF_BASELINE)
+    modified_attrs["stuff"] = effective_stuff(raw_stuff, factor)
+
+    logger.debug(
+        "Stuff efectivo: raw=%s factor=%.3f effective=%.3f",
+        raw_stuff, factor, modified_attrs["stuff"],
+    )
 
     return modified_attrs
