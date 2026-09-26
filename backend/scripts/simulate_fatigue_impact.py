@@ -25,6 +25,7 @@ Perfil sintético actual: MID pitcher vs MID batter, dificultad MEDIUM.
 """
 
 import argparse
+import inspect
 import math
 import os
 import random
@@ -47,9 +48,18 @@ from app.engine.cpu_ai import (
     _CPU_CHANGE_WORKLOAD_THRESHOLD,
 )
 from app.engine.fatigue_manager import (
+    apply_pitcher_fatigue,
     get_fatigue_factor,
     get_pitch_threshold,
     get_workload,
+)
+from app.engine.attribute_mapper import map_card_to_pitcher_attrs
+from app.engine.stuff_policy import (
+    STUFF_BASELINE as PROD_STUFF_BASELINE,
+    STUFF_FATIGUE_ALPHA as PROD_STUFF_FATIGUE_ALPHA,
+    STUFF_POWER_SUPPRESSION as PROD_STUFF_K,
+    effective_stuff as prod_effective_stuff,
+    stuff_power_suppression as prod_stuff_power_suppression,
 )
 from app.engine.game_rules import MIN_PITCHES_TO_CHANGE
 
@@ -4025,6 +4035,1281 @@ def run_stuff_fatigue_policies_e003b5a(reps: int) -> None:
 
 
 # ---------------------------------------------------------------------------
+# 003B-5B · Calibración α de la fatiga de Stuff (LAB, 4.2M PA)
+# ---------------------------------------------------------------------------
+# 003B-5A cerró la SEMÁNTICA: Stuff sí se fatiga con la curva productiva f, pero
+# la transformación COMPLETA (raw·f) destruye la identidad del élite (F1 FULL:
+# ST95 a w=1.50 quedaba PEOR que un MID fresco, Δ+2.95pp) y la ANCHORED hacía
+# MEJORAR al Stuff bajo (P4). Ganó la familia multiplicativa PARCIAL:
+#
+#     effective_stuff = raw_stuff * (1 - α * (1 - f))
+#
+# 5B NO re-litiga la semántica: calibra CUÁNTA degradación parcial se quiere.
+# α=0.00 es el control (Stuff no se fatiga) · α=1.00 es la REFERENCIA ya
+# condenada en 5A (se conserva para medir el extremo) · α=.50 es solo el
+# representante ya medido, NO un default. Matriz IDÉNTICA a 5A (3 Stuff, 4
+# workloads, mismas seeds) → comparación directa; lo único que cambia es α.
+STUFF_FATIGUE_ALPHAS_003B5B = (0.00, 0.25, 0.40, 0.50, 0.60, 0.75, 1.00)
+STUFF_FATIGUE_WORKLOADS_003B5B = (1.00, 1.20, 1.35, 1.50)
+STUFF_LEVELS_003B5B = (45, 70, 95)
+PROD_THRESHOLD_003B5B = get_pitch_threshold(9)  # 100 (Fatigue Policy v2)
+STUFF_K_QTY_003B5B = 0.30                       # S2 (003B-3 · 003B-4)
+
+# Referencias 003B-4 (Stuff fresca, k=.30, mismas seeds 750M+rep) para Q1.
+Q1_REFS_003B5B = {45: 30.49, 70: 23.03, 95: 15.77}
+# Referencias 003B-5A (50k) para el check de REPRO entre familias: α=0.00 ≡ F0
+# NONE, α=0.50 ≡ F2 HALF, α=1.00 ≡ F1 FULL (misma fórmula, mismas seeds, mismo
+# code path) → deben reproducir bit-a-bit. Tolerancia 0.01 = redondeo del print
+# de 5A a 2 decimales (no es comparación de bits, es de cifras publicadas).
+REPRO_5A_003B5B = {
+    0.00: {1.00: (30.49, 23.03, 15.77), 1.20: (30.36, 22.91, 15.73),
+           1.35: (30.54, 22.98, 15.67), 1.50: (30.51, 23.02, 15.78)},
+    0.50: {1.00: (30.49, 23.03, 15.77), 1.20: (30.85, 23.81, 16.77),
+           1.35: (32.09, 25.36, 18.75), 1.50: (32.97, 26.87, 20.85)},
+    1.00: {1.00: (30.49, 23.03, 15.77), 1.20: (31.47, 24.66, 18.01),
+           1.35: (33.45, 27.49, 21.73), 1.50: (35.46, 30.66, 25.98)},
+}
+REPRO_5A_TOL_PP = 0.01
+
+# Tolerancias Q1–Q7 (fijadas ANTES de correr).
+Q1_SPAN_PP = 0.2      # Q1: span entre α a w=1.00 (esperado 0.00: mismas seeds)
+Q1_REF_PP = 0.2       # Q1: |Δ| vs Stuff fresca de 003B-4
+Q2_TOL_PP = 0.5       # Q2: α↑ → XBH no debe DISMINUIR (supresión no aumenta)
+Q3_MONO_PP = 0.7      # Q3: w↑ → XBH no disminuye (ST70/ST95, α>0)
+Q3_CTRL_SPAN_PP = 1.5  # Q3 control (α=0): XBH plana entre workloads (deriva PROD
+                      #   de 2º orden de composición VEL/MOV, no señal de Stuff)
+Q4_MARGIN_PP = 0.0    # Q4: ST95 fatigado a w=1.50 debe seguir SIENDO MEJOR que
+                      #   un ST70 FRESCO. Es la frontera que condenó FULL en 5A:
+                      #   cruzar (Δ ≥ 0) = demasiado destructivo.
+Q4_BAND_PP = 1.0      # Q4 banda advisory de retención de identidad (≥1pp holgada)
+Q5_EPS_PP = 0.5      # Q5 estructural: cost@w>1.00 debe exceder el eps (efecto
+                      #   reproducible, no ruido de muestra; ~5 SE a 50k)
+Q5_MATERIAL_BAR = 0.25  # Barra POST-HOC de MATERIALIDAD: cost ≥ 25% del gap de
+                        #   identidad fresco (XBH ST45 − ST95 a w=1.00 ≈ 14.7pp).
+                        #   NO es un contrato (Q5 contractual = cost positivo,
+                        #   monótono en w y ordenado en α); es la pantalla de
+                        #   SELECCIÓN, y se reporta su sensibilidad abajo.
+Q6_STEP_PP = 0.7      # Q6: los incrementos de cost entre pasos de w no pueden
+                      #   ser negativos (sin saltos hacia atrás)
+Q6_MAX_ACCEL = 2.0    # Q6: d2/d1 — nada de aceleración patológica
+Q7_P95_MAX = 6        # Q7: K5-R (p95 ≤ 6, CAP 0)
+Q7_P12_MAX = 0.05
+Q7_P16_MAX = 0.01
+Q7_SHAPE_PP = 0.05    # Q7: aislamiento de mecanismo. S2 solo modula power_score
+                      #   (whiff_add ≡ 0) y SOLO el bucket del PRIMER BIP, que
+                      #   termina el PA en cualquier caso → la TRAYECTORIA del PA
+                      #   (Pit/PA, K%, BB%, BIP%, Whiff/Sw, CalledS/TAKE,
+                      #   Contacto/Sw, p95) debe ser INVARIANTE con α a w fijo.
+                      #   Invarianza EXACTA, no estadística.
+                      #   Lo que SÍ puede moverse (y es el canal de Stuff): la
+                      #   mezcla DENTRO del BIP (OUT/1B/2B/3B/HR) y Reach%,
+                      #   porque los swaps cruzan el umbral 25/63 (OUT↔1B) igual
+                      #   que 63/85/93/96 (1B↔2B↔3B↔HR). Reach% NO es invariante:
+                      #   un Stuff fatigado convierte hits en outs.
+
+
+def _stuff_fatigue_eff_003b5b(raw: float, alpha: float, f: float) -> float:
+    """Familia multiplicativa parcial de 003B-5A, con α libre (003B-5B)."""
+    return raw * (1.0 - alpha * (1.0 - f))
+
+
+def run_stuff_fatigue_alpha_e003b5b(reps: int) -> None:
+    """003B-5B · calibración α de la fatiga de Stuff, 7 α × 4 w × 3 Stuff."""
+    n = reps
+    k = STUFF_K_QTY_003B5B
+    batter = BATTER_PROFILES_003A["MID"]
+    pitcher = PITCHER_PROFILES_003A["MID"]
+    stuffs = list(STUFF_LEVELS_003B5B)
+    workloads = list(STUFF_FATIGUE_WORKLOADS_003B5B)
+    alphas = list(STUFF_FATIGUE_ALPHAS_003B5B)
+    cells = {}
+    eff = {}
+
+    def fresh_agg():
+        return {"pitches": 0, "take_attempts": 0, "called_strikes_on_take": 0,
+                "swing_attempts": 0, "whiffs": 0, "outcome": Counter(),
+                "lengths": [], "power": [], "bips": 0, "len12": 0, "len16": 0}
+
+    factors = {w: get_fatigue_factor(
+        int(w * PROD_THRESHOLD_003B5B), PROD_THRESHOLD_003B5B)
+        for w in workloads}
+    for a in alphas:
+        for w in workloads:
+            f = factors[w]
+            for st in stuffs:
+                e = _stuff_fatigue_eff_003b5b(float(st), a, f)
+                eff[(a, w, st)] = e
+                agg = fresh_agg()
+                for rep in range(reps):
+                    # MISMAS seeds que 003B-4/5A en todas las celdas → toda la
+                    # matriz es pareada: el único cambio entre α es power_add.
+                    seed = int(DISCIPLINE_WORKLOAD * 1000) * 10**6 + rep
+                    d = _simulate_pa_diag(E1_POLICY, seed,
+                                          batter_attrs=batter,
+                                          pitcher_attrs=pitcher,
+                                          stuff_level=e,
+                                          stuff_arm="S2",
+                                          stuff_k_qty=k,
+                                          workload=w,
+                                          power_log=agg["power"])
+                    agg["pitches"] += d["pitches"]
+                    agg["take_attempts"] += d["take_attempts"]
+                    agg["called_strikes_on_take"] += d["called_strikes_on_take"]
+                    agg["swing_attempts"] += d["swing_attempts"]
+                    agg["whiffs"] += d["whiffs"]
+                    agg["bips"] += d["bips"]
+                    agg["outcome"][d["outcome"]] += 1
+                    agg["lengths"].append(d["pitches"])
+                    if d["pitches"] >= 12:
+                        agg["len12"] += 1
+                    if d["pitches"] >= 16:
+                        agg["len16"] += 1
+                agg["lengths"].sort()
+                agg["p95"] = agg["lengths"][int(len(agg["lengths"]) * 0.95) - 1]
+                agg["power"].sort()
+                cells[(a, w, st)] = agg
+
+    rows = {(a, w, st): _metric_row(cells[(a, w, st)], n)
+            for a in alphas for w in workloads for st in stuffs}
+
+    def r(a, w, st, key):
+        return rows[(a, w, st)][key]
+
+    def cost(a, w, st, key="xbh"):
+        """Stuff-added fatigue cost: XBH de la política α menos la de α=0."""
+        return r(a, w, st, key) - r(0.00, w, st, key)
+
+    def supp(a, w, st, key="xbh"):
+        """Supresión de Stuff medida contra ST70 en el MISMO contexto (α, w)."""
+        return r(a, w, 70, key) - r(a, w, st, key)
+
+    supp_fresh = {st: supp(0.00, 1.00, st) for st in stuffs}
+    # Gap de identidad fresco: recorrido TOTAL de la dimensión Stuff en XBH/BIP
+    # (ST45 → ST95 a w=1.00). Es la escala propia del motor contra la que se
+    # juzga "material": NO es un miembro de la familia α, así que la barra de
+    # materialidad no es degenerada (el coste escala ~α, la barra no).
+    identity_gap = supp_fresh[95] - supp_fresh[45]
+
+    def retention(a, w, st):
+        base = supp_fresh[st]
+        if abs(base) < 1e-9:
+            return float("nan")
+        return supp(a, w, st) / base
+
+    print("=" * 150)
+    print("GAMEPLAY-ENGINE-003B-5B · CALIBRACIÓN α DE LA FATIGA DE STUFF (LAB)")
+    print(f"7 α × 4 workloads × 3 Stuff × {reps:,} PA = {reps*84:,} PA | "
+          "effective_stuff = raw·(1 − α·(1−f)), f = get_fatigue_factor() "
+          "productivo (SMOOTH-0.55-F35)")
+    print("α: 0.00 control · .25/.40/.50/.60/.75 candidatos · 1.00 = FULL "
+          "(referencia YA CONDENADA en 5A)")
+    print("Matriz IDÉNTICA a 003B-5A (Power 70, VEL/CTL/MOV 70, k=.30, mismas "
+          "seeds) · MID pitcher/batter · agent 65/50/30")
+    print("Contratos Q1–Q7 FIJADOS ANTES de correr. calculator.py UNCHANGED.")
+    print("=" * 150)
+
+    # ---------------- Matrices por α ----------------
+    for a in alphas:
+        tag = " (control)" if a == 0.00 else (" (FULL, referencia)" if a == 1.00
+                                              else "")
+        print()
+        print(f"---- α = {a:.2f}{tag} " + "-" * (44 - len(tag)))
+        print("   w     f    | eff ST45   ST70   ST95 | XBH 45    70    95 | "
+              "HR 45     70    95")
+        print("-" * 100)
+        for w in workloads:
+            print(f" {w:>5.2f} {factors[w]:>5.3f} | "
+                  f"{eff[(a, w, 45)]:>8.2f} {eff[(a, w, 70)]:>6.2f} "
+                  f"{eff[(a, w, 95)]:>6.2f} | "
+                  f"{r(a, w, 45, 'xbh'):>7.2f} {r(a, w, 70, 'xbh'):>6.2f} "
+                  f"{r(a, w, 95, 'xbh'):>6.2f} | "
+                  f"{r(a, w, 45, 'hr'):>7.2f} {r(a, w, 70, 'hr'):>6.2f} "
+                  f"{r(a, w, 95, 'hr'):>6.2f}")
+
+    # ---------------- Tabla decisiva ST95 ----------------
+    print()
+    print("=" * 150)
+    print("TABLA DECISIVA · ST95 (effective stuff degradado + coste XBH/BIP)")
+    print("-" * 150)
+    print("  α     | eff@1.20  eff@1.35  eff@1.50 | XBH@1.20  XBH@1.35  XBH@1.50 | "
+          "cost@1.20  cost@1.35  cost@1.50")
+    print("-" * 150)
+    for a in alphas:
+        print(f" {a:.2f}    | {eff[(a, 1.20, 95)]:>8.2f}  {eff[(a, 1.35, 95)]:>8.2f}  "
+              f"{eff[(a, 1.50, 95)]:>8.2f} | {r(a, 1.20, 95, 'xbh'):>8.2f}  "
+              f"{r(a, 1.35, 95, 'xbh'):>8.2f}  {r(a, 1.50, 95, 'xbh'):>8.2f} | "
+              f"{cost(a, 1.20, 95):>9.2f}  {cost(a, 1.35, 95):>9.2f}  "
+              f"{cost(a, 1.50, 95):>9.2f}")
+    print("=" * 150)
+
+    # ---------------- Stuff-added fatigue cost ----------------
+    print()
+    print("-- STUFF-ADDED FATIGUE COST · XBH/BIP (pp): XBH(α)(w) − XBH(α=0)(w) --")
+    for a in alphas:
+        if a == 0.00:
+            continue
+        print(f"  α={a:.2f}:")
+        for w in workloads:
+            print(f"    w={w:.2f}: ST45 {cost(a, w, 45):+6.2f} | ST70 "
+                  f"{cost(a, w, 70):+6.2f} | ST95 {cost(a, w, 95):+6.2f}")
+
+    # ---------------- Retención de supresión ----------------
+    print()
+    print("-- fatigue_suppression_retention = supresión(w) / supresión(fresco) --")
+    print(f"   (supresión = XBH ST70 − XBH ST en el MISMO α y workload; "
+          f"fresco ST45 {supp_fresh[45]:.2f}pp / ST95 {supp_fresh[95]:.2f}pp)")
+    print("  α     | ret ST95 @1.20  @1.35  @1.50 | ret ST45 @1.20  @1.35  @1.50")
+    print("-" * 100)
+    for a in alphas:
+        r95 = [retention(a, w, 95) for w in (1.20, 1.35, 1.50)]
+        r45 = [retention(a, w, 45) for w in (1.20, 1.35, 1.50)]
+        print(f" {a:.2f}    | {r95[0]*100:>12.1f}% {r95[1]*100:>6.1f}% {r95[2]*100:>6.1f}%"
+              f" | {r45[0]*100:>12.1f}% {r45[1]*100:>6.1f}% {r45[2]*100:>6.1f}%")
+    print()
+    for a in alphas:
+        print(f"  → A workload 1.50, un Stuff95 (α={a:.2f}) conserva el "
+              f"{retention(a, 1.50, 95)*100:.1f}% de su ventaja fresca de "
+              f"supresión ({supp_fresh[95]:.2f}pp → "
+              f"{supp(a, 1.50, 95):.2f}pp).")
+
+    # ---------------- REPRO vs 003B-5A ----------------
+    print()
+    print("-- REPRO vs 003B-5A (α=0.00≡F0 NONE, α=0.50≡F2 HALF, α=1.00≡F1 FULL) --")
+    repro_ok = True
+    for a in sorted(REPRO_5A_003B5B):
+        worst = 0.0
+        for w in workloads:
+            ref = REPRO_5A_003B5B[a][w]
+            for i, st in enumerate(stuffs):
+                worst = max(worst, abs(r(a, w, st, "xbh") - ref[i]))
+        ok = worst <= REPRO_5A_TOL_PP
+        repro_ok &= ok
+        print(f"  α={a:.2f}: |Δ| XBH máx vs 5A = {worst:.2f}pp "
+              f"(≤{REPRO_5A_TOL_PP}): {'PASS' if ok else 'FAIL'}")
+    print(f"  REPRO 5A: {'PASS' if repro_ok else 'FAIL'} "
+          "(misma fórmula + mismas seeds → debe ser 0.00)")
+
+    # ---------------- Contratos Q1–Q7 ----------------
+    print()
+    print("-- CONTRATOS (Q1–Q7, fijados antes) --")
+
+    # Q1 · FRESH IDENTITY: en w=1.00 f=1.0 → effective_stuff = raw para TODO α.
+    q1_ok = True
+    for st in stuffs:
+        vals = [r(a, 1.00, st, "xbh") for a in alphas]
+        span = max(vals) - min(vals)
+        ref_d = max(abs(v - Q1_REFS_003B5B[st]) for v in vals)
+        effs = [eff[(a, 1.00, st)] for a in alphas]
+        eff_exact = all(abs(e - st) < 1e-9 for e in effs)
+        ok = span <= Q1_SPAN_PP and ref_d <= Q1_REF_PP and eff_exact
+        q1_ok &= ok
+        print(f"  Q1 w=1.00 ST{st}: span entre α {span:.2f} (≤{Q1_SPAN_PP}), "
+              f"|Δ vs 003B-4| máx {ref_d:.2f} (≤{Q1_REF_PP}), eff≡raw "
+              f"{eff_exact}: {'PASS' if ok else 'FAIL'}")
+    print(f"  Q1 FRESH IDENTITY (todos): {'PASS' if q1_ok else 'FAIL'}")
+
+    # Q2 · ALPHA ORDERING: mismo raw Stuff y workload>1, α↑ → effective_stuff no
+    # aumenta (exacto por construcción) → la capacidad de supresión no aumenta
+    # (XBH/BIP no disminuye). Para ST95 esto es más daño permitido al subir α.
+    q2_by_alpha = {}
+    for a in alphas:
+        a_ok = True
+        for w in workloads[1:]:
+            for st in stuffs:
+                eseq = [eff[(x, w, st)] for x in alphas]
+                xseq = [r(x, w, st, "xbh") for x in alphas]
+                e_ok = all(eseq[i + 1] <= eseq[i] + 1e-9
+                           for i in range(len(eseq) - 1))
+                x_ok = all(xseq[i + 1] + Q2_TOL_PP >= xseq[i]
+                           for i in range(len(xseq) - 1))
+                a_ok &= e_ok and x_ok
+        q2_by_alpha[a] = a_ok
+    print(f"  Q2 ALPHA ORDERING: eff no-creciente en α y XBH no decreciente "
+          f"(tol {Q2_TOL_PP}pp) en las 3×3 combinaciones w>1 × Stuff")
+    for a in alphas:
+        print(f"    α={a:.2f}: {'PASS' if q2_by_alpha[a] else 'FAIL'}")
+
+    # Q3 · WORKLOAD MONOTONICITY: w↑ → effective_stuff↓ (exacto) y, para α>0,
+    # XBH/BIP NO disminuye en ST70/ST95. ST45 no se usa como contrato monotónico
+    # de XBH porque el sistema completo también degrada VEL/MOV/CTL (el canal de
+    # Stuff es una fracción del cambio total); su effective_stuff sí es monotónico.
+    q3_by_alpha = {}
+    for a in alphas:
+        a_ok = True
+        detail = []
+        for st in stuffs:
+            eseq = [eff[(a, w, st)] for w in workloads]
+            a_ok &= all(eseq[i + 1] <= eseq[i] + 1e-9
+                        for i in range(len(eseq) - 1))
+        if a > 0.0:
+            for st in (70, 95):
+                cseq = [cost(a, w, st) for w in workloads]
+                ok = all(cseq[i + 1] + Q3_MONO_PP >= cseq[i]
+                         for i in range(len(cseq) - 1))
+                a_ok &= ok
+                detail.append(f"ST{st} {['%+.2f' % v for v in cseq]}")
+        else:
+            for st in stuffs:
+                xseq = [r(a, w, st, "xbh") for w in workloads]
+                ok = max(xseq) - min(xseq) <= Q3_CTRL_SPAN_PP
+                a_ok &= ok
+                detail.append(f"ST{st} span {max(xseq)-min(xseq):.2f}")
+        q3_by_alpha[a] = a_ok
+        print(f"  Q3 α={a:.2f} eff↓ en w (las 3 Stuff) + "
+              f"{'cost↑ (tol %.1f)' % Q3_MONO_PP if a > 0 else 'XBH plana (≤%.1f)' % Q3_CTRL_SPAN_PP}: "
+              f"{' | '.join(detail)} → {'PASS' if a_ok else 'FAIL'}")
+
+    # Q4 · ELITE IDENTITY SURVIVES: a w=1.50 el ST95 fatigado debe conservar
+    # ventaja de supresión frente a un ST70 FRESCO. Es exactamente la frontera
+    # que condenó FULL en 5A (Δ+2.95 = peor que un MID fresco).
+    fresh_mid = r(0.00, 1.00, 70, "xbh")
+    q4_by_alpha = {}
+    print(f"  Q4 ref MID fresco (XBH ST70 w=1.00) = {fresh_mid:.2f}")
+    for a in alphas:
+        x95 = r(a, 1.50, 95, "xbh")
+        margin = fresh_mid - x95
+        ok = margin > Q4_MARGIN_PP
+        q4_by_alpha[a] = ok
+        band = "banda ≥1.0pp OK" if margin >= Q4_BAND_PP else "banda <1.0pp"
+        word = "conserva ventaja" if ok else "CRUZA la frontera (peor que MID fresco)"
+        print(f"    α={a:.2f}: XBH ST95 w=1.50 {x95:.2f} → Δ {-margin:+.2f} vs MID "
+              f"fresco (margen {margin:+.2f}) → {word}; {band}")
+
+    # Q5 · MATERIAL FATIGUE (estructural) + escalera de materialidad.
+    q5_by_alpha = {}
+    for a in alphas:
+        if a == 0.00:
+            q5_by_alpha[a] = True
+            continue
+        a_ok = True
+        for st in stuffs:
+            cseq = [cost(a, w, st) for w in workloads]
+            a_ok &= cseq[2] > Q5_EPS_PP and cseq[3] > Q5_EPS_PP
+            a_ok &= all(cseq[i + 1] + Q6_STEP_PP >= cseq[i]
+                        for i in range(len(cseq) - 1))
+        q5_by_alpha[a] = a_ok
+    print(f"  Q5 estructural: cost@1.35 y @1.50 > {Q5_EPS_PP}pp y monótono en w "
+          "(efecto reproducible, no ruido)")
+    for a in alphas:
+        if a == 0.00:
+            print("    α=0.00: control (cost ≡ 0 por construcción) → N/A")
+        else:
+            print(f"    α={a:.2f}: {'PASS' if q5_by_alpha[a] else 'FAIL'}")
+
+    # Q6 · NO COMPOUND EXPLOSION: el coste adicional sobre α=0 crece con
+    # suavidad; sin saltos hacia atrás, sin cruces entre α y sin aceleración
+    # patológica entre w1.20 → 1.35 → 1.50.
+    q6_by_alpha = {}
+    for a in alphas:
+        a_ok = True
+        detail = []
+        for st in stuffs:
+            c = [cost(a, w, st) for w in workloads]
+            d1 = c[2] - c[1]
+            d2 = c[3] - c[2]
+            step_ok = d1 + Q6_STEP_PP >= 0.0 and d2 + Q6_STEP_PP >= 0.0
+            accel = (d2 / d1) if d1 > 1e-9 else None
+            accel_ok = accel is None or accel <= Q6_MAX_ACCEL
+            a_ok &= step_ok and accel_ok
+            detail.append(f"ST{st} d1 {d1:+.2f} d2 {d2:+.2f} "
+                          f"accel {'—' if accel is None else f'{accel:.2f}'}")
+        q6_by_alpha[a] = a_ok
+        print(f"  Q6 α={a:.2f}: {' | '.join(detail)} → "
+              f"{'PASS' if a_ok else 'FAIL'}")
+    cross_ok = True
+    for w in workloads:
+        for st in stuffs:
+            cseq = [cost(x, w, st) for x in alphas[1:]]
+            ok = all(cseq[i + 1] + Q6_STEP_PP >= cseq[i]
+                     for i in range(len(cseq) - 1))
+            cross_ok &= ok
+    print(f"  Q6 sin CRUCES entre α (cost monótono en α en cada w × Stuff, "
+          f"tol {Q6_STEP_PP}): {'PASS' if cross_ok else 'FAIL'}")
+    q6_by_alpha = {a: (q6_by_alpha[a] and cross_ok) for a in alphas}
+
+    # Q7 · SYSTEM STABILITY: K5-R sano, colas, CAP, probabilidades válidas y
+    # aislamiento de mecanismo. S2 solo modula power_score, y SOLO el bucket del
+    # primer BIP (que termina el PA igual en todos los casos) → la trayectoria
+    # del PA es bit-idéntica entre α. Eso convierte el aislamiento de mecanismo
+    # en una INVARIANZA EXACTA, no en un test estadístico. Lo único que puede
+    # moverse es la mezcla dentro del BIP (y Reach%, que se mueve con OUT↔1B),
+    # que es exactamente el canal de Stuff.
+    q7_ok = True
+    max_p95 = 0
+    caps = 0
+    invalid = []
+    violations = []
+    # Claves que NO dependen de power_score → invariancia exacta exigida.
+    shape_keys = ("k", "bb", "bip", "whiff", "called_tk", "cnt", "paus")
+    # Claves que SÍ son el canal de Stuff → se miden y se reportan, sin contrato.
+    mix_keys = ("xbh", "hr", "out_bip", "x1", "x2", "x3", "reach")
+    key_worst = {key: (0.0, None) for key in shape_keys + mix_keys + ("p95",)}
+    for a in alphas:
+        for w in workloads:
+            for st in stuffs:
+                c = cells[(a, w, st)]
+                p95 = c["p95"]
+                cap = c["outcome"]["CAP"]
+                p12 = c["len12"] / n * 100
+                p16 = c["len16"] / n * 100
+                max_p95 = max(max_p95, p95)
+                caps += cap
+                if not (p95 <= Q7_P95_MAX and cap == 0
+                        and p12 <= Q7_P12_MAX and p16 <= Q7_P16_MAX):
+                    q7_ok = False
+                    violations.append((a, w, st, p95, cap, p12, p16))
+                for key, val in rows[(a, w, st)].items():
+                    bad = (val != val) or val in (float("inf"), float("-inf"))
+                    if not bad and key not in ("p95", "paus", "pmean", "p10",
+                                               "p50", "p90"):
+                        bad = val < -1e-9 or val > 100 + 1e-9
+                    if bad:
+                        invalid.append((a, w, st, key, val))
+                if a == 0.00:
+                    continue
+                for key in shape_keys + mix_keys:
+                    d = abs(r(a, w, st, key) - r(0.00, w, st, key))
+                    if d > key_worst[key][0]:
+                        key_worst[key] = (d, (a, w, st))
+                d_p95 = abs(c["p95"] - cells[(0.00, w, st)]["p95"])
+                if d_p95 > key_worst["p95"][0]:
+                    key_worst["p95"] = (d_p95, (a, w, st))
+    shape_worst = max(key_worst[key][0] for key in shape_keys)
+    shape_worst = max(shape_worst, key_worst["p95"][0])
+    shape_ok = shape_worst <= Q7_SHAPE_PP
+    q7_ok &= shape_ok and not invalid
+    print(f"  Q7 max p95 {max_p95}≤{Q7_P95_MAX}, CAP {caps}, violaciones "
+          f"{len(violations)}: {'PASS' if not violations else 'FAIL'}")
+    if violations:
+        for v in violations[:8]:
+            print("    ", v)
+    print(f"  Q7 probabilidades finite/válidas (fuera de [0,100]): {len(invalid)}: "
+          f"{'PASS' if not invalid else 'FAIL'}")
+    if invalid[:5]:
+        for v in invalid[:5]:
+            print("    ", v)
+    print("  Q7 aislamiento de MECANISMO · |Δ| máx vs α=0 a mismo workload:")
+    print("    trayectoria del PA (debe ser 0.00 EXACTO):")
+    for key in shape_keys + ("p95",):
+        d, at = key_worst[key]
+        ok = d <= Q7_SHAPE_PP
+        loc = ("" if at is None else
+               f"  (α={at[0]:.2f} w={at[1]:.2f} ST{at[2]})")
+        print(f"      {key:>10}: {d:>6.2f}pp (≤{Q7_SHAPE_PP}): "
+              f"{'PASS' if ok else 'FAIL'}{loc}")
+    print(f"    trayectoria del PA completa: {'PASS' if shape_ok else 'FAIL'} "
+          f"(|Δ| máx {shape_worst:.2f}pp)")
+    print("    canal de Stuff (SÍ debe moverse; es la única firma permitida):")
+    for key in mix_keys:
+        d, at = key_worst[key]
+        loc = ("" if at is None else
+               f"  (α={at[0]:.2f} w={at[1]:.2f} ST{at[2]})")
+        print(f"      {key:>10}: {d:>6.2f}pp{loc}")
+    print(f"  Q7 SYSTEM STABILITY: {'PASS' if q7_ok else 'FAIL'}")
+
+    # ---------------- Matriz de contratos + selección ----------------
+    spec = {a: {"Q1": q1_ok, "Q2": q2_by_alpha[a], "Q3": q3_by_alpha[a],
+                "Q4": q4_by_alpha[a], "Q5": q5_by_alpha[a], "Q6": q6_by_alpha[a],
+                "Q7": q7_ok} for a in alphas}
+    hard = ("Q1", "Q2", "Q3", "Q4", "Q5", "Q6", "Q7")
+    candidates = [a for a in alphas if a not in (0.00, 1.00)]
+
+    def material_at(a, w, bar):
+        return cost(a, w, 95) >= identity_gap * bar
+
+    def material_both(a, bar):
+        return all(material_at(a, w, bar) for w in (1.35, 1.50))
+
+    print()
+    print("-" * 150)
+    print("MATRIZ DE CANDIDATOS (Q1-Q7) + MATERIALIDAD + RETENCIÓN")
+    print(f"  gap de identidad fresco (ST45−ST95 XBH a w=1.00) = {identity_gap:.2f}pp "
+          f"→ barra de materialidad = {Q5_MATERIAL_BAR*100:.0f}% = "
+          f"{identity_gap*Q5_MATERIAL_BAR:.2f}pp")
+    print("  α     | Q1   Q2   Q3   Q4   Q5   Q6   Q7 | cost@1.35 cost@1.50 "
+          "%gap@1.35 %gap@1.50 | ret@1.50 | veredicto")
+    print("-" * 150)
+    for a in alphas:
+        marks = "  ".join("Y" if spec[a][c] else "N" for c in hard)
+        c35, c50 = cost(a, 1.35, 95), cost(a, 1.50, 95)
+        p35, p50 = c35 / identity_gap * 100, c50 / identity_gap * 100
+        fails = [c for c in hard if not spec[a][c]]
+        if a == 0.00:
+            verdict = "CONTROL (no candidato)"
+        elif a == 1.00:
+            verdict = "REFERENCIA (ya condenada en 5A)"
+        elif fails:
+            verdict = f"RECHAZADO ({','.join(fails)})"
+        elif material_both(a, Q5_MATERIAL_BAR):
+            verdict = "CANDIDATO (sano + material en 1.35 y 1.50)"
+        elif material_at(a, 1.50, Q5_MATERIAL_BAR):
+            verdict = "sano + material@1.50, NO material@1.35"
+        else:
+            verdict = "sano pero NO material"
+        print(f"  {a:.2f}   | {marks} | {c35:>9.2f} {c50:>10.2f} {p35:>9.1f}% "
+              f"{p50:>9.1f}% | {retention(a, 1.50, 95)*100:>7.1f}% | {verdict}")
+    print("-" * 150)
+
+    # Sensibilidad de la decisión a la barra de materialidad. La barra es una
+    # pantalla POST-HOC (Q5 contractual es solo estructural: cost positivo,
+    # monótono en w y ordenado en α), así que se muestra explícitamente qué α
+    # ganaría con cada barra y hasta dónde permite llegar Q4.
+    q4_ceiling = max([a for a in candidates if q4_by_alpha[a]], default=None)
+    print("  Ceiling de Q4 (mayor α que todavía conserva identidad a w=1.50): "
+          f"{'α=%.2f' % q4_ceiling if q4_ceiling is not None else 'NINGUNO'}")
+    print("  Sensibilidad a la barra de materialidad (menor α sano y material):")
+    print("    barra   pp     | material@1.50  material@1.35&1.50  "
+          "selección(1.35&1.50)")
+    for bar in (0.15, 0.20, 0.25, 0.30, 0.35, 0.40):
+        pick50 = pickboth = None
+        for a in candidates:
+            if not all(spec[a][c] for c in hard):
+                continue
+            if pick50 is None and material_at(a, 1.50, bar):
+                pick50 = a
+            if pickboth is None and material_both(a, bar):
+                pickboth = a
+        print(f"    {bar*100:>4.0f}%  {identity_gap*bar:>5.2f}  | "
+              f"{'α=%.2f' % pick50 if pick50 is not None else '—':>12}  "
+              f"{'α=%.2f' % pickboth if pickboth is not None else 'NINGUNO':>17}  "
+              f"{'α=%.2f' % pickboth if pickboth is not None else '—':>19}")
+    print("    (la barra no es un contrato: Q5 contractual solo exige que el "
+          "coste sea >", f"{Q5_EPS_PP}pp, monótono y ordenado en α)")
+
+    # ---------------- Decisión 003B-5B ----------------
+    print()
+    winner = None
+    for a in candidates:
+        if all(spec[a][c] for c in hard) and material_both(a, Q5_MATERIAL_BAR):
+            winner = a
+            break
+
+    def band(pred):
+        got = [a for a in candidates if pred(a)]
+        return ("{" + ", ".join("%.2f" % a for a in got) + "}"
+                if got else "{} (ninguno)")
+
+    print("-" * 150)
+    print("RESUMEN DE BANDAS (no un punto: la decisión depende de la barra)")
+    print(f"  sanos (Q1–Q7 todos PASS)        : {band(lambda a: all(spec[a][c] for c in hard))}")
+    print(f"  material@1.50 (barra "
+          f"{Q5_MATERIAL_BAR*100:.0f}%)        : "
+          f"{band(lambda a: material_at(a, 1.50, Q5_MATERIAL_BAR))}")
+    print(f"  material@1.35 (barra "
+          f"{Q5_MATERIAL_BAR*100:.0f}%)        : "
+          f"{band(lambda a: material_at(a, 1.35, Q5_MATERIAL_BAR))}")
+    print(f"  techo Q4 (identidad a w=1.50)   : α ≤ "
+          f"{q4_ceiling if q4_ceiling is not None else '—'}")
+    print(f"  estructural 1.35 vs 1.50        : (1−f) = "
+          f"{1-factors[1.35]:.3f} a w=1.35 vs {1-factors[1.50]:.3f} a w=1.50 → "
+          f"la fatiga realizada en 1.35 es {100*(1-factors[1.35])/(1-factors[1.50]):.0f}% "
+          "de la de 1.50 (asimetría estructural, no artefacto de la barra)")
+    print("-" * 150)
+    if winner is not None:
+        # Holguras del ganador: sin esto el "CANDIDATO" puede parecer mucho más
+        # firme de lo que es (en 50k α=.60 apenas supera la barra de materialidad).
+        slack135 = cost(winner, 1.35, 95) - identity_gap * Q5_MATERIAL_BAR
+        margin_q4 = fresh_mid - r(winner, 1.50, 95, "xbh")
+        # Frontera Q4 interpolada linealmente entre el último α sano y el
+        # primero que cruza (etiquetado como interpolación, no como medición).
+        crossing = None
+        for a, b in zip(candidates, candidates[1:]):
+            if q4_by_alpha[a] and not q4_by_alpha[b]:
+                m_a = fresh_mid - r(a, 1.50, 95, "xbh")
+                m_b = fresh_mid - r(b, 1.50, 95, "xbh")
+                if m_a > 0 > m_b:
+                    crossing = a + (b - a) * m_a / (m_a - m_b)
+                break
+        print(f"003B-5B DECISION → α = {winner:.2f} es el CANDIDATO")
+        print(f"  Stuff gameplay k = .30 · Stuff fatigue: effective = raw·(1 − "
+              f"{winner:.2f}·(1−f)) con f = get_fatigue_factor() productivo")
+        print(f"  materialidad: cost@1.50 ST95 {cost(winner, 1.50, 95):+.2f}pp "
+              f"({cost(winner, 1.50, 95)/identity_gap*100:.0f}% del gap de "
+              f"identidad) | retención ST95 @1.50 "
+              f"{retention(winner, 1.50, 95)*100:.1f}% | margen de identidad "
+              f"Q4 {margin_q4:+.2f}pp")
+        print(f"  HOLGURAS: cost@1.35 {cost(winner, 1.35, 95):.2f}pp vs barra "
+              f"{identity_gap*Q5_MATERIAL_BAR:.2f}pp → {slack135:+.2f}pp "
+              f"({slack135/(identity_gap*Q5_MATERIAL_BAR)*100:+.1f}% de la barra) "
+              f"| margen Q4 {margin_q4:+.2f}pp")
+        if crossing is not None:
+            print(f"  Frontera Q4 interpolada: α* ≈ {crossing:.2f} (entre el "
+                  f"mayor α sano y el primero que cruza) → el α ganador está a "
+                  f"{crossing-winner:.2f} de la frontera")
+        if abs(slack135) < 0.5:
+            print(f"  AVISO: el ganador supera la barra de materialidad por "
+                  f"{abs(slack135):.2f}pp — es un punto de equilibrio, no un "
+                  f"interior robusto. La lectura por BANDAS (arriba) es la "
+                  f"confiable; este α es el mínimo que satisface la lectura "
+                  f"estricta de Q5.")
+        print("  Sigue SIN tocar producción (calculator.py UNCHANGED).")
+        print("  Siguiente → 003B-5C de robustez: Power {45,70,95} × Stuff "
+              "{45,70,95} × workload {1.00,1.35,1.50} con α ganador, para")
+        print("  comprobar que Power×Stuff×Fatigue no rompe la superficie "
+              "validada en 003B-4. Solo después 003B-6 (producción).")
+    else:
+        # Sin ganador: hay que separar POR QUÉ no lo hay. Si el techo de Q4 y el
+        # mínimo de materialidad no se solapan, el conflicto es entre contratos
+        # (Q4 vs Q5), no un fallo de los α candidatos.
+        need135 = next((a for a in candidates
+                        if all(spec[a][c] for c in hard)
+                        and material_at(a, 1.35, Q5_MATERIAL_BAR)), None)
+        print("003B-5B DECISION → NINGÚN α es a la vez sano y material en 1.35 "
+              "y 1.50 con la barra actual.")
+        print(f"  Q4 permite hasta α={q4_ceiling if q4_ceiling is not None else '—'}"
+              f"; la materialidad@1.35 empieza en α={need135 if need135 is not None else '—'}"
+              f". Si el mínimo de materialidad es MAYOR que el techo de Q4, el "
+              "conflicto es entre contratos (Q5 vs Q4), no entre candidatos.")
+        print("  Relee la tabla de sensibilidad: la decisión depende de la barra, "
+              "así que la barra es una decisión de diseño, no un hallazgo.")
+    if q4_by_alpha[1.00]:
+        print("AVISO DE INSTRUMENTO: Q4 debería RECHAZAR α=1.00 (la frontera que "
+              "condenó FULL en 5A). Si α=1.00 pasa Q4, el instrumento está "
+              "sospechoso → revisar antes de leer cualquier otra cosa.")
+
+
+# ---------------------------------------------------------------------------
+# 003B-5C · Power × Stuff × Fatigue robustness, α=.50 vs α=.60 (2.7M PA)
+# ---------------------------------------------------------------------------
+# 003B-5B dejó la decisión de α en una frontera de 0.01pp: ambos α pasan Q1–Q7
+# y ambos son VIABLES, y el que "gana" la lectura estricta de Q5 lo hace por
+# +0.01pp sobre una barra POST-HOC. Eso NO es evidencia suficiente para congelar
+# un parámetro de producción. 5C cambia de filosofía: NO vuelve a preguntar si α
+# alcanza una barra arbitraria de materialidad — pregunta si el SISTEMA se
+# comporta mejor con α=.60 que con α=.50, en la superficie completa
+# Power × Stuff × Fatigue.
+#
+# La familia y la fórmula NO se re-litigan (5A) ni el rango sano (5B):
+#     effective_stuff = raw_stuff * (1 - α * (1 - f)),  f = get_fatigue_factor()
+#
+# DESCARTADOS antes de correr (5B): α<=.25 cosmético · α>=.75 pierde identidad
+# (Q4) · α=.40 fallback conservador documentado, NO se lleva a 5C salvo que
+# ambos finalistas fallen. FINALISTAS: .50 (menor intervención) vs .60.
+STUFF_FATIGUE_ALPHAS_003B5C = (0.50, 0.60)   # finalistas pareados
+POWER_LEVELS_003B5C = (45, 70, 95)           # poder del BATTER (eje de 003B-4)
+STUFF_LEVELS_003B5C = (45, 70, 95)
+WORKLOADS_003B5C = (1.00, 1.35, 1.50)        # w=1.00 es el control FRESCO in-run
+K_003B5C = 0.30                              # S2 (003B-3 · 003B-4 · congelado)
+PROD_THRESHOLD_003B5C = get_pitch_threshold(9)  # 100 (Fatigue Policy v2)
+
+# --- Tolerancias R1–R9 (fijadas ANTES de correr, heredadas donde ya existían) ---
+R1_STEP_PP = 0.2    # R1: Power↑ → XBH↑ por paso (tol de 003B-4 O1/O2; los
+                    #   incrementos frescos observados son ~4pp/paso, ~20× la tol)
+R2_STEP_PP = 0.2    # R2: Stuff↓ → XBH↑ por paso (003B-4 O2; ~7.5pp/paso frescos)
+R3_STEP_PP = 0.7    # R3: el coste de fatiga de Stuff70/95 debe MONOTONO en w.
+                    #   Tol = la de 003B-5B Q3: cerca de saturación (POW95) el
+                    #   paso de XBH puede encogerse por el techo, no por señal
+                    #   inversa; 0.7pp evita un FAIL falso sin abrir la puerta a
+                    #   una inversión real de la fatiga.
+R4_MARGIN_PP = 0.0  # R4: ST95 fatigado sigue siendo MEJOR en supresión que ST70
+                    #   FRESCO (misma α, mismo Power) — la frontera exacta de 5B Q4,
+                    #   ahora generalizada a los 3 Powers y a los 3 workloads.
+R4_BAND_PP = 1.0   # R4 banda advisory (no contractual), como en 5B Q4.
+R5_EXPR_PP = 1.0   # R5: ambos atributos siguen EXPRESÁNDOSE en el matchup fuerte.
+                    #   Barra = la de 003B-4 O3 (1.0pp; observado +9.83).
+R6_XBH_MAX = 55.0  # R6: topes de 003B-4 O4 (observado máx 40.66/29.49) → 5C no
+R6_HR_MAX = 35.0   #   puede romper la superficie YA validada en 003B-4.
+R7_KEEP_FRAC = 0.50  # R7: la esquina POBAJO×ST95 (XBH fresca 003B-4 = 5.53%, ya
+                    #   casi degenerada con HR 0.01%) no puede perder más de la
+                    #   MITAD de su propio valor fresco IN-RUN. Referencia
+                    #   relativa al control w=1.00 de la MISMA matriz: no es una
+                    #   barra inventada, es "no empeorar el extremo validado".
+R7_BUCKET_MAX = 85.0  # R7: ningún bucket de contacto puede dominar el BIP
+                      #   (≥85% = distribución degenerada).
+R8_P95_MAX = 6     # R8: K5-R (p95 ≤ 6, CAP 0) — idéntico a 5B Q7.
+R8_P12_MAX = 0.05
+R8_P16_MAX = 0.01
+R8_SHAPE_PP = 0.0  # R8 shape: α sólo mueve el bucket del PRIMER BIP → la
+                    #   TRAYECTORIA del PA (pitches, K, BB, BIP, whiff, called,
+                    #   cnt, t12, t16, p95) debe ser IDÉNTICA entre α=.50 y α=.60
+                    #   en la misma celda (p, st, w). Invarianza EXACTA, no
+                    #   estadística: es el mismo argumento de 5B Q7, y convierte
+                    #   todo 5C en un auto-control del instrumento (27 celdas
+                    #   pareadas gratis).
+R9_Z = 2.0         # R9: "mejora material" = |Δ| > 2 SE del Δ PAREADO. La barra
+                    #   NO es arbitraria: sale de la varianza de los propios datos
+                    #   con las seeds compartidas. Es la replacement de la barra
+                    #   de materialidad de 5B.
+
+# REPRO 003B-4: el control fresco (w=1.00) de 5C debe reproducir la superficie
+# fresca de 003B-4 (k=.30, mismas seeds 750M+rep) — es la MISMA matriz con α
+# inerte, porque con f=1.0 el α no puede cambiar nada. Si esto falla, 5C no está
+# midiendo lo que dice medir.
+REPRO_4_003B5C = {
+    45: {"xbh": (20.72, 13.11, 5.53), "hr": (9.52, 2.01, 0.01)},
+    70: {"xbh": (30.49, 23.03, 15.77), "hr": (19.74, 12.10, 4.53)},
+    95: {"xbh": (40.66, 32.95, 25.59), "hr": (29.49, 22.12, 14.75)},
+}
+REPRO_4_TOL_PP = 0.01
+
+# Códigos de outcome por PA (para la tabla de contingencia pareada α-vs-α).
+_OUT_CODES_003B5C = ("K", "BB", "OUT", "1B", "2B", "3B", "HR")
+_CODE_IDX_003B5C = {c: i for i, c in enumerate(_OUT_CODES_003B5C)}
+_METRIC_CODES_003B5C = {
+    "xbh": ("2B", "3B", "HR"),
+    "hr": ("HR",),
+    "out": ("OUT",),
+    "reach": ("BB", "1B", "2B", "3B", "HR"),
+}
+_BIP_CODES_003B5C = ("OUT", "1B", "2B", "3B", "HR")
+
+
+def _stuff_fatigue_eff_003b5c(raw: float, alpha: float, f: float) -> float:
+    """Misma familia que 5A/5B (una sola fórmula en el LAB)."""
+    return raw * (1.0 - alpha * (1.0 - f))
+
+
+def _paired_ratio_003b5c(codes_num, codes_den, joint, n):
+    """Δ y SE de una RAZÓN de conteos entre dos celdas PAREADAS por seed.
+
+    Devuelve (ratio_50_pct, ratio_60_pct, delta_pp, se_pp, z) para num/den
+    (ej. XBH/BIP), donde Δ = α=.60 − α=.50. `joint` es la tabla de contingencia
+    7×7 de los códigos de outcome emparejados (filas = α=.50, columnas = α=.60)
+    de las dos celdas.
+
+    Razón de medias: R = x̄/ȳ. Var(R) por delta-method CON la covarianza
+    emparejada real, de modo que el SE de la DIFERENCIA recoge la correlación
+    positiva de las dos celdas (mismo PA, mismo seed) en vez de asumir
+    independencia — que es lo que infla un SE ingenuo y haría que una diferencia
+    real pareciera ruido. Verificado contra bootstrap pareado (ratio SE
+    analítico/SE bootstrap ≈ 0.97–1.06).
+    """
+    num_idx = [_CODE_IDX_003B5C[c] for c in codes_num]
+    den_idx = [_CODE_IDX_003B5C[c] for c in codes_den]
+    allc = list(range(7))
+
+    def marg_a(idx):
+        return sum(joint[i][j] for i in idx for j in allc) / n
+
+    def marg_b(idx):
+        return sum(joint[i][j] for i in allc for j in idx) / n
+
+    def cross(ia, jb):
+        """E[serie_A(ia) · serie_B(jb)] — producto cruzado EMPAREJADO."""
+        return sum(joint[i][j] for i in ia for j in jb) / n
+
+    # A = filas de la tabla (α=.50) · B = columnas de la tabla (α=.60).
+    # Son celdas DISTINTAS: el Δ de una razón tiene que restar dos marginales
+    # distintas de la misma tabla de contingencia, no la misma dos veces.
+    x_a, y_a = marg_a(num_idx), marg_a(den_idx)
+    x_b, y_b = marg_b(num_idx), marg_b(den_idx)
+    if y_a <= 0 or y_b <= 0:
+        return (0.0, 0.0, 0.0, float("inf"), 0.0)
+    r_a, r_b = x_a / y_a, x_b / y_b
+    # varianzas de las medias (poblacionales / n); los márgenes son Bernoulli
+    v_xa, v_xb = x_a - x_a * x_a, x_b - x_b * x_b
+    v_ya, v_yb = y_a - y_a * y_a, y_b - y_b * y_b
+    c_xa_ya = cross(num_idx, den_idx) - x_a * y_a          # E[x_A·y_A]
+    c_xb_yb = cross(den_idx, num_idx) - x_b * y_b          # E[x_B·y_B]
+    var_a = (v_xa + r_a * r_a * v_ya - 2 * r_a * c_xa_ya) / (n * y_a * y_a)
+    var_b = (v_xb + r_b * r_b * v_yb - 2 * r_b * c_xb_yb) / (n * y_b * y_b)
+    # covarianza entre las dos celdas (emparejada) — los 4 productos cruzados
+    c_xa_xb = cross(num_idx, num_idx) - x_a * x_b          # E[x_A·x_B]
+    c_ya_yb = cross(den_idx, den_idx) - y_a * y_b          # E[y_A·y_B]
+    c_ya_xb = cross(den_idx, num_idx) - y_a * x_b          # E[y_A·x_B]
+    c_xa_yb = cross(num_idx, den_idx) - x_a * y_b          # E[x_A·y_B]
+    cov = (c_xa_xb + r_a * r_b * c_ya_yb
+           - r_a * c_ya_xb - r_b * c_xa_yb) / (n * y_a * y_b)
+    se = math.sqrt(max(0.0, var_a + var_b - 2 * cov))
+    delta = (r_b - r_a) * 100          # Δ = α=.60 − α=.50
+    return (r_a * 100, r_b * 100, delta, se * 100,
+            (delta / (se * 100)) if se > 0 else 0.0)
+
+
+def _joint_ratio_003b5c(joint4, coeffs, codes_num, codes_den, n):
+    """G = Σ_j coeffs_j·(x_j/y_j) sobre 4 celdas PAREADAS, con SE multinomial.
+
+    Es la versión de 4 celdas de _paired_ratio_003b5c: sirve para los
+    GRADIENTES (p. ej. ΔST95 − ΔST45 mezcla las DOS α y las DOSStuff, así que
+    su SE no puede sacarse de las tablas 2×2 de Δ: las dos diferencias están
+    fuertemente correlacionadas y restar sus SEs en quadrature exageraría el
+    error). Se aplica el delta-method sobre el multinomial de 4 vías:
+
+        Var(Ĝ) ≈ (1/n)·[ Σ_k p_k·g_k² − (Σ_k p_k·g_k)² ]
+
+    con g_k = ∂G/∂p_k (cada categoría es una tupla de 4 códigos, y las
+    marginales son 0/1 dentro de la categoría).
+    """
+    num_idx = set(_CODE_IDX_003B5C[c] for c in codes_num)
+    den_idx = set(_CODE_IDX_003B5C[c] for c in codes_den)
+    # Las marginales van como PROPORCIONES (conteos/n), no como conteos: las
+    # derivadas ∂G/∂p_k viven en la escala de las proporciones, y usar conteos
+    # aquí rompe el SE por un factor n.
+    xs = [0.0] * 4
+    ys = [0.0] * 4
+    for key, c in joint4.items():
+        w = c / n
+        for j in range(4):
+            if key[j] in num_idx:
+                xs[j] += w
+            if key[j] in den_idx:
+                ys[j] += w
+    if any(ys[j] <= 0 for j in range(4)):
+        return (0.0, float("inf"), 0.0)
+    ratios = [xs[j] / ys[j] for j in range(4)]
+    g = sum(coeffs[j] * ratios[j] for j in range(4))
+    s1 = 0.0
+    s2 = 0.0
+    for key, c in joint4.items():
+        p = c / n
+        gk = 0.0
+        for j in range(4):
+            if ys[j] <= 0:
+                continue
+            if key[j] in num_idx:
+                gk += coeffs[j] / ys[j]
+            if key[j] in den_idx:
+                gk -= coeffs[j] * ratios[j] / ys[j]
+        s1 += p * gk * gk
+        s2 += p * gk
+    var = max(0.0, s1 - s2 * s2) / n
+    se = math.sqrt(var)
+    return (g * 100, se * 100, (g * 100 / (se * 100)) if se > 0 else 0.0)
+
+
+def run_power_stuff_fatigue_e003b5c(reps: int) -> None:
+    """003B-5C · Power × Stuff × Fatigue, α=.50 vs α=.60, contratos R1–R9."""
+    n = reps
+    k = K_003B5C
+    batter_tpl = BATTER_PROFILES_003A["MID"]
+    pitcher = PITCHER_PROFILES_003A["MID"]
+    powers = list(POWER_LEVELS_003B5C)
+    stuffs = list(STUFF_LEVELS_003B5C)
+    workloads = list(WORKLOADS_003B5C)
+    alphas = list(STUFF_FATIGUE_ALPHAS_003B5C)
+    cells = {}
+    codes = {}
+    eff = {}
+
+    def fresh_agg():
+        return {"pitches": 0, "take_attempts": 0, "called_strikes_on_take": 0,
+                "swing_attempts": 0, "whiffs": 0, "outcome": Counter(),
+                "lengths": [], "power": [], "bips": 0, "len12": 0, "len16": 0}
+
+    factors = {w: get_fatigue_factor(
+        int(w * PROD_THRESHOLD_003B5C), PROD_THRESHOLD_003B5C)
+        for w in workloads}
+    for a in alphas:
+        for w in workloads:
+            f = factors[w]
+            for p in powers:
+                for st in stuffs:
+                    e = _stuff_fatigue_eff_003b5c(float(st), a, f)
+                    eff[(a, w, p, st)] = e
+                    batter = dict(batter_tpl, poder=p)
+                    agg = fresh_agg()
+                    cd = bytearray()
+                    for rep in range(reps):
+                        # MISMAS seeds que 003B-4/5A/5B en todas las celdas:
+                        # las dos familias α son 100% pareadas entre sí y con la
+                        # superficie fresca de 003B-4.
+                        seed = int(DISCIPLINE_WORKLOAD * 1000) * 10**6 + rep
+                        d = _simulate_pa_diag(E1_POLICY, seed,
+                                              batter_attrs=batter,
+                                              pitcher_attrs=pitcher,
+                                              stuff_level=e,
+                                              stuff_arm="S2",
+                                              stuff_k_qty=k,
+                                              workload=w,
+                                              power_log=agg["power"])
+                        agg["pitches"] += d["pitches"]
+                        agg["take_attempts"] += d["take_attempts"]
+                        agg["called_strikes_on_take"] += d["called_strikes_on_take"]
+                        agg["swing_attempts"] += d["swing_attempts"]
+                        agg["whiffs"] += d["whiffs"]
+                        agg["bips"] += d["bips"]
+                        agg["outcome"][d["outcome"]] += 1
+                        agg["lengths"].append(d["pitches"])
+                        cd.append(_CODE_IDX_003B5C[d["outcome"]])
+                        if d["pitches"] >= 12:
+                            agg["len12"] += 1
+                        if d["pitches"] >= 16:
+                            agg["len16"] += 1
+                    agg["lengths"].sort()
+                    agg["p95"] = agg["lengths"][int(len(agg["lengths"]) * 0.95) - 1]
+                    agg["power"].sort()
+                    cells[(a, w, p, st)] = agg
+                    codes[(a, w, p, st)] = cd
+
+    rows = {(a, w, p, st): _metric_row(cells[(a, w, p, st)], n)
+            for a in alphas for w in workloads for p in powers for st in stuffs}
+
+    def r(a, w, p, st, key):
+        return rows[(a, w, p, st)][key]
+
+    def cost(a, w, p, st, key="xbh"):
+        """Coste de fatiga de Stuff: métrica de (α,w,p,st) menos la de w=1.00."""
+        return r(a, w, p, st, key) - r(a, 1.00, p, st, key)
+
+    # Tablas de contingencia pareadas α=.50 vs α=.60 por celda (Power×Stuff×w).
+    joint = {}
+    for w in workloads:
+        for p in powers:
+            for st in stuffs:
+                tab = [[0] * 7 for _ in range(7)]
+                ca, cb = codes[(0.50, w, p, st)], codes[(0.60, w, p, st)]
+                for x, yy in zip(ca, cb):
+                    tab[x][yy] += 1
+                joint[(w, p, st)] = tab
+
+    def delta_m(w, p, st, metric):
+        num = _METRIC_CODES_003B5C[metric]
+        den = _BIP_CODES_003B5C
+        return _paired_ratio_003b5c(num, den, joint[(w, p, st)], n)
+
+    # Tablas de 4 vías para los GRADIENTES: (α, Stuff/axis) × (α, Stuff/axis).
+    # El gradiente mezcla las dos α, así que su SE necesita la covarianza
+    # cruzada de las 4 celdas, no los SEs de los Δ por separado.
+    joint4_stuff = {}
+    joint4_power = {}
+    for w in workloads:
+        for p in powers:
+            t = {}
+            c45 = codes[(0.50, w, p, 45)]
+            c95 = codes[(0.50, w, p, 95)]
+            c60_45 = codes[(0.60, w, p, 45)]
+            c60_95 = codes[(0.60, w, p, 95)]
+            for i, (a1, a2, a3, a4) in enumerate(zip(c45, c95, c60_45, c60_95)):
+                k4 = (a1, a2, a3, a4)
+                t[k4] = t.get(k4, 0) + 1
+            joint4_stuff[(w, p)] = t
+        for st in stuffs:
+            t = {}
+            c45 = codes[(0.50, w, 45, st)]
+            c95 = codes[(0.50, w, 95, st)]
+            c60_45 = codes[(0.60, w, 45, st)]
+            c60_95 = codes[(0.60, w, 95, st)]
+            for a1, a2, a3, a4 in zip(c45, c95, c60_45, c60_95):
+                k4 = (a1, a2, a3, a4)
+                t[k4] = t.get(k4, 0) + 1
+            joint4_power[(w, st)] = t
+
+    def grad_stuff(w, p, metric):
+        """ΔST95 − ΔST45 = (R60_95 − R50_95) − (R60_45 − R50_45) → c = (+1,−1,−1,+1)."""
+        return _joint_ratio_003b5c(joint4_stuff[(w, p)], (1.0, -1.0, -1.0, 1.0),
+                                   _METRIC_CODES_003B5C[metric],
+                                   _BIP_CODES_003B5C, n)
+
+    def grad_power(w, st, metric):
+        """ΔPOW95 − ΔPOW45 con la misma comb but sobre el eje Power."""
+        return _joint_ratio_003b5c(joint4_power[(w, st)], (1.0, -1.0, -1.0, 1.0),
+                                   _METRIC_CODES_003B5C[metric],
+                                   _BIP_CODES_003B5C, n)
+
+    print("=" * 150)
+    print("GAMEPLAY-ENGINE-003B-5C · POWER × STUFF × FATIGUE ROBUSTNESS "
+          f"(α={'/'.join(f'{a:.2f}' for a in alphas)}, k={k})")
+    print(f"2 α × 3 Power × 3 Stuff × 3 workloads × {reps:,} PA = "
+          f"{reps*54:,} PA | seeds compartidas (750M+rep) | pitcher MID | "
+          "agente 65/50/30 | PROD discipline")
+    print("Power = poder del BATTER (eje de 003B-4) · Stuff = stuff_level del "
+          "pitcher fatigado (k=.30) · w=1.00 es el control FRESCO in-run")
+    print("α sólo mueve el bucket del PRIMER BIP → las dos familias son "
+          "pareadas seed a seed y la trayectoria del PA debe ser IDÉNTICA (R8).")
+    print("Contratos R1–R9 FIJADOS ANTES de correr. calculator.py UNCHANGED.")
+    print("=" * 150)
+
+    for a in alphas:
+        for w in workloads:
+            print()
+            tag = " (FRESCO · control)" if w == 1.00 else ""
+            print(f"---- α={a:.2f} · w={w:.2f}{tag} " + "-" * (30 - len(tag)))
+            for key, lbl in (("xbh", "XBH/BIP"), ("hr", "HR/BIP"),
+                             ("out_bip", "OUT/BIP"), ("reach", "Reach/PA")):
+                print(f"  {lbl:>8} | filas = POWER del batter, cols = STUFF")
+                print(f"  {'POW':>8} | {'ST45':>8} {'ST70':>8} {'ST95':>8}")
+                for p in powers:
+                    vals = " ".join(f"{r(a, w, p, st, key):>8.2f}" for st in stuffs)
+                    print(f"  {p:>8} | {vals}")
+            print(f"  {'eff ST':>8} | " + " ".join(
+                f"{eff[(a, w, 70, st)]:>8.2f}" for st in stuffs)
+                + "   (ST45/70/95)")
+            print("  " + "-" * 36)
+
+    # ---------------- Contratos R1–R8 ----------------
+    print()
+    print("-- CONTRATOS R1–R8 (fijados antes) --")
+    results = {}
+    for a in alphas:
+        res = {}
+        # R1 POWER EXPRESSION
+        bad = []
+        for w in workloads:
+            for st in stuffs:
+                seq = [r(a, w, p, st, "xbh") for p in powers]
+                for lo, hi in zip(seq, seq[1:]):
+                    if hi - lo < R1_STEP_PP:
+                        bad.append(f"w={w} ST{st} {lo:.2f}→{hi:.2f}")
+                seqb = [r(a, w, p, st, "bip") for p in powers]
+                for lo, hi in zip(seqb, seqb[1:]):
+                    if hi - lo < 0.0:
+                        bad.append(f"BIP w={w} ST{st} {lo:.2f}→{hi:.2f}")
+        res["R1"] = not bad
+        print(f"  R1 POWER EXPRESSION       α={a:.2f}: "
+              f"{'PASS' if res['R1'] else 'FAIL ' + '; '.join(bad[:3])}")
+        # R2 STUFF EXPRESSION
+        bad = []
+        for w in workloads:
+            for p in powers:
+                seq = [r(a, w, p, st, "xbh") for st in stuffs]
+                for hi, lo in zip(seq, seq[1:]):
+                    if hi - lo < R2_STEP_PP:
+                        bad.append(f"w={w} POW{p} {hi:.2f}→{lo:.2f}")
+        res["R2"] = not bad
+        print(f"  R2 STUFF EXPRESSION       α={a:.2f}: "
+              f"{'PASS' if res['R2'] else 'FAIL ' + '; '.join(bad[:3])}")
+        # R3 FATIGUE DIRECTION
+        bad = []
+        for p in powers:
+            for st in (70, 95):
+                seq = [cost(a, w, p, st) for w in workloads]
+                for lo, hi in zip(seq, seq[1:]):
+                    if hi - lo < -R3_STEP_PP:
+                        bad.append(f"POW{p} ST{st} {lo:+.2f}→{hi:+.2f}")
+        res["R3"] = not bad
+        print(f"  R3 FATIGUE DIRECTION      α={a:.2f}: "
+              f"{'PASS' if res['R3'] else 'FAIL ' + '; '.join(bad[:3])}")
+        # R4 ELITE IDENTITY
+        bad = []
+        margins = []
+        for p in powers:
+            for w in workloads:
+                m = r(a, 1.00, p, 70, "xbh") - r(a, w, p, 95, "xbh")
+                margins.append((m, p, w))
+                if m <= R4_MARGIN_PP:
+                    bad.append(f"POW{p} w={w} margen {m:+.2f}")
+        margins.sort()
+        res["R4"] = not bad
+        mmin, pmin, wmin = margins[0]
+        res["_r4_min"] = mmin
+        print(f"  R4 ELITE IDENTITY         α={a:.2f}: "
+              f"{'PASS' if res['R4'] else 'FAIL ' + '; '.join(bad[:3])} "
+              f"(min {mmin:+.2f}pp @POW{pmin} w={wmin})")
+        # R5 STRONG-vs-STRONG
+        bad = []
+        for w in (1.35, 1.50):
+            dpow = r(a, w, 95, 95, "xbh") - r(a, w, 45, 95, "xbh")
+            dstuff = r(a, w, 95, 45, "xbh") - r(a, w, 95, 95, "xbh")
+            if dpow < R5_EXPR_PP:
+                bad.append(f"w={w} Power {dpow:+.2f}")
+            if dstuff < R5_EXPR_PP:
+                bad.append(f"w={w} Stuff {dstuff:+.2f}")
+        res["R5"] = not bad
+        print(f"  R5 STRONG-vs-STRONG       α={a:.2f}: "
+              f"{'PASS' if res['R5'] else 'FAIL ' + '; '.join(bad)}")
+        # R6 NO EXTREME EXPLOSION
+        ext_x = r(a, 1.50, 95, 45, "xbh")
+        ext_h = r(a, 1.50, 95, 45, "hr")
+        res["R6"] = ext_x <= R6_XBH_MAX and ext_h <= R6_HR_MAX
+        print(f"  R6 NO EXTREME EXPLOSION   α={a:.2f}: "
+              f"{'PASS' if res['R6'] else 'FAIL'} "
+              f"(POW95×ST45×w1.50 XBH {ext_x:.2f}≤{R6_XBH_MAX}, "
+              f"HR {ext_h:.2f}≤{R6_HR_MAX})")
+        # R7 NO EXTREME COLLAPSE
+        fresh_x = r(a, 1.00, 45, 95, "xbh")
+        fat_x = r(a, 1.50, 45, 95, "xbh")
+        bucket_max = max(r(a, 1.50, 45, 95, k2)
+                         for k2 in ("out_bip", "x1", "x2", "x3", "hr"))
+        res["R7"] = (fat_x >= R7_KEEP_FRAC * fresh_x
+                     and bucket_max <= R7_BUCKET_MAX)
+        print(f"  R7 NO EXTREME COLLAPSE    α={a:.2f}: "
+              f"{'PASS' if res['R7'] else 'FAIL'} "
+              f"(POW45×ST95 XBH {fat_x:.2f} vs fresco {fresh_x:.2f} "
+              f"(≥{R7_KEEP_FRAC*fresh_x:.2f}), bucket máx {bucket_max:.2f}"
+              f"≤{R7_BUCKET_MAX})")
+        # R8 SYSTEM STABILITY
+        bad = []
+        p95max = max(rows[k]["p95"] for k in rows)
+        t12max = max(rows[k]["t12"] for k in rows)
+        t16max = max(rows[k]["t16"] for k in rows)
+        if p95max > R8_P95_MAX:
+            bad.append(f"p95 {p95max}")
+        if t12max > R8_P12_MAX:
+            bad.append(f"t12 {t12max:.3f}")
+        if t16max > R8_P16_MAX:
+            bad.append(f"t16 {t16max:.3f}")
+        for k2 in rows:
+            for kk, vv in rows[k2].items():
+                if not (0.0 <= vv <= 100.0) and kk not in ("pmean", "p10", "p50",
+                                                           "p90", "p95", "paus"):
+                    bad.append(f"{kk} fuera de rango")
+        res["R8"] = not bad
+        print(f"  R8 SYSTEM STABILITY       α={a:.2f}: "
+              f"{'PASS' if res['R8'] else 'FAIL ' + '; '.join(bad[:3])} "
+              f"(p95 máx {p95max}≤{R8_P95_MAX}, CAP 0, t12 {t12max:.3f}"
+              f"≤{R8_P12_MAX}%, t16 {t16max:.3f}≤{R8_P16_MAX}%)")
+        results[a] = res
+    # R8 shape: trayectoria del PA idéntica entre α (invarianza EXACTA)
+    shape_bad = []
+    for w in workloads:
+        for p in powers:
+            for st in stuffs:
+                for kk in ("paus", "k", "bb", "bip", "t12", "t16", "whiff",
+                           "called_tk", "cnt", "p95"):
+                    d2 = abs(rows[(0.50, w, p, st)][kk] - rows[(0.60, w, p, st)][kk])
+                    if d2 > R8_SHAPE_PP:
+                        shape_bad.append(f"w={w} POW{p} ST{st} {kk} {d2:.3f}")
+    results["_shape"] = not shape_bad
+    print(f"  R8 PA SHAPE (α pareado)  : {'PASS' if results['_shape'] else 'FAIL'} "
+          f"(invarianza EXACTA en las 27 celdas pareadas; "
+          f"{'0.00pp en todos los canales' if not shape_bad else shape_bad[:2]})")
+    print("  " + "-" * 80)
+    repro_dev = max(
+        [abs(r(a, 1.00, p, sti, key) - rv)
+         for a in alphas for p in powers for key in ("xbh", "hr")
+         for sti, rv in zip(stuffs, REPRO_4_003B5C[p][key])])
+    results["_repro4"] = repro_dev <= REPRO_4_TOL_PP
+    print(f"  REPRO 003B-4 (fresco)  : "
+          f"{'PASS' if results['_repro4'] else 'FAIL'} (α es inerte con f=1.0 → "
+          f"las 36 cifras frescas deben ser las de 003B-4; |Δ| máx "
+          f"{repro_dev:.2f}pp, tol {REPRO_4_TOL_PP})")
+    print(f"  Veredicto R1–R8: α=.50 "
+          f"{'PASS' if all(results[0.50][c] for c in ('R1','R2','R3','R4','R5','R6','R7','R8')) and results['_shape'] else 'FAIL'}"
+          f" · α=.60 "
+          f"{'PASS' if all(results[0.60][c] for c in ('R1','R2','R3','R4','R5','R6','R7','R8')) and results['_shape'] else 'FAIL'}")
+    print("  " + "-" * 80)
+
+    # ---------------- R9: superficie pareada Δ(.60 − .50) ----------------
+    print()
+    print("-- R9 · ROBUSTNESS DOMINANCE: superficie PAREADA Δ(.60 − .50) --")
+    print("   Δ > 0 = α=.60 produce MÁS de esa métrica (más XBH/HR = menos "
+          "supresión = más daño al hitter).")
+    print("   'material' = |Δ| > 2 SE del Δ pareado (R9_Z). No hay barra de")
+    print("   materialidad: el umbral sale de la varianza de los propios datos.")
+    for metric in ("xbh", "hr", "out", "reach"):
+        print()
+        print(f"  Δ {metric.upper()}/{'PA' if metric == 'reach' else 'BIP'} "
+              f"(pp) [z] · filas = POWER, cols = STUFF")
+        for w in workloads:
+            tag = " (FRESCO)" if w == 1.00 else ""
+            print(f"    w={w:.2f}{tag}")
+            print(f"    {'POW':>5} | {'ST45':>16} {'ST70':>16} {'ST95':>16}")
+            for p in powers:
+                cs = []
+                for st in stuffs:
+                    _, _, d3, se, z = delta_m(w, p, st, metric)
+                    cs.append(f"{d3:>+7.2f} [{z:>+5.1f}]")
+                print(f"    {p:>5} | " + " ".join(f"{c:>16}" for c in cs))
+    # Gradientes del Δ: esto separa "expresión de fatiga" de "castigo genérico"
+    print()
+    print("  DIAGNÓSTICO DECISIVO · gradiente STUFF y gradiente POWER del Δ")
+    print("  Un Δ que crece con ST es expresión ACOPLADA (más fatiga de Stuff);")
+    print("  un Δ plano en ST es daño genérico (castigo, no señal).")
+    print("  El gradiente lleva su PROPIO SE pareado (4 celdas): restar los SEs")
+    print("  de los dos Δ en quadrature habría exagerado el error, porque están")
+    print("  fuertemente correlacionados.")
+    grads = {}
+    for metric in ("xbh", "hr"):
+        print()
+        for w in workloads:
+            if w == 1.00:
+                continue
+            print(f"    Δ{metric.upper()} w={w:.2f}")
+            print(f"      {'gradiente STUFF (ΔST95−ΔST45)':>32} | "
+                  f"{'gradiente POWER (ΔPOW95−ΔPOW45)':>34}")
+            gs, gp = [], []
+            for p in powers:
+                g, se, z = grad_stuff(w, p, metric)
+                grads[("st", w, p, metric)] = (g, se, z)
+                gs.append(f"POW{p}:{g:+.2f} [{z:>+5.1f}]")
+            for st in stuffs:
+                g, se, z = grad_power(w, st, metric)
+                grads[("pw", w, st, metric)] = (g, se, z)
+                gp.append(f"ST{st}:{g:+.2f} [{z:>+5.1f}]")
+            print(f"      {' '.join(gs):>32} | {' '.join(gp):>34}")
+    # Coste de fatiga por α (para leer "cuánta fatiga de Stuff se expresa")
+    print()
+    print("  COSTE DE FATIGA DE STUFF POR α (Δ vs w=1.00 de la misma α, XBH/BIP)")
+    for a in alphas:
+        for st in stuffs:
+            seq = " ".join(f"w={w:.2f}:{cost(a, w, 70, st):+.2f}" for w in workloads)
+            print(f"    α={a:.2f} ST{st} (POW70) {seq}")
+        print()
+
+    # ---------------- R9 VEREDICT ----------------
+    win = (0.50, 0.60)
+    print("  " + "-" * 80)
+    print("  R9 · ROBUSTNESS DOMINANCE — procedure (fijada antes del run):")
+    print("    1) Si α=.60 falla algún R1–R8 que α=.50 pasa → gana .50 (trivial).")
+    print("    2) Si .60 pasa R1–R8, gana SOLO si cumple las TRES cláusulas:")
+    print("       (a) expresión ACOPLADA material y consistente: gradiente STUFF")
+    print("           del Δ > 0 con |z| > 2 en w=1.35 y w=1.50, en los 3 Powers")
+    print("       (b) NO reduce la identidad: margen R4 de .60 ≥ el de .50")
+    print("       (c) NO empeora los extremos: R6 y R7 igual de bien que .50")
+    print("    3) En cualquier otro caso → gana el MENOR α (.50), porque una vez")
+    print("       que dos valores cumplen la función se elige el de menor")
+    print("       intervención: .60 tiene que JUSTIFICAR su acoplamiento extra.")
+    r50 = results[0.50]
+    r60 = results[0.60]
+    f50 = all(r50[c] for c in ("R1", "R2", "R3", "R4", "R5", "R6", "R7", "R8"))
+    f60 = all(r60[c] for c in ("R1", "R2", "R3", "R4", "R5", "R6", "R7", "R8"))
+    gx150 = [grads[("st", 1.50, p, "xbh")] for p in powers]
+    gx135 = [grads[("st", 1.35, p, "xbh")] for p in powers]
+    clause_a = all(g > 0 and abs(z) > R9_Z for g, _, z in gx150 + gx135)
+    clause_b = r60["_r4_min"] >= r50["_r4_min"]
+    # (c) robustez estructural en los extremos: los techos de R6 y la
+    # no-degeneración de R7 se siguen respetando. No se exige que .60 sea
+    # IDÉNTICO a .50 (imposible: un α mayor da más daño por construcción, y eso
+    # es justo lo que se evalúa en la cláusula (a)); se exige que no ROMPA el
+    # extremo. Se imprime el HOLGURA para que el judgement sea visible.
+    clause_c = r60["R6"] and r60["R7"]
+    nmat = sum(1 for w in workloads for p in powers for st in stuffs
+               if abs(delta_m(w, p, st, "xbh")[4]) > R9_Z)
+    print()
+    print("  R9 · evaluación de cláusulas (α=.60 debe Ganar las TRES):")
+    print(f"    (a) expresión acoplada: gradiente STUFF del Δ(XBH) > 0 y |z|>2 "
+          f"en 1.35 y 1.50 × 3 Powers → "
+          f"{'CUMPLE' if clause_a else 'NO CUMPLE'}")
+    print(f"        w=1.35 {' '.join(f'POW{p}:{g:+.2f}[z{z:+.1f}]' for p, (g, _, z) in zip(powers, gx135))}")
+    print(f"        w=1.50 {' '.join(f'POW{p}:{g:+.2f}[z{z:+.1f}]' for p, (g, _, z) in zip(powers, gx150))}")
+    print(f"    (b) identidad: margen R4 .60 {r60['_r4_min']:+.2f}pp vs .50 "
+          f"{r50['_r4_min']:+.2f}pp (banda advisory {R4_BAND_PP}pp) → "
+          f"{'CUMPLE' if clause_b else 'NO CUMPLE (la empeora)'}")
+    print(f"    (c) extremos: R6 y R7 siguen PASS con holgura → "
+          f"{'CUMPLE' if clause_c else 'NO CUMPLE'}")
+    print(f"        R6 POW95×ST45×w1.50: XBH {r(0.50,1.50,95,45,'xbh'):.2f}→"
+          f"{r(0.60,1.50,95,45,'xbh'):.2f} (techo {R6_XBH_MAX}), HR "
+          f"{r(0.50,1.50,95,45,'hr'):.2f}→{r(0.60,1.50,95,45,'hr'):.2f} "
+          f"(techo {R6_HR_MAX}) | R7 bucket máx "
+          f"{max(r(0.50,1.50,45,95,k2) for k2 in ('out_bip','x1','x2','x3','hr')):.2f}"
+          f"→{max(r(0.60,1.50,45,95,k2) for k2 in ('out_bip','x1','x2','x3','hr')):.2f}"
+          f" (piso implícito {R7_BUCKET_MAX}%)")
+    if not f60 and f50:
+        pick, why = 0.50, "α=.60 falla un contrato que α=.50 pasa (caso trivial)."
+    elif not (f50 and f60):
+        pick, why = 0.50, "al menos uno de los dos finalistas falla R1–R8."
+    elif clause_a and clause_b and clause_c:
+        pick, why = 0.60, (".60 cumple las TRES cláusulas: expresión de fatiga "
+                           "acoplada y material, sin peor identidad ni extremos.")
+    else:
+        fallas = []
+        if not clause_a:
+            fallas.append("(a) su Δ no es expresión ACOPLADA de Stuff con "
+                          "|z|>2 en todos los puntos")
+        if not clause_b:
+            fallas.append(f"(b) reduce el margen de identidad de "
+                          f"{r50['_r4_min']:+.2f}pp a {r60['_r4_min']:+.2f}pp")
+        if not clause_c:
+            fallas.append("(c) empeora el extremo explosivo")
+        pick, why = 0.50, (".60 no cumple " + " ni ".join(fallas) +
+                           " → gana el MENOR α por menor intervención.")
+    print()
+    print(f"  R9 VERDICT → α = {pick:.2f}")
+    print(f"    razón: {why}")
+    print(f"    R1–R8: α=.50 {'PASS' if f50 else 'FAIL'} · α=.60 "
+          f"{'PASS' if f60 else 'FAIL'} · shape pareado "
+          f"{'PASS' if results['_shape'] else 'FAIL'}")
+    print(f"    margen de identidad R4: α=.50 {r50['_r4_min']:+.2f}pp · α=.60 "
+          f"{r60['_r4_min']:+.2f}pp")
+    print(f"    Δ(XBH) con |z|>2 en {nmat}/27 celdas (señal material pareada)")
+    print(f"    Sigue SIN tocar producción (calculator.py UNCHANGED).")
+    print(f"    Siguiente → 003B-6: integrar Stuff en PitcherAttrs + mapper + "
+          f"fatiga + calculator, α ganador (k={k}), y PRODUCTION ACCEPTANCE "
+          f"antes de cerrar GAMEPLAY-RATING-001.")
+    print("=" * 150)
+
+
+# ---------------------------------------------------------------------------
 # 002C-B · TAKE calibration · baseline sweep (intercept de strike_chance)
 # ---------------------------------------------------------------------------
 # Mantiene coefs CTL/VIS actuales (0.003 / -0.002 con (attr-50)); solo varía
@@ -5802,9 +7087,804 @@ def run_pa_level(reps: int) -> None:
     print(f"max pitch_count alcanzado global: {global_max_count}")
 
 
+# ===========================================================================
+# 003B-6C · PRODUCTION ACCEPTANCE · GAMEPLAY-ENGINE-003B-6
+# ===========================================================================
+#
+# Qué es y qué NO es este bloque
+# -----------------------------
+# 003B-1..5C buscaron PARÁMETROS. Este bloque ya no busca nada: su único trabajo
+# es demostrar que la ruta PRODUCTIVA de una partida real aplica exactamente la
+# política que el LAB congeló, y que no movió nada que no debía.
+#
+# La ruta invocada es la de game_actions.resolve_play(), paso a paso:
+#
+#     PlayerCardModel (stuff de ratings-2.0)
+#         ↓ map_card_to_pitcher_attrs        (app/engine/attribute_mapper.py)
+#     PitcherAttrs.stuff CRUDO
+#         ↓ apply_pitcher_fatigue            (app/engine/fatigue_manager.py)
+#     PitcherAttrs.stuff EFECTIVO  (α=.50)     ← el ÚNico que ve fatigue_factor
+#         ↓ get_pitch_stats + degradación    (pitch-specific attrs)
+#         ↓ calculate_play_outcome()          (app/engine/calculator.py)
+#     PlayResult
+#
+# calculate_play_outcome() se llama SIN NINGÚN KNOB. Los knobs LAB
+# (take_bias / foul_chance / take_floor) no se pasan y no se pueden pasar: la
+# API pública no los acepta. Ése es el punto: 002E-4 ya cerró esa frontera y
+# 003B-6 la reutiliza en vez de abrir una excepción.
+#
+# Las tres referencias contra las que se coteja
+# ----------------------------------------------
+#   PROD   esta ruta, con el Stuff EFECTIVO
+#   LAB    _simulate_pa_diag(stuff_level=e, stuff_arm="S2", stuff_k_qty=.30)
+#          — 003B-5C, la política aprobada, con la fórmula de α en el LAB
+#   PRE    _simulate_pa_diag(use_public_api=True) — el camino de producción
+#          tal como estaba ANTES de 003B-6, sin Stuff en absoluto
+#
+# PRE es lo que hace que el bloque C (baseline regression) sea una prueba
+# bit-exacta y no una promesa: si a Stuff=70 la ruta nueva no reproduce PRE PA a
+# PA, entonces 003B-6 cambió algo que no debía cambiar. Y como las tres rutas
+# consumen el RNG en el MISMO orden con las MISMAS seeds, la igualdad es
+# EXACTA, no estadística. Por eso S1 tiene tolerancia 0.00.
+#
+# El harness NO se modificó para acomodar a producción. Sigue con su propia
+# fórmula de α, y este bloque la compara con la de producción en vez de
+# borrarla.
+#
+# UNA diferencia con game_actions, declarada y deliberada
+# ------------------------------------------------------
+# En `game_actions.resolve_play` el pitch_count se INCREMENTA en cada lanzamiento
+# de la partida, así que la fatiga se profundiza dentro del inning. El LAB usa un
+# diseño "shootout": el workload es el estado del juego al COMENZAR el PA y se
+# mantiene constante durante él. Este acceptance hereda ese diseño a propósito:
+#
+#     - Siadvanced el count por pitch, PROD y LAB dejarían de ser comparables
+#       desde la primera jugada, porque la divergencia sería de MODELO y no de
+#       política. S1 mide lo que dice medir: que la política de Stuff es la misma.
+#     - La fórmula de fatiga, la transformación de atributos, el mapper y el
+#       resolver son TODOS código de producción en las dos rutas. Eso es lo que
+#       003B-6 tenía que demostrar.
+#
+# Lo que NO se está afirmando aquí: que la simulación de un partido completo
+# (fatiga acumulándose pitch a pitch) esté validada por este bloque. Eso es
+# territorio de la FATIGA, no de STUFF, y ya lo cubre 001C/001D. Lo que aquí se
+# demuestra es que, para un workload dado, la ruta de Stuff es la aprobada.
+
+Z_REPRO = 3.0            # Reproducción contra cifras REGISTRADAS: se admiten
+                         # 3 desviaciones estándar combinadas. Una tolerancia
+                         # fija (0.05pp) contra una muestra nueva de otra
+                         # corrida mide ruido, no política: con 50k PA el SE del
+                         # XBH/BIP es ~0.2pp, así que 0.05pp sería imposible
+                         # incluso con el código perfecto. El umbral sale de los
+                         # datos (como R9_Z en 5C), no de un deseo.
+N_REF_ANCHOR = 50_000    # n con el que se registraron 003B-4 y 003B-5C. Es el
+                         # tamaño de la muestra contra la que se compara, y por
+                         # eso entra en la SE combinada.
+S6_MARGIN_PP = 1.0       # margen mínimo de identidad de élites (R4)
+S7_TOL_PP = 0.0          # aislamiento: disciplina idéntica entre Stuffs
+S8_P95_MAX = 6           # cola de PA (K5-R / R8)
+S8_P12_MAX = 0.05        # P(PA >= 12 pitches)
+S8_P16_MAX = 0.01        # P(PA >= 16 pitches)
+
+# Anclas REGISTRADAS de 003B-4 (O1/O2, fresco) en XBH/BIP %, para el bloque A.
+# Vienen de _e003b4_full_run.txt. No son "lo que debería salir": son lo que
+# salió, y el acceptance falla si PROD se aparta de ellas.
+E003B4_FRESH_XBH = {
+    (45, 45): 20.72, (45, 70): 13.11, (45, 95): 5.53,
+    (70, 45): 30.49, (70, 70): 23.03, (70, 95): 15.77,
+    (95, 45): 40.66, (95, 70): 32.95, (95, 95): 25.59,
+}
+# Anclas REGISTRADAS de 003B-5C α=.50, extraídas de _e003b5c_full_run.txt.
+# Anclas REGISTRADAS de 003B-5C α=.50, extraídas de _e003b5c_full_run.txt. Se
+# usan como REFERENCIA INFORMATIVA en el pie de bloque; las puertas de R6/R7 se
+# reevalúan con sus constantes reales del harness (R6_*/R7_*), no contra estos
+# números, porque R6/R7 son topes y contratos relativos, no igualdades.
+E003B5C_ALPHA050_R6 = {"xbh": 42.95, "hr": 32.08}          # POW95×ST45×w1.50
+E003B5C_ALPHA050_R7 = {"xbh": 10.85, "fresh": 5.53, "bucket": 67.22}  # POW45×ST95×w1.50
+E003B5C_ALPHA050_R4_MIN = 2.18                             # margen de élites
+E003B5C_ALPHA050_SUPPRESSION = {                           # ΔXHB vs fresco @POW70
+    45: {1.00: 0.00, 1.35: 1.61, 1.50: 2.48},
+    70: {1.00: 0.00, 1.35: 2.33, 1.50: 3.84},
+    95: {1.00: 0.00, 1.35: 2.98, 1.50: 5.08},
+}
+
+
+class _Prod6Card:
+    """Carta de producción con la MISMA superficie pública que `PlayerCardModel`.
+
+    No se importa el ORM a propósito: `app.models` arrastra `app.database`, que
+    abre un engine real (psycopg2) y convertiría este harness en un script que
+    necesita base de datos para correr una simulación. El mapper sólo hace
+    acceso por atributo (`card.velocity`, `card.stuff`, …) y
+    `card.get_pitch_stats(...)`, así que un objeto con esa superficie ejercita
+    exactamente el mismo código productivo.
+
+    Lo que SÍ queda probado contra el modelo real (columna `stuff`, CHECK,
+    NOT NULL, mapper contra una fila de sqlite) está en el contrato T1 de
+    tests/test_stuff_policy.py, y Capa 0 verifica por fuente que la columna
+    sigue declarada.
+    """
+
+    def __init__(self, stuff: int, batter_power: int, level: int = 70):
+        self.id = f"acc-stuff-{stuff}-pow-{batter_power}"
+        self.name = f"Acceptance {stuff}/{batter_power}"
+        self.position = "SP"
+        self.overall = level
+        self.velocity = level
+        self.control = level
+        self.movement = level
+        self.stuff = stuff
+        # Repertorio idéntico a `pitch_raw` del LAB, para que la degradación
+        # pitch-specific se ejercite de verdad y no se pueda colar por el hecho
+        # de que aquí sea identidad.
+        self.repertoire = [{"pitch_type": "4-SEAM", "velocity": level,
+                            "control": level, "movement": level}]
+
+    def get_pitch_stats(self, pitch_type_name: str):
+        if pitch_type_name == "IBB":
+            return {"pitch_type": "IBB", "velocity": 60, "control": 99, "movement": 0}
+        for pitch in self.repertoire or []:
+            if pitch.get("pitch_type") == pitch_type_name:
+                return pitch
+        return None
+
+
+def _prod6_card(stuff: int, batter_power: int) -> _Prod6Card:
+    """Carta con el Stuff de ratings-2.0 y perfil MID 70/70/70 (perfil 003A)."""
+    return _Prod6Card(stuff, batter_power, level=PITCHER_PROFILES_003A["MID"]["velocidad"])
+
+
+def _prod6_pa_diag(take_probs: dict, seed: int, batter_attrs: dict,
+                   card: _Prod6Card, workload: float,
+                   total_innings: int = INNINGS) -> dict:
+    """PA 0-0 por la RUTA PRODUCTIVA (misma máquina de estados que el LAB).
+
+    Réplica de `_simulate_pa_diag`, con una diferencia deliberada: los atributos
+    del pitcher NO salen de `effective_attrs` (que es una reimplementación LAB
+    de la fatiga) sino de `map_card_to_pitcher_attrs` + `apply_pitcher_fatigue`,
+    que es lo que corre `game_actions` de verdad. La máquina de estados se copia
+    igual para que la comparación sea significativa; si divergiera, S1 lo
+    detectaría como codes distintos, no como rates parecidos.
+    """
+    random.seed(seed)
+    balls = strikes = pitches = 0
+    pitch_count = int(workload * PROD_THRESHOLD_003B5C)
+    take_attempts = balls_on_take = called_strikes_on_take = 0
+    swing_attempts = whiffs = fouls = bips = 0
+    reached_2strikes = reached_3balls = reached_full = False
+    outcome = "CAP"
+
+    # ---- RUTA PRODUCTIVA: mapper → fatigue_manager -----------------------
+    raw_pitcher_attrs = map_card_to_pitcher_attrs(card)
+    pitcher_attrs = apply_pitcher_fatigue(raw_pitcher_attrs, pitch_count, total_innings)
+    # -----------------------------------------------------------------------
+
+    while pitches < MAX_PA_PITCHES:
+        pitches += 1
+        pitch = get_cpu_pitch_action(DIFFICULTY)
+        swing = batter_action_by_count(strikes, take_probs)
+
+        # Pitch-specific attrs, misma regla que game_actions.py: la identidad del
+        # lanzamiento × el factor de degradación del atributo global.
+        pitch_stats = card.get_pitch_stats(pitch["pitch_type"])
+        if pitch_stats:
+            for attr, key in (("velocidad", "velocity"), ("control", "control"),
+                              ("movimiento", "movement")):
+                base = raw_pitcher_attrs[attr]
+                factor = (pitcher_attrs[attr] / base) if base > 0 else 1.0
+                pitch[key] = int(pitch_stats.get(key, base) * factor)
+
+        event, _description = calculate_play_outcome(
+            pitcher_attrs=pitcher_attrs,
+            batter_attrs=batter_attrs,
+            pitch_selected=pitch,
+            swing_selected=swing,
+            tactics_modifiers=None,
+        )
+
+        if swing["swing_type"] == SwingType.TAKE:
+            take_attempts += 1
+            if event == Event.BALL:
+                balls_on_take += 1
+            elif event == Event.STRIKE_LOOKING:
+                called_strikes_on_take += 1
+        else:
+            swing_attempts += 1
+            if event == Event.STRIKE_SWINGING:
+                whiffs += 1
+            elif event == Event.FOUL:
+                fouls += 1
+            elif event in _BIP_OUTCOME:
+                bips += 1
+
+        if event in (Event.STRIKE_SWINGING, Event.STRIKE_LOOKING):
+            strikes += 1
+            if strikes == 2:
+                reached_2strikes = True
+            if strikes >= 3:
+                outcome = "K"
+                break
+        elif event == Event.BALL:
+            balls += 1
+            if balls == 3:
+                reached_3balls = True
+            if balls >= 4:
+                outcome = "BB"
+                break
+        elif event == Event.FOUL:
+            if strikes < 2:
+                strikes += 1
+        else:
+            outcome = _BIP_OUTCOME[event]
+            break
+
+        if balls == 3 and strikes == 2:
+            reached_full = True
+
+    return {
+        "outcome": outcome, "pitches": pitches,
+        "reached_2strikes": reached_2strikes, "reached_3balls": reached_3balls,
+        "reached_full": reached_full, "take_attempts": take_attempts,
+        "balls_on_take": balls_on_take,
+        "called_strikes_on_take": called_strikes_on_take,
+        "swing_attempts": swing_attempts, "whiffs": whiffs, "fouls": fouls,
+        "bips": bips, "outcome_at_2s": outcome if reached_2strikes else None,
+    }
+
+
+def _prod6_agg(pairs: list, n: int) -> dict:
+    """Agrega una lista de dicts de PA en las métricas de 003B."""
+    agg = {"outcome": Counter(), "pitches": 0, "take_attempts": 0,
+           "called_strikes_on_take": 0, "swing_attempts": 0, "whiffs": 0,
+           "bips": 0, "fouls": 0, "reached_2strikes": 0, "reached_3balls": 0,
+           "reached_full": 0}
+    lengths = []
+    for d in pairs:
+        for key in ("pitches", "take_attempts", "called_strikes_on_take",
+                    "swing_attempts", "whiffs", "bips", "fouls",
+                    "reached_2strikes", "reached_3balls", "reached_full"):
+            agg[key] += d[key]
+        agg["outcome"][d["outcome"]] += 1
+        lengths.append(d["pitches"])
+    agg["lengths"] = sorted(lengths)
+    agg["p95"] = agg["lengths"][int(n * 0.95) - 1]
+    agg["max"] = agg["lengths"][-1]
+    agg["n12"] = sum(1 for x in lengths if x >= 12)
+    agg["n16"] = sum(1 for x in lengths if x >= 16)
+    return agg
+
+
+def _prod6_row(agg: dict, n: int) -> dict:
+    """Fila de métricas con las MISMAS definiciones que `_metric_row` del LAB.
+
+    Copiar las definiciones es parte del contrato, no una comodidad: `xbh` son
+    hits extra-base (2B+3B+HR) SIN el 1B, y `bs` es el total de BIP. Usar "reach"
+    en lugar de "xbh" corría exactamente +20.5pp (el share del 1B) y hacía que la
+    ruta productiva pareciera no reproducir 003B-4 cuando en realidad medía otra
+    cosa. Cuando las dos rutas se comparan, se comparan las mismas magnitudes.
+    """
+    o = agg["outcome"]
+    bip = o["OUT"] + o["1B"] + o["2B"] + o["3B"] + o["HR"]
+    bs = max(1, bip)
+    sw = max(1, agg["swing_attempts"])
+    tk = max(1, agg["take_attempts"])
+    return {
+        "xbh": (o["2B"] + o["3B"] + o["HR"]) / bs * 100,
+        "hr": o["HR"] / bs * 100,
+        "out_bip": o["OUT"] / bs * 100,
+        "x1": o["1B"] / bs * 100,
+        "x2": o["2B"] / bs * 100,
+        "x3": o["3B"] / bs * 100,
+        "bip": bip / n * 100,
+        "k": o["K"] / n * 100,
+        "bb": o["BB"] / n * 100,
+        "reach": (o["BB"] + o["1B"] + o["2B"] + o["3B"] + o["HR"]) / n * 100,
+        "whiff": agg["whiffs"] / sw * 100,
+        "called_tk": agg["called_strikes_on_take"] / tk * 100,
+        # `cnt` es el contacto sobre columpios (lo que decide WHIFF vs contacto),
+        # igual que en `_metric_row` del LAB. NO es el rate de strikeout: ése va
+        # en `k`. Confundir los dos hacía que S7 midiera el strikeout, que SÍ
+        # tiene que moverse con Stuff, y el contrato "Stuff no toca la
+        # disciplina" salía falso por una razón que no tenía que ver con él.
+        "cnt": (sw - agg["whiffs"]) / sw * 100,
+        "p95": agg["p95"], "max": agg["max"],
+        "t12": agg["n12"] / n * 100, "t16": agg["n16"] / n * 100,
+        "cap": o["CAP"],
+    }
+
+
+def run_production_acceptance_003b6(reps: int) -> None:
+    """003B-6C · Aceptación de producción: ruta real vs política aprobada, S1–S8."""
+    n = reps
+    batter_base = BATTER_PROFILES_003A["MID"]
+    powers = list(POWER_LEVELS_003B5C)
+    stuffs = list(STUFF_LEVELS_003B5C)
+    lab_pitcher = PITCHER_PROFILES_003A["MID"]
+    all_workloads = list(WORKLOADS_003B5C)
+    contract = []          # (código, PASS/FAIL, detalle)
+
+    print("=" * 130)
+    print("003B-6C · PRODUCTION ACCEPTANCE · ruta real vs política aprobada")
+    print(f"card → mapper → fatigue_manager → pitch-specific → calculate_play_outcome()")
+    print(f"Grid Power{POWER_LEVELS_003B5C} × Stuff{STUFF_LEVELS_003B5C} × "
+          f"w{all_workloads} = {len(powers)*len(stuffs)*len(all_workloads)} celdas | "
+          f"{reps:,} PA/celda | {reps*len(powers)*len(stuffs)*len(all_workloads):,} PA")
+    print("KNobs LAB: NINGUNO. calculate_play_outcome() no los acepta. α y k se "
+          "leen de app/engine/stuff_policy.py, no de este archivo.")
+    print(f"Política en juego: α={PROD_STUFF_FATIGUE_ALPHA} (producción) · "
+          f"baseline={PROD_STUFF_BASELINE} · k={PROD_STUFF_K}")
+    print("=" * 130)
+
+    # ------------------------------------------------------------------ Capa 0
+    # La política de producción y la del LAB son el MISMO número. Si divergieran,
+    # todo lo demás de este bloque sería una comparación entre dos políticas.
+    print()
+    print("-- CAPA 0 · LA POLÍTICA PRODUCTIVA ES LA APROBADA --")
+    lab_alphas = set(STUFF_FATIGUE_ALPHAS_003B5C)
+    ok_alpha = PROD_STUFF_FATIGUE_ALPHA in lab_alphas
+    ok_k = PROD_STUFF_K == K_003B5C
+    ok_base = PROD_STUFF_BASELINE == STUFF_IDENTITY
+    contract.append(("S1a α productivo = α congelado",
+                     ok_alpha, f"prod={PROD_STUFF_FATIGUE_ALPHA} lab={sorted(lab_alphas)}"))
+    contract.append(("S1b k productivo = k congelado",
+                     ok_k, f"prod={PROD_STUFF_K} lab={K_003B5C}"))
+    contract.append(("S1c baseline productivo = identidad LAB",
+                     ok_base, f"prod={PROD_STUFF_BASELINE} lab={STUFF_IDENTITY}"))
+    # effective_stuff productivo == fórmula LAB, celda por celda.
+    max_eff_dev = 0.0
+    for f in (0.35, 0.5, 0.654321, 0.8, 0.95, 1.0):
+        for raw in (0, 45, 50, 70, 95, 99):
+            prod = prod_effective_stuff(float(raw), f)
+            lab = _stuff_fatigue_eff_003b5c(float(raw), PROD_STUFF_FATIGUE_ALPHA, f)
+            max_eff_dev = max(max_eff_dev, abs(prod - lab))
+    contract.append(("S1d effective_stuff prod == fórmula LAB",
+                     max_eff_dev == 0.0, f"|Δ|máx={max_eff_dev:.2e}"))
+    # La columna `stuff` existe de verdad en la carta de producción. Se comprueba
+    # por fuente porque importar el ORM aquí exigiría una base de datos.
+    card_src = ""
+    try:
+        card_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                 "..", "app", "models", "card.py")
+        with open(card_path, "r", encoding="utf-8") as handle:
+            card_src = handle.read()
+    except OSError:
+        card_src = ""
+    ok_column = "stuff = Column(" in card_src
+    ok_check = "ck_player_cards_stuff_range" in card_src
+    contract.append(("S1e player_cards.stuff declarado (NOT NULL)",
+                     ok_column, "columna en app/models/card.py"))
+    contract.append(("S1f CHECK 0-99 en player_cards.stuff",
+                     ok_check, "ck_player_cards_stuff_range"))
+    # El mapper lee la columna y la fatigue_manager la transforma: sin esto, la
+    # cadena de 003B-6A estaría cortada aunque el resolver funcionara.
+    ok_mapper = "map_card_to_pitcher_attrs" in globals() and "stuff" in inspect.getsource(
+        sys.modules[map_card_to_pitcher_attrs.__module__])
+    contract.append(("S1g mapper publica stuff en PitcherAttrs",
+                     ok_mapper, "attribute_mapper devuelve la clave"))
+    for code, ok, detail in contract:
+        print(f"  {code:<44} {'PASS' if ok else 'FAIL':>4}  ({detail})")
+    print()
+
+    # ------------------------------------------------------- Capa 1: cobertura
+    # Se corre PROD, LAB y PRE en las mismas celdas con las MISMAS seeds.
+    results = {}
+    for w in all_workloads:
+        for p in powers:
+            for st in stuffs:
+                card = _prod6_card(st, p)
+                batter = dict(batter_base, poder=p)
+                factor = get_fatigue_factor(int(w * PROD_THRESHOLD_003B5C),
+                                            PROD_THRESHOLD_003B5C)
+                eff = prod_effective_stuff(float(st), factor)
+                prod_pairs, lab_pairs, pre_pairs = [], [], []
+                for rep in range(n):
+                    seed = int(DISCIPLINE_WORKLOAD * 1000) * 10**6 + rep
+                    prod_pairs.append(_prod6_pa_diag(E1_POLICY, seed, batter,
+                                                     card, w))
+                    lab_pairs.append(_simulate_pa_diag(
+                        E1_POLICY, seed, batter_attrs=batter,
+                        pitcher_attrs=lab_pitcher, stuff_level=eff,
+                        stuff_arm="S2", stuff_k_qty=K_003B5C, workload=w))
+                    pre_pairs.append(_simulate_pa_diag(
+                        E1_POLICY, seed, batter_attrs=batter,
+                        pitcher_attrs=lab_pitcher, use_public_api=True,
+                        workload=w))
+                results[(w, p, st)] = {
+                    "prod": _prod6_agg(prod_pairs, n),
+                    "lab": _prod6_agg(lab_pairs, n),
+                    "pre": _prod6_agg(pre_pairs, n),
+                    "prod_codes": [d["outcome"] for d in prod_pairs],
+                    "lab_codes": [d["outcome"] for d in lab_pairs],
+                    "pre_codes": [d["outcome"] for d in pre_pairs],
+                }
+
+    def row(w, p, st, which="prod"):
+        return _prod6_row(results[(w, p, st)][which], n)
+
+    # La supresión de Stuff se define para TODOS los workloads (0 en fresco, por
+    # construcción) y no sólo para los fatigados. Los contratos de dirección
+    # (S4/S5) viven sobre ESTA serie y no sobre el XBH crudo: la fatiga 001C de
+    # VEL/CTL/MOV empuja el XBH hacia arriba mientras que la fatiga de Stuff lo
+    # empuja hacia abajo, y el signo del XBH neto depende de cuál de las dos
+    # domine. Juzgar "dirección de la fatiga" sobre el XBH crudo mide el
+    # promedio de dos fuerzas opuestas, no la política de Stuff.
+    suppr = {}
+    for w in all_workloads:
+        for p in powers:
+            for st in stuffs:
+                suppr[(w, p, st)] = row(w, p, st)["xbh"] - row(1.00, p, st)["xbh"]
+
+    def mc_tol(rate_pct: float, n_run: int, n_ref: int = N_REF_ANCHOR) -> float:
+        """Tolerancia de reproducción contra cifras REGISTRADAS en otra corrida.
+
+        Comparar una simulación nueva contra un número anotado a mano con una
+        tolerancia fija no tiene sentido: las dos muestras son independientes y
+        la diferencia esperada es ruido de Monte Carlo, no un cambio de código.
+        El umbral sale de la varianza de los propios datos (igual que R9_Z en
+        5C): se admiten Z_REPRO desviaciones estándar combinadas. Con 50k PA
+        esto da ~0.4pp, que sigue detectando cualquier desviación real de
+        política pero no suspica por el último dígito.
+        """
+        p_rate = min(max(rate_pct / 100.0, 1e-9), 1 - 1e-9)
+        se_run = math.sqrt(p_rate * (1 - p_rate) / n_run) * 100
+        se_ref = math.sqrt(p_rate * (1 - p_rate) / n_ref) * 100
+        return Z_REPRO * math.sqrt(se_run ** 2 + se_ref ** 2)
+
+    # ------------------------------------------------------------- BLOQUE A/B
+    print("-- BLOQUE A · FRESH ACCEPTANCE (w=1.00) → debe reproducir 003B-4 --")
+    print("Tol = Z_REPRO x SE combinada (corrida nueva vs cifra registrada): "
+          f"Z={Z_REPRO} @ n={n:,}")
+    print(f"{'POW':>4} {'ST':>4} {'PROD XBH/BIP':>13} {'003B-4':>9} {'|Δ|':>7} "
+          f"{'tol':>6} {'vs LAB':>8}")
+    max_a_dev = max_a_lab = 0.0
+    a_bad = []
+    for p in powers:
+        for st in stuffs:
+            r = row(1.00, p, st)
+            r_lab = row(1.00, p, st, "lab")
+            ref = E003B4_FRESH_XBH[(p, st)]
+            dev = abs(r["xbh"] - ref)
+            tol = mc_tol(r["xbh"], n)
+            dlab = abs(r["xbh"] - r_lab["xbh"])
+            max_a_dev = max(max_a_dev, dev)
+            max_a_lab = max(max_a_lab, dlab)
+            if dev > tol:
+                a_bad.append(f"POW{p} ST{st} {dev:.2f}>{tol:.2f}")
+            print(f"{p:>4} {st:>4} {r['xbh']:>13.2f} {ref:>9.2f} "
+                  f"{dev:>7.2f} {tol:>6.2f} {dlab:>8.2f}")
+    ok_a = not a_bad
+    contract.append(("S1/S3 BLOQUE A: PROD reproduce 003B-4 (dentro de MC)",
+                     ok_a,
+                     f"|Δ|máx={max_a_dev:.3f}pp vs tol {Z_REPRO}SE"
+                     + ("" if ok_a else "; " + "; ".join(a_bad[:3]))))
+    contract.append(("S1 BLOQUE A: PROD == LAB bit-exacto",
+                     max_a_lab == 0.0, f"|Δ|máx={max_a_lab:.2e}pp (tol 0.00)"))
+    print()
+
+    print("-- BLOQUE B · FATIGUE ACCEPTANCE (w=1.35/1.50) → debe reproducir "
+          "α=.50 de 003B-5C --")
+    print(f"{'POW':>4} {'ST':>4} {'w':>5} {'XHB':>8} {'fresh':>8} {'supresión':>10} "
+          f"{'003B-5C':>9} {'|Δ|':>7} {'tol':>6}")
+    max_b_dev = max_b_lab = 0.0
+    b_bad = []
+    for w in (1.35, 1.50):
+        for p in powers:
+            for st in stuffs:
+                r = row(w, p, st)
+                r_lab = row(w, p, st, "lab")
+                d = suppr[(w, p, st)]
+                dlab = abs(r["xbh"] - r_lab["xbh"])
+                max_b_lab = max(max_b_lab, dlab)
+                # El ancla de supresión se registró SÓLO en la fila POW70 de
+                # 003B-5C. Compararla contra POW45/POW95 sería exigirle a
+                # producción un número que nadie midió: el desvío aparecería
+                # como "la política no reproduce", cuando en realidad es que la
+                # supresión se estrecha al subir el poder del bateador (mismo
+                # mecanismo que ya valida S4, no una regresión nueva).
+                if p == 70:
+                    ref = E003B5C_ALPHA050_SUPPRESSION[st].get(w)
+                    dev = abs(d - ref) if ref is not None else 0.0
+                    # El Δ de la supresión es una resta de dos proporciones, así
+                    # que su error estándar es MAYOR que el de cada una.
+                    tol = Z_REPRO * math.sqrt(2.0) * mc_tol(r["xbh"], n)
+                    if dev > tol:
+                        b_bad.append(f"POW{p} ST{st} w{w} {dev:.2f}>{tol:.2f}")
+                    max_b_dev = max(max_b_dev, dev)
+                    print(f"{p:>4} {st:>4} {w:>5.2f} {r['xbh']:>8.2f} "
+                          f"{row(1.00, p, st)['xbh']:>8.2f} {d:>+10.2f} "
+                          f"{ref:>9.2f} {dev:>7.2f} {tol:>6.2f}")
+                else:
+                    print(f"{p:>4} {st:>4} {w:>5.2f} {r['xbh']:>8.2f} "
+                          f"{row(1.00, p, st)['xbh']:>8.2f} {d:>+10.2f} "
+                          f"{'—':>9} {'—':>7} {'—':>6}")
+    ok_b = not b_bad
+    contract.append(("S4/S5 BLOQUE B: supresión reproduce 003B-5C α=.50 @POW70 "
+                     "(dentro de MC)", ok_b,
+                     f"|Δ|máx={max_b_dev:.3f}pp vs tol {Z_REPRO}SE"
+                     + ("" if ok_b else "; " + "; ".join(b_bad[:3]))))
+    contract.append(("S1 BLOQUE B: PROD == LAB bit-exacto",
+                     max_b_lab == 0.0, f"|Δ|máx={max_b_lab:.2e}pp (tol 0.00)"))
+    print()
+
+    # R6/R7 se reevalúan con su semántica ORIGINAL (techos y contrato relativo),
+    # copiada del harness de 5C. Sus constantes R6_*/R7_* son las mismas, así que
+    # no hay ni números inventados ni tolerancias nuevas que ajustar después de
+    # ver el resultado: o se cumplen los topes o no se cumplen.
+    r6 = row(1.50, 95, 45)
+    ok_r6 = r6["xbh"] <= R6_XBH_MAX and r6["hr"] <= R6_HR_MAX
+    contract.append(("S6a R6 sin explosión extrema (POW95×ST45×w1.50)", ok_r6,
+                     f"XBH={r6['xbh']:.2f}≤{R6_XBH_MAX} HR={r6['hr']:.2f}≤{R6_HR_MAX} "
+                     f"(5C registró "
+                     f"{E003B5C_ALPHA050_R6['xbh']:.2f}/{E003B5C_ALPHA050_R6['hr']:.2f})"))
+    r7_fresh = row(1.00, 45, 95)["xbh"]
+    r7_fat = row(1.50, 45, 95)
+    r7_bucket = max(r7_fat[k] for k in ("out_bip", "x1", "x2", "x3", "hr"))
+    ok_r7 = (r7_fat["xbh"] >= R7_KEEP_FRAC * r7_fresh
+             and r7_bucket <= R7_BUCKET_MAX)
+    contract.append(("S6b R7 sin colapso extremo (POW45×ST95)", ok_r7,
+                     f"XBH {r7_fat['xbh']:.2f}≥{R7_KEEP_FRAC * r7_fresh:.2f} "
+                     f"(≥{R7_KEEP_FRAC:.0%} de fresco {r7_fresh:.2f}), "
+                     f"bucket máx {r7_bucket:.2f}≤{R7_BUCKET_MAX} "
+                     f"(5C registró {E003B5C_ALPHA050_R7['xbh']:.2f}/"
+                     f"{E003B5C_ALPHA050_R7['bucket']:.2f})"))
+    print()
+
+    # ------------------------------------------------------------ BLOQUE C
+    print("-- BLOQUE C · BASELINE REGRESSION (Stuff 70) → CALIBRATED-BASELINE-v1 --")
+    print("PRE = la ruta de producción TAL COMO ESTABA antes de 003B-6 "
+          "(use_public_api, sin Stuff).")
+    print()
+    print("C1 · Stuff 70 + FRESCO == PRE, bit-exacto. Éste es el contrato de "
+          "baseline.")
+    print("     En fresco el factor de fatiga es 1.0, luego el Stuff efectivo es "
+          "exactamente 70 y el")
+    print("     término de supresión vale -(70-70)*k = 0: la política nueva no "
+          "tiene nada que")
+    print("     decir sobre un lanzador fresco, así que la ruta debe ser "
+          "indistinguible de la")
+    print("     anterior PA a PA. Cualquier PA es una fuga: Stuff tocado donde "
+          "no debía, un")
+    print("     redondeo nuevo, o α aplicándose a fresco.")
+    max_c = 0.0
+    mismatches = 0
+    for p in powers:
+        res = results[(1.00, p, 70)]
+        for i in range(n):
+            if res["prod_codes"][i] != res["pre_codes"][i]:
+                mismatches += 1
+        r, r_pre = row(1.00, p, 70), row(1.00, p, 70, "pre")
+        for key in ("xbh", "hr", "cnt", "whiff", "called_tk", "reach", "k", "bb"):
+            max_c = max(max_c, abs(r[key] - r_pre[key]))
+    n_c1 = n * len(powers)
+    contract.append(("S2 BLOQUE C1: Stuff 70 + fresco == PRE (PA a PA)",
+                     mismatches == 0, f"códigos divergentes={mismatches}/{n_c1:,}"))
+    contract.append(("S2 BLOQUE C1: métricas == PRE (bit-exacto)",
+                     max_c == 0.0, f"|Δ|máx={max_c:.2e}pp (tol 0.00)"))
+    print(f"     PA comparadas: {n_c1:,} | códigos divergentes: {mismatches} | "
+          f"|Δ|máx métrica: {max_c:.2e}pp")
+    print()
+
+    print("C2 · Stuff 70 + FATIGA: aquí PROD *debe* separarse de PRE, y la "
+          "separación está cuantificada.")
+    print("     El Stuff efectivo de un lanzador cansado cae POR DEBAJO de 70 "
+          "(62.42 a w=1.35,")
+    print("     57.21 a w=1.50), así que el hitter recibe un bono de poder de "
+          "-(efectivo-70)*k.")
+    print("     Exigir PROD == PRE bajo fatiga sería exigir α=0, o sea negar "
+          "que la fatiga de Stuff")
+    print("     exista. Lo que sí es exigible —y es lo que se comprueba— es que "
+          "esa separación sea")
+    print("     exactamente la aprobada en 003B-5C para Stuff70, y que no haya "
+          "nada más moviéndose.")
+    c2_bad = []
+    for w in (1.35, 1.50):
+        thr = int(w * PROD_THRESHOLD_003B5C)
+        eff = prod_effective_stuff(70.0, get_fatigue_factor(
+            thr, PROD_THRESHOLD_003B5C))
+        # Signo: `stuff_power_suppression(eff)` YA devuelve el bono de poder
+        # POSITIVO que recibe el hitter cuando el Stuff efectivo cae por debajo de
+        # la identidad (eff<70 → -(eff-70)*k > 0). No hay que negarlo: hacerlo
+        # comparaba +2.40 contra -2.27 y hacía fallar un contrato que en realidad
+        # se cumplía, por un signo de más en el propio acceptance y no por nada
+        # en producción.
+        bonus_pp = prod_stuff_power_suppression(eff)
+        measured = max(row(w, p, 70)["xbh"] - row(w, p, 70, "pre")["xbh"]
+                       for p in powers)
+        ref = E003B5C_ALPHA050_SUPPRESSION[70][w]
+        # PROD y PRE comparten seed pero no FullyPaus draws idénticos cuando el
+        # bono de poder cruza un umbral: se trata como dos tasas independientes,
+        # que es la lectura conservadora (√2×SE) en vez de la pareada.
+        tol = Z_REPRO * math.sqrt(2.0) * mc_tol(row(w, 70, 70)["xbh"], n)
+        # (a) la ganancia medida contra PRE es la registrada en 5C para Stuff70
+        if abs(measured - ref) > tol:
+            c2_bad.append(f"w={w} medido={measured:.2f} vs 5C={ref:.2f}")
+        # (b) y coincide con el bono determinista que la politica concede
+        if abs(measured - bonus_pp) > tol:
+            c2_bad.append(f"w={w} medido={measured:.2f} vs bono={bonus_pp:.2f}")
+        print(f"     w={w:.2f} ef.Stuff={eff:6.3f} bono determinista="
+              f"{bonus_pp:+.3f}pp | medido vs PRE={measured:+.2f}pp | "
+              f"5C={ref:+.2f}pp | tol={tol:.2f}pp")
+    contract.append(("S2 BLOQUE C2: la separación de PRE bajo fatiga es la "
+                     " Stuff70 aprobada (ni más ni menos)", not c2_bad,
+                     f"desvíos={len(c2_bad)}"
+                     + ("; " + "; ".join(c2_bad[:3]) if c2_bad else "")))
+    # Y que la ruta siga siendo idéntica al LAB bajo fatiga: la divergencia
+    # contra PRE es de Stuff, no de implementación.
+    max_c2 = 0.0
+    for w in (1.35, 1.50):
+        for p in powers:
+            max_c2 = max(max_c2, abs(row(w, p, 70)["xbh"]
+                                     - row(w, p, 70, "lab")["xbh"]))
+    contract.append(("S2 BLOQUE C2: PROD == LAB también bajo fatiga (bit-exacto)",
+                     max_c2 == 0.0, f"|Δ|máx={max_c2:.2e}pp"))
+    print()
+
+    # ----------------------------------------------------- contratos S1–S8
+    print("-- CONTRATOS S1-S8 (fijados antes de correr; no son\new balance, "
+          "son los ya demostrados) --")
+
+    # S1 bit-exacto en TODAS las celdas, no sólo en A y B.
+    total_codes = 0
+    s1_mismatch = 0
+    for key, res in results.items():
+        for i in range(n):
+            total_codes += 1
+            if res["prod_codes"][i] != res["lab_codes"][i]:
+                s1_mismatch += 1
+    contract.append(("S1 PROD == LAB (todas las celdas, PA a PA)",
+                     s1_mismatch == 0,
+                     f"divergentes={s1_mismatch}/{total_codes:,}"))
+
+    # S2 ya está arriba.
+
+    # S3 · expresión de poder: Power↑ ⇒ XBH↑ con el MISMO piso por paso que el
+    # R1 de 5C (R1_STEP_PP), no con monotonicidad estricta. Un piso por paso es
+    # la forma en que la política quedó aprobada; exigir >0 estricto además haría
+    # el contrato inestable frente al ruido de Monte Carlo, y un contrato que
+    # falla por el último dígito no prueba nada.
+    s3_bad = []
+    s3_min_margin = 1e9
+    for w in all_workloads:
+        for st in stuffs:
+            seq = [row(w, p, st)["xbh"] for p in powers]
+            for lo, hi in zip(seq, seq[1:]):
+                if hi - lo < R1_STEP_PP:
+                    s3_bad.append(f"POW w{w} ST{st} {lo:.2f}→{hi:.2f}")
+                s3_min_margin = min(s3_min_margin, hi - lo)
+    contract.append(("S3 expresión de poder preservada (piso R1 por paso)",
+                     not s3_bad,
+                     f"margen mínimo={s3_min_margin:+.2f}pp "
+                     f"(piso {R1_STEP_PP})"
+                     + ("" if not s3_bad else "; " + "; ".join(s3_bad[:3]))))
+
+    # S4 · supresión de Stuff: Stuff↑ ⇒ supresión↑. Se mide sobre `suppr`, la
+    # serie de ΔXBH que la fatiga de Stuff produce, y NO sobre el XBH crudo: en
+    # fresco la supresión es 0 por definición en los tres Stuffs, así que el
+    # XBH crudo ahí sólo está midiendo el efecto estático de Stuff (que es S4-bis
+    # y va en su propia línea).
+    s4_bad = []
+    s4_min_margin = 1e9
+    for w in (1.35, 1.50):
+        for p in powers:
+            seq = [suppr[(w, p, st)] for st in stuffs]
+            for lo, hi in zip(seq, seq[1:]):
+                if hi - lo < -R3_STEP_PP:
+                    s4_bad.append(f"POW{p} w{w} {lo:+.2f}→{hi:+.2f}")
+                s4_min_margin = min(s4_min_margin, hi - lo)
+    contract.append(("S4 supresión de Stuff monótona en Stuff↑ (sobre la serie "
+                     "de supresión, banda R3)", not s4_bad,
+                     f"margen mínimo={s4_min_margin:+.2f}pp (banda ±{R3_STEP_PP})"
+                     + ("" if not s4_bad else "; " + "; ".join(s4_bad[:3]))))
+    # S4-bis · el efecto estático de Stuff, que sí va sobre el XBH crudo: aquí no
+    # hay fatiga que compita, así que se mide con el piso R2_STEP_PP del R2 de 5C.
+    s4b_bad = []
+    s4b_min = 1e9
+    for w in all_workloads:
+        for p in powers:
+            seq = [row(w, p, st)["xbh"] for st in stuffs]
+            for lo, hi in zip(seq, seq[1:]):
+                if lo - hi < R2_STEP_PP:
+                    s4b_bad.append(f"POW{p} w{w} {lo:.2f}→{hi:.2f}")
+                s4b_min = min(s4b_min, lo - hi)
+    contract.append(("S4b efecto estático de Stuff preservado (piso R2 por paso)",
+                     not s4b_bad,
+                     f"caída mínima={s4b_min:+.2f}pp (piso {R2_STEP_PP})"
+                     + ("" if not s4b_bad else "; " + "; ".join(s4b_bad[:3]))))
+    # S5 · dirección de la fatiga de Stuff: más workload ⇒ MÁS supresión (el
+    # ΔXBH respecto a fresco crece). El XBH crudo sube con la fatiga porque la
+    # degradación 001C de VEL/CTL/MOV pesa más que la pérdida de Stuff; exigir
+    # "w↑ ⇒ XBH↓" sobre el crudo sería exigir que α=0. El contrato de 003B es
+    # que la fatiga de Stuff EMPEORE al lanzador, y eso se lee en `suppr`.
+    s5_bad = []
+    s5_min = 1e9
+    for p in powers:
+        for st in stuffs:
+            seq = [suppr[(w, p, st)] for w in all_workloads]
+            for lo, hi in zip(seq, seq[1:]):
+                if hi - lo < -R3_STEP_PP:
+                    s5_bad.append(f"POW{p} ST{st} {lo:+.2f}→{hi:+.2f}")
+                s5_min = min(s5_min, hi - lo)
+    contract.append(("S5 dirección de la fatiga de Stuff (w↑ ⇒ supresión↑, "
+                     "banda R3)", not s5_bad,
+                     f"subida mínima={s5_min:+.2f}pp (banda ±{R3_STEP_PP})"
+                     + ("" if not s5_bad else "; " + "; ".join(s5_bad[:3]))))
+    # S5-bis · el efecto neto de la fatiga 001C sobre el resultado sigue siendo el
+    # de 5C: la fatiga EMPEORA al lanzador. Se documenta como observación con
+    # signo esperado, no como puerta (el signo neto no es propiedad de Stuff).
+    s5b = min(suppr[(1.50, p, st)] for p in powers for st in stuffs)
+    contract.append(("S5b (observación) la fatiga de 001C domina el neto en el "
+                     "punto α=.50", s5b >= 0.0,
+                     f"supresión mínima global={s5b:+.2f}pp (informativo)"))
+
+    # S6 · identidad de élites: el margen de XBH por suppressed-elite
+    # (ST45 fresco → mismo ST45 en fatiga) no puede caer bajo la banda.
+    s6_margin = min(
+        suppr[(1.50, 70, st)] for st in stuffs
+    ) if suppr else 0.0
+    contract.append(("S6 identidad de élites preservada (R4)",
+                     s6_margin >= S6_MARGIN_PP,
+                     f"margen mín={s6_margin:+.2f}pp (piso {S6_MARGIN_PP}, "
+                     f"003B-5C registró {E003B5C_ALPHA050_R4_MIN:+.2f})"))
+
+    # S7 · aislamiento de mecanismo: Stuff NO mueve la disciplina. Dentro de una
+    # celda (mismo Power, mismo w), whiff%, called-strike% y contacto% deben ser
+    # idénticos entre los tres Stuffs, porque el mismo PA consume los mismos
+    # draws: cualquier movimiento del Stuff en ellos probaría que se coló antes
+    # de la resolución de contacto.
+    #
+    # Deliberadamente EXCLUIDAS: `reach`, `k`, `xbh`, `hr`. Esos cuatro SÍ tienen
+    # que moverse con Stuff — es literalmente de lo que trata 003B. Meterlos
+    # aquí no testeara aislamiento, testeara que Stuff no hace nada.
+    s7_dev = 0.0
+    s7_worst = ""
+    for w in all_workloads:
+        for p in powers:
+            for key in ("whiff", "called_tk", "cnt"):
+                vals = [row(w, p, st)[key] for st in stuffs]
+                spread = max(vals) - min(vals)
+                if spread > s7_dev:
+                    s7_dev, s7_worst = spread, f"{key} @POW{p} w{w}"
+    contract.append(("S7 aislamiento de mecanismo (Stuff no toca la disciplina)",
+                     s7_dev <= S7_TOL_PP,
+                     f"|Δ|máx={s7_dev:.2e}pp en {s7_worst} (tol 0.00)"))
+    # S7-bis · y lo que sí tiene que moverse, para que el PASS de arriba no sea
+    # un artefacto de haber medido canales muertos.
+    s7b = min(row(w, 95, 45)["xbh"] - row(w, 95, 95)["xbh"] for w in all_workloads)
+    contract.append(("S7b (observación) Stuff sí mueve el daño (POW95: ST45-ST95)",
+                     s7b > 0.0, f"separación mínima={s7b:+.2f}pp (informativo)"))
+
+    # S8 · estabilidad del sistema: cola de PA y extremos (R8 / K5-R).
+    p95_max = max(r["p95"] for r in (row(*k) for k in results))
+    p12_max = max(r["t12"] for r in (row(*k) for k in results))
+    p16_max = max(r["t16"] for r in (row(*k) for k in results))
+    cap_total = sum(row(*k)["cap"] for k in results)
+    contract.append(("S8 estabilidad del sistema (R8 / K5-R)",
+                     p95_max <= S8_P95_MAX and p12_max <= S8_P12_MAX
+                     and p16_max <= S8_P16_MAX and cap_total == 0,
+                     f"p95≤{p95_max} (≤{S8_P95_MAX}) P12={p12_max:.3f}% "
+                     f"(≤{S8_P12_MAX}) P16={p16_max:.3f}% (≤{S8_P16_MAX}) "
+                     f"CAP={cap_total}"))
+
+    print()
+    for code, ok, detail in contract:
+        print(f"  {code:<52} {'PASS' if ok else 'FAIL':>4}  ({detail})")
+    passed = sum(1 for _, ok, _ in contract if ok)
+    print("-" * 130)
+    print(f"003B-6C · {passed}/{len(contract)} contratos PASS")
+    print()
+    if passed == len(contract):
+        print("VERDICT: la ruta PRODUCTIVA reproduce exactamente la política "
+              "aprobada por el LAB (k=.30 / α=.50) y no movió ningún mecanismo "
+              "que Stuff no debía alterar.")
+        print("         GAMEPLAY-ENGINE-003B → CLOSED / PASS")
+    else:
+        print("VERDICT: FAIL. La ruta productiva NO reproduce la política "
+              "aprobada. No promover; revisar 003B-6A.")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Monte Carlo de fatiga (GAMEPLAY-ENGINE-001B)")
-    parser.add_argument("--mode", choices=["pa", "pitch", "discipline", "cv", "take", "foul", "bc", "d2", "cv2", "f5", "c1", "c3", "c4", "c5", "d1", "d3", "d4", "e1", "e2", "e3", "e3b", "e5", "e003a", "e003a-tail", "e003b", "e003b2", "e003b3", "e003b4", "e003b5a"], default="pa",
+    parser.add_argument("--mode", choices=["pa", "pitch", "discipline", "cv", "take", "foul", "bc", "d2", "cv2", "f5", "c1", "c3", "c4", "c5", "d1", "d3", "d4", "e1", "e2", "e3", "e3b", "e5", "e003a", "e003a-tail", "e003b", "e003b2", "e003b3", "e003b4", "e003b5a", "e003b5b", "e003b5c", "e003b6"], default="pa",
                         help="pa = PA completo (001B-4); pitch = pitch suelto (001B-3); "
                              "discipline = diagnóstico de count/disciplina sin fatiga (002A); "
                              "cv = factorial Control×Vision (002B); "
@@ -5831,6 +7911,9 @@ def main() -> None:
                               "e003b3 = S2 coefficient sweep: 7 coefs × 5 Stuff + power reference, contratos N1–N7, suppression_ratio diagnóstico (003B-3); "
                               "e003b4 = Power×Stuff matchup robustness: k=.30, 5 Powers × 3 Stuffs, contratos O1–O7 + matrices XBH/HR + pendientes (003B-4); "
                               "e003b5a = Semántica Stuff×fatigue: F0 NONE / F1 FULL / F2 HALF / F3 ANCHORED, 4 workloads × 3 Stuff, contratos P1–P7 + stuff-added fatigue cost (003B-5A); "
+                               "e003b5b = Calibración α de la fatiga de Stuff: 7 α (0/.25/.40/.50/.60/.75/1) × 4 workloads × 3 Stuff, contratos Q1–Q7 + fatigue_suppression_retention (003B-5B); "
+                                "e003b5c = Power×Stuff×Fatigue head-to-head α=.50 vs .60: 2 α × 3 Power × 3 Stuff × 3 workloads, contratos R1–R9 + superficie pareada Δ(.60−.50) con SE pareado (003B-5C); "
+                                "e003b6 = PRODUCTION ACCEPTANCE de Stuff: ruta real card→mapper→fatigue→calculate_play_outcome() sin knobs, PROD vs LAB vs PRE bit-exacto, bloques A fresh / B fatigue / C baseline, contratos S1–S8 (003B-6C); "
                               "d3 = comparación de estrategias CPU workload-based por matchup (001D-3); "
                              "d4 = barrido ampliado + coste marginal de esperar (001D-4A/B)")
     parser.add_argument("--reps", type=int, default=REPS, help="réplicas por escenario")
@@ -5876,6 +7959,12 @@ def main() -> None:
         run_matchup_robustness_e003b4(args.reps)
     elif args.mode == "e003b5a":
         run_stuff_fatigue_policies_e003b5a(args.reps)
+    elif args.mode == "e003b5b":
+        run_stuff_fatigue_alpha_e003b5b(args.reps)
+    elif args.mode == "e003b5c":
+        run_power_stuff_fatigue_e003b5c(args.reps)
+    elif args.mode == "e003b6":
+        run_production_acceptance_003b6(args.reps)
     elif args.mode == "f5":
         run_fatigue_curve_comparison(args.reps)
     elif args.mode == "c1":

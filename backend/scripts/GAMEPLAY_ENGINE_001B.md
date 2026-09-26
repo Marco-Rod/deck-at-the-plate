@@ -69,8 +69,8 @@ GAMEPLAY-ENGINE-002 — DISCIPLINE / COUNT MODEL
 GAMEPLAY-ENGINE-003A — CALIBRATED ENGINE BASELINE
 [CLOSED — PASS with superseded measurement contract · CALIBRATED-BASELINE-v1 congelado]
 
-GAMEPLAY-ENGINE-003B — STUFF
-[IN PROGRESS — 003B-1..4 CLOSE (S1/S2/S3 PASS → M1–M6 PASS → N1–N7 PASS → O1–O7 PASS, k=.30 ROBUSTNESS-VALIDATED CANDIDATE); 003B-5A CLOSED (semántica Stuff×fatigue: familia multiplicativa parcial gana, ANCHORED rechazada por P4); 003B-5B calibración α pendiente]
+GAMEPLAY-ENGINE-003B - STUFF - CLOSED / PASS
+[CLOSED / PASS - 003B-1..4 CLOSE (S1/S2/S3 PASS -> M1-M6 PASS -> N1-N7 PASS -> O1-O7 PASS, k=.30 ROBUSTNESS-VALIDATED CANDIDATE); 003B-5A CLOSED (semantica Stuff x fatiga: familia multiplicativa parcial gana, ANCHORED rechazada por P4); 003B-5B CLOSED (a sweep 0/.25/.40/.50/.60/.75/1.0, 4.2M PA, Q1-Q7: banda sana {.25,.40,.50,.60}, techo de identidad Q4 a*~0.72, a=.60 gana la lectura estricta de Q5 por +0.01pp de holgura -> punto de equilibrio, NO robusto); 003B-5C CLOSED (head-to-head Power x Stuff x Fatigue a=.50 vs .60, 2.7M PA, R1-R9: ambos PASS R1-R8, REPRO 003B-4 |D|=0.00pp, shape pareado exacto -> **a=.50 CONGELADO** por R9(b): .60 reduce el margen de identidad +2.18pp -> +1.11pp); 003B-6A CLOSED (integracion productiva: stuff_policy.py, PitcherAttrs.stuff, columna+CHECK+migracion 0042, mapper, fatigue_manager sin truncar, calculator sin conocer la fatiga, backfill); 003B-6B CLOSED (42 tests T1-T8, suite 987 passed); **003B-6C CLOSED / PASS (PRODUCTION ACCEPTANCE, 1.35M PA x 3 rutas, 27/27 contratos: S1 PROD==LAB 0/1.350.000 bit-exacto, Bloques A y B |D|max=0.005pp, C1 Stuff70+fresco==PRE 0/150.000, S6 R6 42.95/32.08 y R7 10.85/5.53 bucket 67.22 clavando 5C, S7 0.00pp) -> GAMEPLAY-ENGINE-003B y GAMEPLAY-RATING-001 CERRADOS. Stuff CONGELADO. Siguiente: Clutch = GAMEPLAY-RATING-002 desde cero]**
 
 Finding:
 GAMEPLAY-ENGINE-002-CLAMP-001
@@ -2434,3 +2434,543 @@ Pregunta B) ¿Con qué intensidad?  → 003B-5B calibra α. α=.50 NO es definit
   0.60, 0.75, 1.00} + NONE como control (misma matriz, contratos P1–P7). Tras
   ganadora estable → 003B-6 Production Acceptance y cierre de
   GAMEPLAY-RATING-001. Harness y ADR al día; `calculator.py` UNCHANGED.
+
+## GAMEPLAY-ENGINE-003B-5B · Calibración α de la fatiga de Stuff
+
+```text
+Pregunta A) ¿Debe Stuff degradarse con fatiga?   → 5A: SÍ (multiplicativa parcial)
+Pregunta B) ¿Con qué intensidad α?              → AQUÍ. 7 α, 4.2M PA, Q1–Q7.
+```
+
+5A fijó la familia; 5B sólo mide **cuánta** degradación parcial se quiere. No se
+re-litiga la semántica: `α=0.00` es el control, `α=1.00` es la referencia ya
+condenada (se conserva para medir el extremo y para falsar Q4), y `.25/.40/.50/
+.60/.75` son los candidatos.
+
+### Setup 003B-5B
+
+```text
+Familia:  effective_stuff = raw_stuff * (1 - α * (1 - f)),  f = get_fatigue_factor()
+
+α:        0.00 (control) / 0.25 / 0.40 / 0.50 / 0.60 / 0.75 / 1.00 (FULL ref)
+Stuff:    45 / 70 / 95
+Workload: 1.00 / 1.20 / 1.35 / 1.50   (f: 1.000 / 0.919 / 0.784 / 0.634)
+Power:    70        VEL/CTL/MOV: 70 base, fatigados por PROD
+k Stuff:  0.30      (S2 · contact-quality suppression)
+Seeds:    750M+rep IDÉNTICAS en las 84 celdas → matriz 100% pareada
+PA/cell:  50k       7 α × 4 workloads × 3 Stuff = 4.2M PA
+```
+
+- Matriz **idéntica** a 5A (mismos 3 Stuff, mismos 4 workloads, mismos seeds,
+  mismo `k`) para que la comparación sea directa: lo único que cambia es α.
+- El factor `f` sigue viniendo del PRODUCTIVO `get_fatigue_factor()`; NO se
+  duplica la curva en el harness.
+- **REPRO bit-exacto contra 5A**: α=0.00 ≡ F0 NONE, α=0.50 ≡ F2 HALF,
+  α=1.00 ≡ F1 FULL. Es el mismo código con las mismas seeds, así que la
+  reproduccín debe dar `|Δ| = 0.00pp` contra las cifras publicadas de 5A
+  (tolerancia 0.01 = redondeo del print de 5A). **Resultó 0.00/0.00/0.00** → el
+  instrumento de 5B es el mismo que el de 5A, no una variante.
+
+### Contratos Q1–Q7 (fijados ANTES de correr)
+
+- **Q1 · FRESH IDENTITY**: en w=1.00, `f=1.0` → `effective_stuff = raw` para
+  **todo** α. Verificable bit-exacto: span entre α ≤0.2pp, `|Δ|` ≤0.2pp vs
+  003B-4 fresca (30.49/23.03/15.77) y `eff ≡ raw` exacto.
+- **Q2 · ALPHA ORDERING**: mismo raw Stuff y w>1, α creciente →
+  `effective_stuff` no aumenta (exacto por construcción) → la capacidad de
+  supresión no aumenta, es decir XBH/BIP no disminuye (tol 0.5pp). Para ST95
+  esto se ve como más daño permitido al subir α.
+- **Q3 · WORKLOAD MONOTONICITY**: w↑ → `effective_stuff`↓ (exacto, las 3
+  Stuff) y, para cada α>0, XBH/BIP **no disminuye** en ST70/ST95 (tol 0.7pp).
+  ST45 queda fuera del contrato monotónico de XBH porque el sistema completo
+  también está degradando VEL/MOV/CTL: su `effective_stuff` sí es monotónico.
+  El brazo control (α=0) se chequea como XBH plana entre workloads (≤1.5pp,
+  tolera la deriva PROD de 2º orden de composición VEL/MOV, no señal de Stuff).
+- **Q4 · ELITE IDENTITY SURVIVES**: a w=1.50 el ST95 fatigado debe conservar
+  ventaja de supresión frente a un **ST70 fresco** (margen > 0). Es exactamente
+  la frontera que condenó FULL en 5A; cruzarla = demasiado destructivo. Banda
+  advisory de 1.0pp reportada aparte (no contractual, para no meter una
+  decisión de diseño dentro del contrato).
+- **Q5 · MATERIAL FATIGUE**: **estructural** = el cost de Stuff fatigado sobre
+  α=0 excede el eps (0.5pp ≈ 5 SE) en w=1.35 y w=1.50 y es monótono en w. El
+  umbral de "material" NO se prefijó: se mide después contra el **gap de
+  identidad fresco** (ST45−ST95 XBH a w=1.00 = 14.72pp, la escala propia del
+  motor, que no es miembro de la familia α → la barra no es degenerada), y se
+  reporta la sensibilidad de la decisión a la barra.
+- **Q6 · NO COMPOUND EXPLOSION**: el cost sobre α=0 crece con suavidad: sin
+  pasos hacia atrás (tol 0.7pp), sin cruces entre α (cost monótono en α en cada
+  w × Stuff) y sin aceleración patológica (`d2/d1` ≤ 2.0, donde
+  `d1 = cost(1.35)−cost(1.20)` y `d2 = cost(1.50)−cost(1.35)`).
+- **Q7 · SYSTEM STABILITY**: K5-R sano (max p95 ≤ 6), sin CAP, P≥12 ≤0.05% y
+  P≥16 ≤0.01% por celda, todas las probabilidades finite y en [0,100], y
+  **aislamiento de mecanismo**: en S2 el `whiff_add ≡ 0` y `power_add` sólo
+  cambia el bucket del PRIMER BIP (que termina el PA igual en todos los casos)
+  → la trayectoria del PA debe ser **bit-idéntica** entre α.
+
+### Resultados (evidencia `scripts/_e003b5b_full_run.txt`, 4.2M PA)
+
+Matriz XBH/BIP y HR/BIP por α (50k/celda, p95 máx = 6 en las 84 celdas, CAP 0):
+
+| α | w | eff 45/70/95 | XBH 45 | XBH 70 | XBH 95 | HR 45 | HR 70 | HR 95 |
+| :-: | :-: | :---------- | -----: | -----: | -----: | ----: | ----: | ----: |
+| 0.00 | 1.00 | 45/70/95 | 30.49 | 23.03 | 15.77 | 19.74 | 12.10 | 4.53 |
+| 0.00 | 1.50 | 45/70/95 | 30.51 | 23.02 | 15.78 | 19.70 | 12.20 | 4.61 |
+| 0.25 | 1.20 | 44.09/68.59/93.09 | 30.61 | 23.31 | 16.20 | 19.92 | 12.51 | 5.04 |
+| 0.25 | 1.50 | 40.89/63.60/86.32 | 31.84 | 24.99 | 18.32 | 20.89 | 14.18 | 7.17 |
+| 0.40 | 1.20 | 43.55/67.75/91.94 | 30.75 | 23.61 | 16.54 | 20.12 | 12.74 | 5.39 |
+| 0.40 | 1.50 | 38.42/59.76/81.11 | 32.56 | 26.11 | 19.87 | 21.62 | 15.39 | 8.78 |
+| 0.50 | 1.20 | 43.19/67.18/91.18 | 30.85 | 23.81 | 16.77 | 20.21 | 12.93 | 5.67 |
+| 0.50 | 1.50 | 36.77/57.21/77.64 | 32.97 | 26.87 | 20.85 | 22.06 | 16.05 | 9.77 |
+| 0.60 | 1.20 | 42.83/66.62/90.41 | 30.97 | 23.96 | 17.02 | 20.30 | 13.10 | 5.92 |
+| 0.60 | 1.50 | 35.13/54.65/74.16 | 33.47 | 27.55 | 21.83 | 22.52 | 16.85 | 10.88 |
+| 0.75 | 1.20 | 42.28/65.77/89.26 | 31.21 | 24.23 | 17.37 | 20.45 | 13.38 | 6.25 |
+| 0.75 | 1.50 | 32.66/50.81/68.95 | 34.18 | 28.72 | 23.35 | 23.20 | 18.03 | 12.47 |
+| 1.00 | 1.20 | 41.38/64.36/87.35 | 31.47 | 24.66 | 18.01 | 20.70 | 13.85 | 6.79 |
+| 1.00 | 1.50 | 28.55/44.41/60.27 | 35.46 | 30.66 | 25.98 | 24.50 | 19.88 | 15.25 |
+
+**Tabla decisiva · ST95** (la que pedía el tradeoff):
+
+| α | eff@1.20 | eff@1.35 | eff@1.50 | XBH@1.50 | cost@1.20 | cost@1.35 | cost@1.50 | ret@1.50 | margen Q4 |
+| :-: | ------: | ------: | ------: | -------: | --------: | --------: | --------: | -------: | --------: |
+| 0.00 | 95.00 | 95.00 | 95.00 | 15.78 | 0.00 | 0.00 | 0.00 | 99.7% | +7.24 |
+| 0.25 | 93.09 | 89.86 | 86.32 | 18.32 | +0.48 | +1.51 | +2.54 | 91.8% | +4.71 |
+| 0.40 | 91.94 | 86.78 | 81.11 | 19.87 | +0.82 | +2.45 | +4.08 | 86.0% | +3.16 |
+| 0.50 | 91.18 | 84.72 | 77.64 | 20.85 | +1.04 | +3.08 | +5.07 | 83.0% | +2.18 |
+| 0.60 | 90.41 | 82.66 | 74.16 | 21.83 | +1.29 | +3.69 | +6.05 | 78.7% | +1.20 |
+| 0.75 | 89.26 | 79.58 | 68.95 | 23.35 | +1.64 | +4.63 | +7.57 | 73.8% | **−0.33** |
+| 1.00 | 87.35 | 74.44 | 60.27 | 25.98 | +2.28 | +6.06 | +10.20 | 64.4% | **−2.95** |
+
+**`fatigue_suppression_retention`** = `supresión(w) / supresión(fresco)`, con
+supresión medida contra Stuff70 **en el mismo α y el mismo workload**
+(`supresión = XBH ST70 − XBH ST`; fresca ST95 = 7.26pp, ST45 = −7.46pp):
+
+| α | ret ST95 @1.20 | @1.35 | @1.50 | ret ST45 @1.20 | @1.35 | @1.50 |
+| :-: | ------------: | ----: | ----: | ------------: | ----: | ----: |
+| 0.00 | 98.9% | 100.7% | 99.7% | 99.9% | 101.4% | 100.4% |
+| 0.25 | 97.9% | 95.9% | 91.8% | 97.8% | 95.9% | 91.8% |
+| 0.40 | 97.4% | 92.6% | 86.0% | 95.6% | 92.9% | 86.4% |
+| 0.50 | 97.0% | 91.1% | 83.0% | 94.3% | 90.2% | 81.7% |
+| 0.60 | 95.6% | 88.7% | 78.7% | 94.0% | 88.1% | 79.3% |
+| 0.75 | 94.5% | 84.9% | 73.8% | 93.5% | 84.8% | 73.2% |
+| 1.00 | 91.7% | 79.4% | 64.4% | 91.2% | 79.9% | 64.4% |
+
+La fila α=0.00 (~100% en las tres) es el control que ancla el métrico: con Stuff
+fresco la retención es 1 por construcción y lo que queda es deriva PROD de 2º
+orden. La fila de ST45 es negativa (el 45 no suprime, subreprime) pero su razón
+es igualmente informativa: la fatiga también le **resta** su handicap al 45.
+
+**Contratos — veredicto (50k):**
+
+| Contrato | Resultado |
+| :------- | :-------- |
+| REPRO 5A | PASS — `|Δ|` XBH máx 0.00pp para α=0.00/0.50/1.00 (bit-exacto) |
+| Q1 FRESH IDENTITY | PASS — span 0.00, `|Δ|` vs 003B-4 0.00, `eff ≡ raw` exacto en las 3 Stuff |
+| Q2 ALPHA ORDERING | PASS — los 7 α, en las 9 combinaciones w>1 × Stuff |
+| Q3 WORKLOAD MONOTONICITY | PASS — `eff`↓ en w las 3 Stuff; cost↑ en ST70/ST95 los 6 α>0; control α=0 plano (span 0.18/0.12/0.11) |
+| Q4 ELITE IDENTITY | **α=0.75 (margen −0.33) y α=1.00 (−2.95) CRUZAN la frontera**; sanos ≤0.60. El α=1.00 reproduce exactamente el −2.95 de 5A → el contrato falsable funciona |
+| Q5 MATERIAL FATIGUE (estructural) | PASS — los 6 α>0 con cost >0.5pp en 1.35 y 1.50, monótono en w |
+| Q6 NO COMPOUND EXPLOSION | PASS — aceleración máx d2/d1 = 1.14 (α=1.00), cero cruces entre α, cero pasos atrás |
+| Q7 SYSTEM STABILITY | PASS — p95 6≤6, CAP 0, 0 violaciones, 0 probabilidades inválidas, trayectoria del PA con `|Δ| = 0.00pp` EXACTO |
+
+**Q7 · un hallazgo del instrumento, no del juego**: la invariancia de la
+trayectoria del PA resultó **exacta** (0.00pp en K%, BB%, BIP%, Whiff/Sw,
+CalledS/TAKE, Contacto/Sw, Pit/PA y p95), porque `power_add` sólo mueve el
+bucket del primer BIP y cualquier BIP termina el PA. Lo que sí se mueve es la
+mezcla dentro del BIP (XBH +10.20, HR +10.64, OUT/BIP +10.54 a α=1.00) y
+**Reach% (−7.48pp)**: los swaps cruzan el umbral 25/63 igual que 63/85/93/96, o
+sea un Stuff fatigado convierte hits en outs. Reach% **no** es invariante y no
+debe usarse como mecanismo de aislamiento.
+
+### 003B-5B CALIBRATION DECISION
+
+```text
+Bandas (a 50k, no un punto):
+  sanos (Q1–Q7 todos PASS)     : {0.25, 0.40, 0.50, 0.60}
+  material@1.50 (barra 25%)   : {0.40, 0.50, 0.60, 0.75}
+  material@1.35 (barra 25%)   : {0.60, 0.75}
+  techo de identidad (Q4)     : α ≤ 0.60 medido · α* ≈ 0.72 interpolado
+```
+
+**El ganador por lectura estricta es α=0.60, y es un punto de equilibrio.** Con
+la barra de materialidad al 25% del gap de identidad (3.68pp), α=0.60 gana
+porque es el **único** α que es sano y material en 1.35 y 1.50 a la vez
+(cost@1.35 = 3.69pp contra 3.68pp requeridos: **+0.01pp de holgura, +0.3%**), y
+su margen de identidad Q4 es sólo **+1.20pp** (la mitad del de α=0.50). No es un
+interior robusto: es el borde izquierdo de una ventana viable de anchura ≈0.11
+(0.60 ≤ α ≤ 0.72).
+
+Sensibilidad de la decisión a la barra (la barra es diseño, no hallazgo):
+
+| barra de materialidad | material@1.50 | material@1.35&1.50 |
+| -------------------: | ------------: | ------------------: |
+| 15% (2.21pp) | α=0.25 | α=0.40 |
+| 20% (2.94pp) | α=0.40 | α=0.50 |
+| **25% (3.68pp)** | α=0.40 | **α=0.60** ← el punto de equilibrio |
+| 30% (4.42pp) | α=0.50 | NINGUNO (α=0.75 cruza Q4) |
+| 40% (5.89pp) | α=0.60 | NINGUNO |
+
+**Por qué la ventana es tan estrecha (estructural, no artefacto de la barra)**:
+la curva de fatiga es gaussiana en w, así que a w=1.35 sólo se ha realizado el
+**59%** de la degradación que existe a w=1.50 (`1−f` = 0.216 vs 0.366). Exigir
+materialidad en los DOS workloads es por tanto ~1.7× más exigente que exigirla
+sólo en 1.50, y ese factor se come casi todo el espacio que Q4 deja libre.
+
+**Recomendación** (ordenada por principio, no por centralidad — coherente con
+cómo se eligió el floor .20: obtener el beneficio sin más intervención de la
+necesaria):
+
+1. **α=0.50 es la elección defendible** si la materialidad se juzga en w=1.50
+   (donde la fatiga está completa): cost +5.07pp = 34% del gap de identidad,
+   retención 83.0%, margen Q4 +2.18pp (el doble de holgura que α=0.60), α=0.50
+   ya medido en 5A como F2 y con Q1–Q7 todos PASS.
+2. **α=0.60** si la lectura de Q5 exige materialidad también en w=1.35. Es
+   sano, pero gasta la mayor parte del margen de identidad para ganar
+   +0.98pp de coste sobre α=0.50.
+3. **α=0.40** es el mínimo con materialidad clara en 1.50 (27.7% del gap) y la
+   mejor retención de la banda sana (86.0%) — el extremo conservador si el
+   criterio dominante es " Stuff no debe perder identidad".
+4. **α≤0.25** es cosmética (10.3% del gap a 1.35): Stuff prácticamente ignora la
+   fatiga → descartada por el spirit de Q5 aunque sus contratos sanen.
+5. **α≥0.75 queda FUERA por Q4**, no por gusto: el élite fatigado pasa a
+   permitir más XBH que un MID fresco. La frontera interpolada está en α*≈0.72.
+
+- **Sigue SIN tocar producción**: `calculator.py` UNCHANGED, cero cambios de
+  gameplay, k=.30 intacto. Sólo harness (`--mode e003b5b`) + este ADR.
+- **Suite pytest 945 passed** (sin cambios en `app/`).
+- **Siguiente: GAMEPLAY-ENGINE-003B-5C** · robustez del ganador:
+  Power {45,70,95} × Stuff {45,70,95} × workload {1.00,1.35,1.50} (1.35M PA por
+  α) para comprobar que la combinación **Power × Stuff × Fatigue** no rompe la
+  superficie validada en 003B-4. Dado que la decisión α=.50-vs-.60 está
+  dominada por una holgura de 0.01pp, la opción de llevar **ambos** α a 5C
+  (2.7M PA) es barata y decide la frontera con evidencia de robustez en vez de
+  con una barra. Sólo después 003B-6 (integrar `Stuff` en `PitcherAttrs`, mapper,
+  fatiga, calculator + production acceptance) y cierre de GAMEPLAY-RATING-001.
+
+## GAMEPLAY-ENGINE-003B-5C · Power × Stuff × Fatigue robustness (α=.50 vs α=.60)
+
+```text
+5A:  partial multiplicative family selected.
+5B:  healthy range identified; .50 and .60 emerge as finalists.
+5C:  head-to-head robustness across Power × Stuff × Fatigue determines α.
+     Selection based on system behavior, not threshold proximity.
+```
+
+5B cerró con la decisión de α **apoyada en una barra post-hoc**: `.60` ganaba
+la lectura estricta de Q5 por **+0.01pp** sobre un umbral que nadie fijó. Eso
+no es evidencia para congelar un parámetro de producción. 5C cambia de
+filosofía: **no vuelve a preguntar si α alcanza una barra de materialidad**
+—precisamente lo que produjo la ambigüedad— y pregunta si el **sistema** se
+comporta mejor con `.60` que con `.50` en la superficie completa.
+
+**Nada de lo que 5C prueba se re-litiga**: la familia y la fórmula vienen de 5A,
+el rango sano y los descartados vienen de 5B (α≤.25 cosmético · α≥.75 pierde
+identidad por Q4 · **.40 = fallback conservador documentado, NO llevado a 5C**).
+Los finalistas son `.50` (menor intervención) y `.60`.
+
+### Setup 003B-5C
+
+```text
+Power:    45 / 70 / 95      (poder del BATTER — el mismo eje de 003B-4)
+Stuff:    45 / 70 / 95      (stuff_level del pitcher, fatigado)
+Workload: 1.00 / 1.35 / 1.50   (w=1.00 es el control FRESCO *in-run*)
+α:        0.50 / 0.60       k: 0.30        (MID pitcher, agente 65/50/30)
+Seeds:    750M+rep IDÉNTICAS en las 54 celdas → las DOS familias α son 100%
+          pareadas seed a seed, y el control fresco reproduce 003B-4
+2 × 3 × 3 × 3 = 54 celdas × 50k = 2.7M PA
+```
+
+- `w=1.00` dentro de la propia matriz es lo que hace 5C autocontenido: cada
+  contrato tiene su control fresco en el mismo run, sin referencias externas.
+- **α sólo mueve el bucket del PRIMER BIP** (misma razón que 5B Q7), así que la
+  trayectoria del PA debe ser **bit-idéntica** entre las dos α: son 27 celdas
+  pareadas que validan el instrumento entero gratis.
+
+### Contratos R1–R9 (fijados ANTES de correr)
+
+- **R1 · POWER EXPRESSION**: en cada Stuff × workload, `POW45 < POW70 < POW95` en
+  XBH/BIP (tol 0.2pp, la de 003B-4 O1; los pasos frescos son ~4pp, 20× la tol).
+- **R2 · STUFF EXPRESSION**: en cada Power × workload, `ST45 > ST70 > ST95` en
+  XBH/BIP (tol 0.2pp, la de 003B-4 O2; pasos frescos ~7.5pp).
+- **R3 · FATIGUE DIRECTION**: con α>0 y ST70/ST95, el coste de fatiga debe ser
+  monótono en w (tol 0.7pp = la de 5B Q3, para no producir un FAIL falso donde
+  XBH satura cerca del techo en POW95).
+- **R4 · ELITE IDENTITY**: ST95 fatigado sigue siendo mejor en supresión que ST70
+  **fresco** (misma α, mismo Power) — la frontera exacta de 5B Q4, ahora
+  generalizada a los 3 Powers y los 3 workloads. Banda advisory 1.0pp.
+- **R5 · STRONG-vs-STRONG SURVIVES**: en `POW95`, ambos atributos siguen
+  expresándose a w=1.35 y 1.50: el hueco de Power (POW95−POW45) y el de Stuff
+  (ST45−ST95) ≥1.0pp (barra heredada de 003B-4 O3; observado +9.83).
+- **R6 · NO EXTREME EXPLOSION**: `POW95×ST45×w1.50` no hace runaway —
+  XBH ≤55.0, HR ≤35.0 (topes de 003B-4 O4; máximo fresco observado 40.66/29.49
+  → 5C no puede romper la superficie YA validada).
+- **R7 · NO EXTREME COLLAPSE**: `POW45×ST95` no degenera. Referido a su **propio
+  fresco in-run** (no a una barra inventada): XBH ≥50% del valor w=1.00, y ningún
+  bucket de contacto >85% del BIP.
+- **R8 · SYSTEM STABILITY**: K5-R (p95 ≤6, CAP 0), P≥12 ≤0.05%, P≥16 ≤0.01%, y
+  **shape pareado exacto**: `|Δ| = 0.00` en pitches/K/BB/BIP/whiff/called/cnt/
+  t12/t16/p95 entre las dos α en las 27 celdas pareadas.
+- **R9 · ROBUSTNESS DOMINANCE** (comparativo, fijado antes del run). Default
+  `.50`; `.60` gana **sólo si cumple las TRES cláusulas**:
+  - **(a) expresión ACOPLADA material y consistente** — el gradiente STUFF del
+    Δ (ΔST95 − ΔST45) > 0 con |z| > 2 en w=1.35 **y** 1.50, en los 3 Powers.
+  - **(b) NO reduce la identidad** — margen R4 de `.60` ≥ el de `.50`.
+  - **(c) NO rompe los extremos** — R6 y R7 siguen PASS.
+  - En cualquier otro caso gana el **menor** α: una vez que dos valores cumplen
+    la función, `.60` tiene que **justificar** su acoplamiento extra.
+
+**Sobre la barra de R9**: no se inventó un umbral de materialidad. "Material" =
+`|Δ| > 2 SE del Δ **pareado**`, con el SE salido de la varianza de los propios
+datos por delta-method sobre la tabla de contingencia de las dos celdas
+pareadas. Esto importa: el SE pareado del gradiente es ~**6× menor** que el SE
+naive no pareado (0.30pp vs 1.79pp en la validación), porque las dos diferencias
+están fuertemente correlacionadas. Ambas fórmulas se validaron contra bootstrap
+pareado (ratio SE analítico/SE bootstrap ≈ **1.01**). Un SE ingenuo habría
+declarado "material" cualquier ruido.
+
+### Resultados (evidencia `scripts/_e003b5c_full_run.txt`, 2.7M PA)
+
+**Controles del instrumento (ambos PASS)**
+
+- **REPRO 003B-4**: el control fresco reproduce la superficie de 003B-4 con
+  `|Δ| máx = 0.00pp` en las 36 cifras (XBH y HR × 3 Powers × 3 Stuff). 5C está
+  midiendo la misma superficie que 003B-4 validó, con α encima.
+- **R8 shape pareado**: invarianza **EXACTA** (`0.00pp`) en las 27 celdas
+  pareadas y en todos los canales.
+
+**Contratos (ambos α, 50k/celda):**
+
+| Contrato | α=.50 | α=.60 |
+| :------- | :---- | :---- |
+| R1 POWER EXPRESSION | PASS | PASS |
+| R2 STUFF EXPRESSION | PASS | PASS |
+| R3 FATIGUE DIRECTION | PASS | PASS |
+| R4 ELITE IDENTITY | PASS (min **+2.18pp** @POW70 w1.50) | PASS (min **+1.11pp** @POW95 w1.50) |
+| R5 STRONG-vs-STRONG | PASS | PASS |
+| R6 NO EXTREME EXPLOSION | PASS (42.95≤55.0, 32.08≤35.0) | PASS (43.41≤55.0, 32.55≤35.0) |
+| R7 NO EXTREME COLLAPSE | PASS (10.85 vs fresco 5.53; bucket 67.22) | PASS (11.91 vs fresco 5.53; bucket 66.26) |
+| R8 SYSTEM STABILITY | PASS (p95 6, CAP 0, t12 .012, t16 .002) | PASS (idéntico) |
+
+**Coste de fatiga de Stuff por α (Δ XBH/BIP vs w=1.00, POW70):**
+
+| α | ST45 @1.35 | @1.50 | ST70 @1.35 | @1.50 | ST95 @1.35 | @1.50 |
+| :-: | --------: | ----: | --------: | ----: | --------: | ----: |
+| .50 | +1.61 | +2.48 | +2.33 | +3.84 | **+2.98** | **+5.08** |
+| .60 | +1.89 | +2.98 | +2.78 | +4.52 | **+3.59** | **+6.06** |
+
+**Superficie pareada Δ(.60 − .50) · XBH/BIP (pp) [z]:**
+
+| w | Power | ST45 | ST70 | ST95 |
+| :-: | :---- | ----: | ----: | ----: |
+| 1.00 | 45/70/95 | +0.00 | +0.00 | +0.00 |
+| 1.35 | 45 | +0.26 [+9.4] | +0.40 [+11.6] | +0.61 [+14.4] |
+| 1.35 | 70 | +0.29 [+9.9] | +0.44 [+12.3] | +0.61 [+14.5] |
+| 1.35 | 95 | +0.28 [+9.7] | +0.48 [+12.8] | +0.60 [+14.3] |
+| 1.50 | 45 | +0.47 [+13.0] | +0.79 [+16.8] | **+1.06** [+19.5] |
+| 1.50 | 70 | +0.50 [+13.3] | +0.68 [+15.5] | **+0.98** [+18.8] |
+| 1.50 | 95 | +0.46 [+12.9] | +0.74 [+16.3] | **+1.15** [+20.3] |
+
+El Δ es material (|z| > 2) en **18/27 celdas**, y `.60` produce MÁS XBH en todas
+las celdas fatigadas — es la definición misma de "más fatiga de Stuff". La
+pregunta de R9 no es si `.60` hace más, sino si esa diferencia es *expresión
+acoplada* o simplemente *castigo*.
+
+**Gradiente STUFF del Δ — el discriminador (con su SE pareado de 4 celdas):**
+
+| w | POW45 | POW70 | POW95 | gradiente POWER (ST45 / ST70 / ST95) |
+| :-: | ----: | ----: | ----: | :------------------------------ |
+| 1.35 XBH | +0.34 [+6.8] | +0.33 [+6.4] | +0.33 [+6.4] | +0.01 [+0.4] / +0.09 [+1.7] / −0.00 [−0.0] |
+| 1.50 XBH | +0.58 [+8.9] | +0.48 [+7.5] | +0.68 [+10.1] | −0.01 [−0.2] / −0.05 [−0.7] / +0.09 [+1.1] |
+
+Esto es un **hallazgo del instrumento y del diseño**: el Δ de `.60` **crece con
+el Stuff** (gradiente +0.33 a +0.68pp, |z| 6.4–10.1) y es **plano en Power**
+(|z| ≤ 1.7, indistinguible de cero). Es decir, `.60` no es "más daño en todas
+partidas": es específicamente **más pérdida de identidad acoplada al Stuff**, que
+es exactamente la forma que debía tener si la familia es correcta. Y no toca la
+expresión de Power → la superficie de 003B-4 no se comprime.
+
+### 003B-5C CALIBRATION DECISION
+
+**Verificación de cláusulas (R9, sobre `.60`):**
+
+```text
+(a) expresión acoplada material y consistente  → CUMPLE
+      w=1.35: +0.34[6.8] +0.33[6.4] +0.33[6.4]     (3/3 Powers, |z|>2)
+      w=1.50: +0.58[8.9] +0.48[7.5] +0.68[10.1]    (3/3 Powers, |z|>2)
+(b) NO reduce la identidad                     → NO CUMPLE
+      margen R4: .60 +1.11pp  vs  .50 +2.18pp   (banda advisory 1.0pp)
+      → .60 reduce el margen de identidad a la MITAD y queda a 0.11pp de la banda
+(c) no rompe los extremos                      → CUMPLE
+      R6 42.95→43.41 (techo 55) · 32.08→32.55 (techo 35) | R7 bucket 67.22→66.26
+```
+
+**DECISIÓN: α = 0.50** (`k=0.30`).
+
+Razonamiento, y por qué es más fuerte que el de 5B:
+
+1. **`.60` no es un sistema distinto, es el mismo sistema un 20% más adelante.**
+   No hay acantilado de robustez entre `.50` y `.60`: las dos son smooth y
+   monótonas, y `.60` simplemente está más lejos por la misma curva. La
+   comparación head-to-head no puede producir "un sistema cualitativamente
+   mejor" — a lo sumo una comparación cuantitativa, que es lo que R9 afina.
+2. **La cláusula que decide es la identidad, y es estructural, no una barra.**
+   `.50` conserva +2.18pp de identidad del élite; `.60` conserva +1.11pp y queda
+   a 0.11pp de la banda advisory de 1.0pp. Dado que Q4 ya condenó α=1.00 por
+   cruzar esta misma frontera, gastar la mitad del margen para un +0.61pp de
+   XBH en ST95 es mala compra. **Aquí no hay ninguna barra de materialidad en
+   juego.**
+3. **`.50` no "casi no expresa" la fatiga de Stuff** — la objeción que motivaba
+   llevar `.60` a 5C. En ST95 a w=1.35, `.50` ya mueve +2.98pp de XBH y a w=1.50
+   +5.08pp, con retención de supresión del 83%. La señal está bien expresada; lo
+   que `.60` añade no es presencia de señal sino magnitud.
+4. **`.60` sí es genuinamente mejor en su cláusula (a)** y eso queda registrado:
+   si en el futuro hubiera que subir la fatiga de Stuff, `.60` es el valor con
+   el gradiente STUFF más limpio. No se pierde: queda medido y documentado.
+5. **La conclusión es más defendible que la de 5B.** 5B terminó en "elegimos
+   `.60` porque superó una barra por 0.01pp". 5C termina en "**la robustez del
+   sistema, no la proximidad a un umbral, elige `.50`**: `.60` ofrece un 20% más
+   de acoplamiento a cambio de la mitad del margen de identidad". Mismo proceso,
+   mejor criterio, y `α=.40` sigue disponible como paso atrás documentado.
+
+- **Sin cambios productivos**: `calculator.py` UNCHANGED, cero diffs en `app/`.
+- **Suite pytest 945 passed** (sin cambios en `app/`).
+- **Siguiente: GAMEPLAY-ENGINE-003B-6** · integración productiva + acceptance:
+  `Stuff` en `PitcherAttrs`, mapper, `fatigue_manager` (α=.50 sobre la curva
+  productiva) y `calculator`, con PRODUCTION ACCEPTANCE (k=.30 · α=.50) y
+  tickets de API/DB. Después, cierre de **GAMEPLAY-RATING-001**.
+  **No se abre otro sweep de α**: `.40` es el único recurso si 003B-6 o la
+  acceptance fallaran, y ambos han sido caracterizados ya.
+
+---
+
+## 003B-6 · INTEGRACIÓN PRODUCTIVA + PRODUCTION ACCEPTANCE · CLOSED / PASS
+
+**Veredicto: 27/27 contratos S1-S8 PASS. `GAMEPLAY-ENGINE-003B` CLOSED, y con
+él `GAMEPLAY-RATING-001`. Stuff queda CONGELADO y no se vuelve a tocar.**
+
+### Qué se promovió (diff real en `app/`)
+
+| Fichero | Cambio |
+|---|---|
+| `app/engine/stuff_policy.py` | **NUEVO**. `STUFF_BASELINE=70`, `STUFF_FATIGUE_ALPHA=.50`, `STUFF_POWER_SUPPRESSION=.30`, `effective_stuff()`, `stuff_power_suppression()` |
+| `app/core/engine_types.py` | `PitcherAttrs.stuff: float` |
+| `app/models/card.py` | `PlayerCardModel.stuff` `Integer NOT NULL DEFAULT 70` + `CHECK (0..99)` |
+| `alembic/versions/0042_player_cards_stuff.py` | **NUEVO**. Columna + constraint, `down_revision=0041` |
+| `app/engine/attribute_mapper.py` | Publica `stuff` (con fallback `STUFF_BASELINE` si falta) |
+| `app/engine/fatigue_manager.py` | Aplica `effective_stuff()` con α=.50, **sin truncar** |
+| `app/engine/calculator.py` | Aplica `stuff_power_suppression()` en `power_score` |
+| `app/engine/game_actions.py`, `app/routers/gameplay.py` | Fallback `stuff=70` en las rutas de producto |
+| `app/seeds/backfill_cards.py` | Resuelve `Stuff` desde `CardRatingProfile` / `PlayerRatings` |
+
+El punto de diseño que importa: **`calculator.py` no sabe qué es la fatiga.**
+Recibe un Stuff ya efectivo. La transformación `raw → effective` ocurre una vez,
+en `fatigue_manager`, que es el único dueño de α. Eso es lo que hace el
+acceptance posible: comparar la política sin duplicar la fórmula a mano.
+
+### Production acceptance (003B-6C) — `scripts/_e003b6_full_run.txt`
+
+27 celdas (3 Power × 3 Stuff × 3 workloads) × 50.000 PA × 3 rutas = **1.350.000 PA**
+por ruta. La ruta productiva se ejercita con el módulo real de punta a punta:
+`card → map_card_to_pitcher_attrs() → apply_pitcher_fatigue() →
+calculate_play_outcome()`. **Cero knobs LAB** — α y k se leen de
+`stuff_policy.py`, no del harness.
+
+| Contrato | Resultado |
+|---|---|
+| **S1** PROD == LAB, PA a PA | **0 / 1.350.000** divergentes (bit-exacto, 27 celdas) |
+| **S1a-d** α, k, baseline, fórmula efectiva | PASS — los cuatro coinciden bit a bit |
+| **S1e-g** columna, CHECK y mapper en producción | PASS |
+| **Bloque A** fresco == 003B-4 | PASS — **\|Δ\|máx = 0.005pp** en las 9 celdas |
+| **Bloque B** fatiga == 003B-5C α=.50 | PASS — **\|Δ\|máx = 0.005pp** |
+| **S2 C1** Stuff 70 + fresco == PRE | PASS — **0 / 150.000** divergentes, métricas bit-exactas |
+| **S2 C2** separación bajo fatiga = la aprobada | PASS — medido +2.40/+3.88 vs bono determinista +2.273/+3.838 vs 5C +2.33/+3.84 |
+| **S3/S4/S4b/S5** expresión de Power, supresión de Stuff y dirección de fatiga | PASS — con los pisos R1/R2/R3 originales |
+| **S6** identidad de élites (R4) | PASS — +2.48pp (5C registró +2.18pp) |
+| **S6a/S6b** R6/R7 sin explosión ni colapso | PASS — **42.95/32.08** y **10.85/5.53, bucket 67.22**, clavando los valores de 5C |
+| **S7** aislamiento de mecanismo | PASS — **0.00e+00pp** en whiff, called-strike y contacto |
+| **S8** estabilidad (R8 / K5-R) | PASS — p95=6, CAP=0, P12 0.012%, P16 0.002% |
+
+### Dos cosas que el acceptance tuvo que corregir sobre su propio diseño
+
+Recogerlas aquí porque son la parte no obvia del trabajo, y porque las dos
+habrían producido un PASS o un FAIL **equivocado**:
+
+1. **`xbh` es hits extra-base (2B+3B+HR), sin el 1B.** La primera versión del
+   acceptance summed el 1B y por eso todo el Bloque A aparecía desviado +21pp.
+   S1 (PROD==LAB) pasaba bit-exacto en las mismas celdas: la política era correcta
+   y la métrica mentía. Una comparación entre dos rutas sólo vale si compara las
+   **mismas magnitudes**; se copiaron las definiciones de `_metric_row`.
+
+2. **Bloque C sólo es un contrato de baseline en FRESCO, y por una razón lógica.**
+   El Stuff efectivo de un lanzador cansado cae *por debajo* de 70 (62.42 a w=1.35,
+   57.21 a w=1.50), así que el hitter recibe un bono de poder de `-(ef-70)*k`.
+   Exigir `PROD == PRE` bajo fatiga sería exigir `α=0`, o sea **negar que la
+   fatiga de Stuff exista**. Lo que sí se exige —y se midió— es que esa
+   separación sea exactamente la aprobada en 5C, ni más ni menos. En fresco el
+   término vale `-(70-70)*k = 0` y la ruta es indistinguible de la anterior: eso
+   es lo que prueba que no se coló nada.
+
+También se ajustaron las tolerancias de reproducción a `Z_REPRO=3` desviaciones
+estándar combinadas (como `R9_Z` en 5C) en vez de un 0.05pp fijo: con 50k PA el
+error estándar del XBH/BIP ronda 0.2pp, de modo que una tolerancia fija midiera
+ruido de Monte Carlo en lugar de política. El umbral sale de los datos.
+
+### Verificaciones
+
+- **Suite pytest 987 passed** (945 previos + 42 de 003B-6B).
+- `SCHEMA_HEAD` bumpeado `0041 → 0042`. `ENGINE_BUILD`, `GAMEPLAY_RULES_VERSION` y
+  `BASELINE_COMMIT` **congelados** en `4ee14a8`: la convención del repo es que la
+  build refleje el contenido del código, y este commit no cambia `app/engine/build.py`.
+- `GAMEPLAY-ENGINE-003B` y `GAMEPLAY-RATING-001`: **CLOSED**.
+
+### Estado formal tras el cierre
+
+```text
+GAMEPLAY-ENGINE-003B   CLOSED / PASS
+GAMEPLAY-RATING-001    CLOSED / PASS
+
+Stuff semantics:   contact-quality suppression
+STUFF_BASELINE:    70
+k:                 0.30
+fatigue family:    partial multiplicative
+alpha:             0.50
+
+Production acceptance:  27/27 PASS
+PROD vs LAB:            0 / 1,350,000 PA divergent
+Fresh legacy baseline:  0 / 150,000 divergent
+Regression suite:       987 PASS
+Schema:                 0042
+Engine build:           4ee14a8
+```
+
+### Dos deudas que quedan abiertas (y NO son bloqueantes para este cierre)
+
+Se registran aquí para que no se pierdan, y **deliberadamente sin mezclarlas con
+Clutch**: son dos cadenas de trabajo distintas, con dependencias distintas.
+
+**`DATA-STUFF-001` · Stuff real para las cartas ratings-2.0.**
+`backfill_cards.py` resuelve Stuff para las cartas legacy
+(`rating_model_version IS NULL`). Las cartas **ya versionadas por ratings-2.0** y
+la ruta de creación de cartas nuevas siguen heredando el `DEFAULT 70` de la
+migración 0042, y por tanto quedan fuera de este acceptance. El motor ya sabe
+distinguir Stuff 45/70/95, pero parte del catálogo podría no estar expresando sus
+ratings reales. No invalida el motor: invalida la premisa de que el catálogo
+activo alimenta el motor con su Stuff real. **Es el siguiente paso, antes de
+abrir `GAMEPLAY-RATING-002`.** Auditoría: verificar cuántos de las 806 cartas
+activas están efectivamente en el default 70 y materializar su
+`CardRatingProfile.stuff_rating` / `PlayerRatings.stuff_rating`.
+
+**`TELEMETRY/FATIGUE` · comportamiento temporal pitch a pitch.**
+El acceptance usa un workload fijo durante el PA (diseño shootout), mientras que
+`game_actions.resolve_play` incrementa el pitch count en cada lanzamiento. Lo que
+6C demuestra es que, **para un `fatigue_factor` dado**, la ruta de Stuff es la
+aprobada. La dinámica temporal del workload pertenece a la cadena 001C/001D y
+queda para instrumentación/reconciliación. No reabre Fatigue para cerrar Stuff.
+
+### Cierre
+
+Stuff se congela aquí. `α=.50` y `k=.30` son la política de producción, validadas
+por igualdad bit-exacto contra el LAB en 1.350.000 PA. **No se abre otro sweep
+de α**: `.40` queda documentado como el único paso atrás, y `.60` queda medido
+por si en el futuro hiciera falta más acoplamiento de Stuff con la fatiga.
+Siguiente atributo, desde cero y como proyecto propio: **Clutch
+(GAMEPLAY-RATING-002)**.
