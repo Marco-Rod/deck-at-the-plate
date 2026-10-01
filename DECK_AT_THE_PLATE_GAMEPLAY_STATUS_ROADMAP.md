@@ -1,0 +1,1787 @@
+# Deck at the Plate --- Gameplay: Estado, decisiones y roadmap
+
+> **Documento vivo --- estado consolidado al 1 de octubre de 2026**
+>
+> Objetivo: conservar en un solo lugar lo ya validado del gameplay, las
+> decisiones congeladas, los hallazgos abiertos y el orden recomendado
+> para continuar.
+>
+> **Método:** caracterizar → simular → decidir → implementar → aceptar
+> en producción.\
+> Un bloque cerrado no se reabre salvo evidencia nueva de un defecto
+> real.
+
+------------------------------------------------------------------------
+
+## 1. Objetivo de la etapa de Gameplay
+
+La meta no es sólo que una partida "funcione", sino construir una ruta
+reproducible, auditable y versionable:
+
+``` text
+Card / Ratings
+      ↓
+Attribute Mapper
+      ↓
+Game Session / Registered Roster
+      ↓
+Fatigue + Tactics + Matchup
+      ↓
+Gameplay Engine
+      ↓
+State Transition
+      ↓
+Persistence
+      ↓
+WebSocket
+      ↓
+Telemetry
+      ↓
+Analytics / Balance
+```
+
+Queremos consistencia entre ratings, decisiones del motor, estado
+persistido, eventos enviados al cliente y futuras estadísticas.
+
+------------------------------------------------------------------------
+
+## 2. Estado general
+
+### Cerrado / validado
+
+-   Catálogo `ratings-2.0` activo.
+-   Ownership y estructura del roster humano.
+-   Snapshot inmutable del roster de cada partida.
+-   Roster CPU ligado a un único catálogo activo.
+-   Selección CPU inicial determinista.
+-   Consistencia transaccional DB → WebSocket.
+-   Propagación correcta de fatiga hacia atributos específicos del
+    pitcheo.
+-   Fatigue Policy v2.
+-   Estrategia CPU basada en `workload`.
+-   UI basada en `fatigue_factor` / `fatigue_band`.
+-   Eliminación de modelos frontend paralelos de fatiga.
+-   Plate Discipline / Counts.
+-   Clamp Control × Vision.
+-   `CALIBRATED-BASELINE-v1`.
+-   Semántica, magnitud y robustez de `Stuff`.
+-   Interacción Power × Stuff.
+-   Interacción Stuff × Fatigue.
+-   Integración productiva y acceptance de Stuff.
+-   `GAMEPLAY-ENGINE-003B — CLOSED / PASS`.
+-   `GAMEPLAY-RATING-001 — CLOSED / PASS`.
+-   `DATA-STUFF-001A — CLOSED / PASS`.
+-   `DATA-STUFF-001B — CLOSED / PASS`.
+
+### Próximo bloque
+
+``` text
+GAMEPLAY-RATING-002 (Clutch)
+```
+
+La cadena de datos quedó cerrada y verificada sobre la población real:
+`ratings-2.0 → player_cards.stuff → mapper → fatigue → calculator`.
+
+------------------------------------------------------------------------
+
+# 3. Catálogo y ratings
+
+## Catálogo v2 activo
+
+``` text
+ID: b2f36619-ff17-459f-b4fe-c88b8c3a07a1
+Version: 2
+Status: ACTIVE
+Cards: 806
+Active: 806
+Pack eligible: 806
+Supersedes: v1
+```
+
+Rareza:
+
+  Rareza      Cartas
+  --------- --------
+  COMMON         297
+  BRONZE         219
+  SILVER         141
+  GOLD           101
+  DIAMOND        48
+
+El catálogo v1 permanece histórico/retirado.
+
+Principio:
+
+``` text
+ACTIVE catalog ≠ owned card ≠ playable card
+```
+
+No introducir filtros `ACTIVE` globales en repositorios históricos. Una
+carta retirada puede seguir siendo propiedad del usuario y
+potencialmente jugable.
+
+------------------------------------------------------------------------
+
+# 4. Roster humano y ownership
+
+Originalmente `GameSessionService.create()` podía recibir IDs de cartas
+suministrados por el cliente sin comprobar propiedad.
+
+Findings:
+
+``` text
+GAMEPLAY-LINEUP-001
+Arbitrary card IDs could be used.
+
+GAMEPLAY-LINEUP-002
+Persisted UserLineup fallback required the same validation boundary.
+```
+
+Se implementó `_validate_human_roster()` utilizando ownership y datos
+reales de carta.
+
+Regresiones cubiertas:
+
+-   carta no poseída → rechazo;
+-   batter duplicado → 400;
+-   pitcher como batter → 400;
+-   batter como pitcher → 400.
+
+Estado:
+
+``` text
+GAMEPLAY-LINEUP-001 — CLOSED / PASS
+GAMEPLAY-LINEUP-002 — protected by common validation
+```
+
+Principio:
+
+``` text
+OWNED BY USER ≠ REGISTERED FOR THIS GAME
+```
+
+------------------------------------------------------------------------
+
+# 5. Snapshot de roster por partida
+
+Al crear una partida:
+
+-   se valida el roster humano;
+-   se congela el bullpen humano;
+-   se fija el catálogo CPU;
+-   se selecciona el roster CPU;
+-   se congela el bullpen CPU;
+-   los IDs registrados quedan en el estado de la partida.
+
+El snapshot representa pertenencia al roster registrado, no
+disponibilidad instantánea. Un relevista no se elimina del snapshot al
+entrar al juego.
+
+Commit:
+
+``` text
+a1323cb4f122e9113d08a4d7c44a80524db0076f
+fix(gameplay): freeze game rosters at session creation
+```
+
+Estado:
+
+``` text
+GAMEPLAY-ROSTER-001 — CLOSED / PASS
+GAMEPLAY-ROSTER-002 — CLOSED / PASS
+GAMEPLAY-CATALOG-001 — CLOSED / PASS
+GAMEPLAY-CPU-001 — CLOSED / PASS
+GAMEPLAY-CPU-002 — CLOSED / PASS
+```
+
+------------------------------------------------------------------------
+
+# 6. CPU roster
+
+El CPU resuelve:
+
+``` text
+get_active_catalog(season=2026, edition_type="BASE")
+```
+
+y consulta:
+
+``` text
+find_cards_by_team(..., catalog_id=active_catalog.id)
+```
+
+No existe fallback global.
+
+Selección determinista:
+
+``` text
+pitchers → (-overall, id)
+batters  → (-overall, id)
+
+starter = pitchers[0]
+lineup  = batters[:9]
+```
+
+La dificultad todavía no cambia la calidad del roster elegido. La
+selección strongest-by-overall + ID es la política v1.
+
+------------------------------------------------------------------------
+
+# 7. Transacciones y WebSocket
+
+Problema original:
+
+``` text
+broadcast
+   ↓
+DB rollback
+   ↓
+cliente observaba un estado inexistente
+```
+
+Solución: `PendingBroadcast`.
+
+``` text
+Mutate state
+    ↓
+PendingBroadcast[]
+    ↓
+commit
+    ↓
+publish
+```
+
+Commit:
+
+``` text
+4b852d53585e62a05d3b9c01f11f107ccdc1b7f4
+fix(gameplay): make broadcasts transaction-safe
+```
+
+Estado:
+
+``` text
+GAMEPLAY-TX-001 — CLOSED / PASS
+```
+
+------------------------------------------------------------------------
+
+# 8. Fatigue v2
+
+La política legacy usaba thresholds demasiado pequeños:
+
+``` text
+3 innings → 6
+6 innings → 15
+9 innings → 25
+```
+
+Se calibró una nueva curva:
+
+``` text
+SMOOTH-0.55-F35
+```
+
+Para `w <= 1`:
+
+``` text
+factor = 1
+```
+
+Para `w > 1`:
+
+``` text
+factor = 0.35 + 0.65 * exp(-((w - 1) / 0.55)^2)
+```
+
+Thresholds seleccionados:
+
+``` text
+3 innings → 33
+6 innings → 67
+9 innings → 100
+```
+
+Producción:
+
+``` text
+STANDARD_PITCH_THRESHOLD = 100
+get_pitch_threshold() = round(100 × innings / 9)
+```
+
+Commit:
+
+``` text
+d8c8804
+feat(gameplay): implement calibrated fatigue policy v2
+```
+
+------------------------------------------------------------------------
+
+# 9. Fatiga aplicada al pitch específico
+
+Bug original:
+
+``` text
+map_card_to_pitcher_attrs()
+    ↓
+apply_pitcher_fatigue()
+    ↓
+get_pitch_stats(tipo)
+    ↓
+current_pitch recuperaba atributos frescos
+```
+
+Se derivaron factores entre atributos raw y fatigados y se aplicaron al
+repertoire específico.
+
+Commit:
+
+``` text
+045584164f73ec66a753ce4466044476834892d1
+fix(gameplay): apply fatigue to pitch-specific attributes
+```
+
+Estado:
+
+``` text
+GAMEPLAY-ENGINE-001A — CLOSED / PASS
+```
+
+------------------------------------------------------------------------
+
+# 10. Estrategia CPU y fatiga
+
+Se separaron:
+
+``` text
+workload = pitch_count / pitch_threshold
+```
+
+para estrategia, y:
+
+``` text
+fatigue_factor
+```
+
+para degradación física.
+
+Política CPU v1:
+
+``` text
+HARD   → workload >= 1.20
+MEDIUM → workload >= 1.35
+EASY   → workload >= 1.50
+```
+
+`fatigue_level` queda sólo como compatibilidad legacy.
+
+Commits principales:
+
+``` text
+fb090ff
+ec6e98c
+23a0ce4
+d025eb4
+```
+
+------------------------------------------------------------------------
+
+# 11. UI de fatiga
+
+Bandas:
+
+``` text
+FRESH      factor >= .95
+TIRING     .80 <= factor < .95
+FATIGUED   .60 <= factor < .80
+EXHAUSTED  factor < .60
+```
+
+La banda es la semántica primaria. La barra puede derivarse del factor,
+pero no se presenta como un porcentaje literal de "energía".
+
+Se eliminaron implementaciones frontend paralelas/obsoletas.
+
+Commit:
+
+``` text
+125b8b6
+refactor(frontend): remove obsolete fatigue UI model
+```
+
+Estado:
+
+``` text
+GAMEPLAY-FATIGUE-UI-001 — CLOSED
+```
+
+------------------------------------------------------------------------
+
+# 12. Plate Discipline / Counts
+
+Política productiva congelada:
+
+``` text
+TAKE_BASE_STRIKE_CHANCE = 0.30
+TAKE_STRIKE_CHANCE_FLOOR = 0.20
+TAKE_STRIKE_CHANCE_CEILING = 0.85
+FOUL_ON_CONTACT_CHANCE = 0.45
+```
+
+TAKE:
+
+``` text
+0.30
++ (control - 50) * .003
+- (vision - 50) * .002
+
+clamp .20 → .85
+```
+
+La estrategia `65/50/30` usada en experimentos es un agente LAB:
+
+``` text
+0 strikes → TAKE 65%
+1 strike  → TAKE 50%
+2 strikes → TAKE 30%
+```
+
+No es una regla productiva del motor.
+
+------------------------------------------------------------------------
+
+# 13. Clamp Control × Vision
+
+El floor anterior `.25` creaba una meseta para Control bajo + Vision
+alta.
+
+Se caracterizó analíticamente y con Monte Carlo.
+
+Decisión:
+
+``` text
+TAKE floor = .20
+```
+
+Recuperó aproximadamente el 89% de la sensibilidad perdida sin eliminar
+completamente la protección inferior.
+
+Commits:
+
+``` text
+84cee31 — production promotion
+408722d — production acceptance
+```
+
+Estado:
+
+``` text
+GAMEPLAY-ENGINE-002 — CLOSED / PASS
+GAMEPLAY-ENGINE-002-CLAMP-001 — CLOSED
+```
+
+No seguir ajustando TAKE/foul/floor sin evidencia nueva.
+
+------------------------------------------------------------------------
+
+# 14. CALIBRATED-BASELINE-v1
+
+Matriz:
+
+``` text
+Pitcher: WEAK / MID / STRONG
+Batter:  WEAK / MID / STRONG
+```
+
+El contrato original basado en el máximo de pitches/PA fue sustituido
+por un contrato de colas prospectivo:
+
+``` text
+K5-R
+
+p95 <= 6
+P(pitches >= 12) <= .05%
+P(pitches >= 16) <= .01%
+no CAP accumulation
+```
+
+Repetición independiente:
+
+``` text
+p95 = 6
+P>=12 = .024%
+P>=16 = 0
+```
+
+Anclas MID/MID:
+
+``` text
+Contact/Swing ≈ 65.41%
+XBH/BIP ≈ 23.03%
+```
+
+Commit:
+
+``` text
+bee3bc6
+```
+
+Estado:
+
+``` text
+GAMEPLAY-ENGINE-003A — CLOSED
+```
+
+------------------------------------------------------------------------
+
+# 15. Stuff: finding original
+
+`ratings-2.0` produce:
+
+``` text
+Velocity
+Control
+Movement
+Stuff
+```
+
+pero el motor sólo consumía los tres primeros.
+
+Finding:
+
+``` text
+GAMEPLAY-RATING-001
+Stuff exists in ratings but is not consumed by gameplay.
+```
+
+Se decidió no agregarlo arbitrariamente y abrir una cadena experimental.
+
+------------------------------------------------------------------------
+
+# 16. 003B-1 --- semántica de Stuff
+
+Candidatos:
+
+``` text
+S1 WHIFF
+Stuff modifica whiff.
+
+S2 CONTACT QUALITY
+Stuff modifica power_score después del contacto.
+
+S3 HYBRID
+Stuff modifica parcialmente ambos.
+```
+
+750k PA.
+
+Resultado por +10 Stuff, aproximadamente:
+
+  Modelo     Δ Contact/Swing   Δ XBH/BIP
+  -------- ----------------- -----------
+  S1                   −0.63      \~0.00
+  S2                    0.00       −0.61
+  S3                   −0.31       −0.32
+
+S1 era redundante con Velocity/Movement.
+
+Decisión:
+
+``` text
+Stuff = contact-quality suppression
+```
+
+Commit:
+
+``` text
+f0584aa
+```
+
+------------------------------------------------------------------------
+
+# 17. 003B-2 --- Stuff vs Velocity/Movement
+
+1.25M PA.
+
+Sensibilidad por +10:
+
+``` text
+VEL: Contact/Swing −2.441 | XBH/BIP +0.020
+MOV: Contact/Swing −2.441 | XBH/BIP +0.020
+
+S1:  −0.628 | −0.002
+S2:  +0.000 | −0.609
+S3:  −0.308 | −0.318
+```
+
+Coseno:
+
+``` text
+cos(S1, MOV) = 1.000
+cos(S1, VEL) = 1.000
+
+cos(S2, MOV) ≈ -0.008
+cos(S2, VEL) ≈ -0.008
+```
+
+Modelo conceptual:
+
+``` text
+Velocity / Movement → whiff
+Control             → zone / called strike
+Stuff               → contact quality allowed
+```
+
+Commit:
+
+``` text
+a582518
+```
+
+------------------------------------------------------------------------
+
+# 18. 003B-3 --- magnitud de Stuff
+
+Forma:
+
+``` text
+stuff_delta = stuff - 70
+effective_power_score =
+    power_score - stuff_delta * k
+```
+
+2.0M PA.
+
+      k   Δ XBH/10 Stuff   ratio vs Power
+  ----- ---------------- ----------------
+    .30           −2.945             .742
+    .40           −3.968            1.000
+    .50           −5.008            1.262
+
+Interpretación:
+
+-   `.40` ≈ `-Power`: dos caras del mismo atributo.
+-   `.50` domina demasiado.
+-   `.30` suprime sin anular.
+-   `.20` quedó como referencia conservadora.
+
+Commit:
+
+``` text
+c56d1d8
+```
+
+Candidato:
+
+``` text
+k = .30
+```
+
+------------------------------------------------------------------------
+
+# 19. 003B-4 --- Power × Stuff
+
+Matriz:
+
+``` text
+Power = 45 / 55 / 70 / 85 / 95
+Stuff = 45 / 70 / 95
+```
+
+750k PA.
+
+Resultados:
+
+``` text
+Power slope @ ST95 = +4.012 / 10
+Stuff slope @ POW95 = −3.013 / 10
+```
+
+Strong-vs-strong:
+
+``` text
+POW95 × ST95 = 25.59 XBH/BIP
+POW70 × ST95 = 15.77
+Δ = +9.83pp
+```
+
+Diagonal:
+
+``` text
+20.72 → 23.03 → 25.59
+```
+
+No existe cancelación artificial.
+
+Commit:
+
+``` text
+213b3a8
+```
+
+Decisión:
+
+``` text
+k=.30 → ROBUSTNESS-VALIDATED CANDIDATE
+```
+
+------------------------------------------------------------------------
+
+# 20. 003B-5A --- semántica Stuff × Fatigue
+
+Políticas:
+
+``` text
+F0 NONE
+
+F1 FULL
+effective = raw * fatigue_factor
+
+F2 HALF
+effective = raw * (1 - .5 * (1 - fatigue_factor))
+
+F3 ANCHORED
+effective = 70 + (raw - 70) * fatigue_factor
+```
+
+2.4M PA.
+
+Resultados:
+
+-   `ANCHORED` rechazado: Stuff bajo podía mejorar al fatigarse.
+-   `FULL` rechazado: Stuff95 a workload 1.50 terminaba peor que MID
+    fresco.
+-   `HALF` mostró degradación proporcional y preservación de identidad.
+
+Commit:
+
+``` text
+5eb8352
+```
+
+Decisión:
+
+``` text
+familia multiplicativa parcial
+→ promovida a calibración
+```
+
+------------------------------------------------------------------------
+
+# 21. 003B-5B --- calibración de alpha
+
+Familia:
+
+``` text
+effective_stuff =
+raw_stuff * (1 - alpha * (1 - fatigue_factor))
+```
+
+Sweep:
+
+``` text
+0 / .25 / .40 / .50 / .60 / .75 / 1
+```
+
+Hallazgos:
+
+``` text
+<= .25 → demasiado cosmético
+.40    → conservador
+.50    → sano + buena holgura
+.60    → sano pero más cerca de perder identidad
+>= .75 → fuera por frontera de identidad
+```
+
+Frontera interpolada:
+
+``` text
+alpha* ≈ .72
+```
+
+Finalistas:
+
+``` text
+.50 vs .60
+```
+
+No se decidió mediante una barra post-hoc.
+
+------------------------------------------------------------------------
+
+# 22. 003B-5C --- alpha .50 vs .60
+
+2.7M PA.
+
+Matriz:
+
+``` text
+Power    45 / 70 / 95
+Stuff    45 / 70 / 95
+Workload 1.00 / 1.35 / 1.50
+```
+
+Ambos pasaron R1-R8.
+
+Pero:
+
+``` text
+              alpha=.50   alpha=.60
+identity       +2.18pp     +1.11pp
+```
+
+`.60` añadía magnitud, pero reducía significativamente el margen de
+identidad.
+
+`.50` sí expresa claramente fatiga de Stuff:
+
+``` text
+ST95 @ w1.35 → +2.98pp XBH
+ST95 @ w1.50 → +5.08pp XBH
+retention ≈ 83%
+```
+
+Decisión:
+
+``` text
+alpha = .50
+```
+
+Principio: menor intervención cuando ambos cumplen la función y el más
+agresivo no justifica su coste.
+
+------------------------------------------------------------------------
+
+# 23. Política final de Stuff
+
+Congelado:
+
+``` text
+STUFF_BASELINE = 70
+STUFF_POWER_SUPPRESSION = .30
+STUFF_FATIGUE_ALPHA = .50
+```
+
+Fatiga:
+
+``` text
+effective_stuff =
+raw_stuff * (
+    1 - .50 * (1 - fatigue_factor)
+)
+```
+
+Calidad de contacto:
+
+``` text
+stuff_delta = effective_stuff - 70
+
+power_score -=
+stuff_delta * .30
+```
+
+Separación:
+
+``` text
+fatigue_manager → transforma atributos
+calculator      → consume atributos efectivos
+```
+
+`calculator` no necesita conocer directamente `fatigue_factor`.
+
+------------------------------------------------------------------------
+
+# 24. 003B-6 --- integración productiva + acceptance
+
+Ruta productiva:
+
+``` text
+Ratings / Card
+      ↓
+attribute_mapper
+      ↓
+PitcherAttrs.stuff
+      ↓
+fatigue_manager
+      ↓
+effective Stuff
+      ↓
+calculator
+      ↓
+contact-quality suppression
+```
+
+Migración:
+
+``` text
+0042
+```
+
+Acceptance:
+
+``` text
+27 / 27 contracts PASS
+0 / 1,350,000 PA divergent PROD vs LAB
+```
+
+La reproducción fue bit-exacta.
+
+Baseline fresco:
+
+``` text
+0 / 150,000 divergent
+```
+
+Suite:
+
+``` text
+987 passed
+```
+
+Engine build de acceptance:
+
+``` text
+4ee14a8
+```
+
+Commits:
+
+``` text
+512f5bc
+feat(gameplay): integrate Stuff into contact quality
+
+6015b50
+docs(gameplay): close Stuff integration acceptance
+```
+
+> Si el commit documental fue amendado posteriormente para retirar
+> `_e003b6_full_run.txt` del tracking, actualizar aquí el hash.
+
+Estado:
+
+``` text
+GAMEPLAY-ENGINE-003B — CLOSED / PASS
+GAMEPLAY-RATING-001  — CLOSED / PASS
+```
+
+**Stuff queda congelado.**
+
+------------------------------------------------------------------------
+
+# 25. Correcciones metodológicas detectadas en 003B-6
+
+## XBH
+
+Definición correcta:
+
+``` text
+XBH = 2B + 3B + HR
+```
+
+No incluye singles.
+
+El harness inicialmente sumaba `1B`, creando una desviación falsa de
+\~21pp pese a que PROD y LAB eran bit-exactos.
+
+## Baseline bajo fatiga
+
+El contrato de equivalencia con el motor anterior sólo aplica en fresco.
+
+Con Stuff70 fatigado:
+
+``` text
+effective_stuff < 70
+```
+
+y aparece intencionalmente un bono ofensivo.
+
+Exigir igualdad bajo fatiga habría significado exigir `alpha=0`.
+
+## Tolerancias
+
+Las reproducciones Monte Carlo se comparan mediante SE combinado, no
+mediante tolerancias fijas arbitrarias.
+
+------------------------------------------------------------------------
+
+# 26. DATA-STUFF-001 — CERRADO
+
+## Problema
+
+El motor ya consume Stuff, pero faltaba cerrar la cadena desde los ratings
+reales hasta las cartas publicadas.
+
+Riesgo planteado:
+
+``` text
+card.stuff = 70
+```
+
+aunque:
+
+``` text
+CardRatingProfile.stuff != 70
+```
+
+o:
+
+``` text
+PlayerRatings.stuff != 70
+```
+
+En ese caso:
+
+``` text
+el motor habla Stuff
+pero el catálogo lo silencia.
+```
+
+## DATA-STUFF-001A --- auditoría read-only
+
+Script: `backend/etl/audit_stuff_propagation.py`
+
+Universo:
+
+``` text
+ACTIVE BASE catalog v2
+expected = 806 cards
+```
+
+Entregable: contadores de `total_active`, `stuff_card_eq_70`,
+`authoritative_stuff_eq_70`, `silent_default_mismatch`, `exact_match`,
+`missing_profile`, `missing_player_rating` y
+`conflicting_profile_vs_player_rating`.
+
+Mismo criterio de mismatch crítico:
+
+``` text
+card.stuff == 70
+AND
+authoritative_stuff != 70
+```
+
+Precedencia auditada (idéntica a la de `backfill_cards.py`):
+
+``` text
+CardRatingProfile
+    ↓
+PlayerRatings
+    ↓
+baseline 70
+```
+
+### Corrección metodológica: Stuff es sólo de PITCHER
+
+`stuff_rating` es NULL **por diseño** para BATTER — los CHECK de role-shape
+(`ck_card_rating_profiles_complete_role_shape` y
+`ck_player_ratings_complete_role_shape`) lo imponen — mientras que
+`player_cards.stuff` es NOT NULL.
+
+Contar las 806 cartas como una sola población habría producido ~402
+"mismatches" falsos. La auditoría segmenta por role (el de
+`CardRatingProfile`, no el `position` de la carta) y mide el contrato
+crítico sólo sobre pitchers.
+
+Una carta de bateo con `stuff = 70` no es un silencio: es su único valor
+legal.
+
+### Hallazgo de entorno
+
+La BD estaba en Alembic `0041`: la columna `player_cards.stuff` (migración
+`0042`, ya commiteada) no existía. Sin `al upgrade head` la pregunta del
+roadmap no era respondible, y la auditoría lo declara explícitamente en
+`schema` en vez de fallar en silencio.
+
+### Contratos D1-D7 --- 7/7 PASS
+
+``` text
+D1  universo == 806 cartas ACTIVE            806 / 806
+D2  cada carta de pitcher resuelve un
+    Stuff autoritativo único y en dominio     404 / 404
+D3  las fuentes faltantes se reportan
+    missing_profile                0
+    missing_player_rating          0
+    fallback_to_baseline          12
+D4  conflictos Profile ↔ PlayerRatings       0
+D5  matches y silent-default clasificados
+    exact_at_baseline            12
+    silent_default_mismatch     392
+    stale_override                0
+    divergent                     0
+D6  auditoría read-only            PASS (conteos before/after idénticos)
+D7  sin mutaciones hasta caracterizar          PASS
+```
+
+### Respuesta a la pregunta de §36
+
+``` text
+ACTIVE cards = 806
+
+count(
+    card.stuff == 70
+    AND
+    authoritative_stuff != 70
+) = 392
+```
+
+La pregunta del roadmap estaba bien planteada y la respuesta es
+inequívoca: **392**.
+
+Caracterización adicional:
+
+``` text
+pitcher_cards                        404
+pitcher_cards_materialized            12   (2.97%)
+materialization_rate                0.029703
+
+card.stuff      → 1 valor distinto  (70, el server_default)
+authoritative   → 53 valores distintos, rango 45..97
+delta (card − authoritative) → −27 .. +25
+conflicts CardRatingProfile ↔ PlayerRatings → 0
+```
+
+Dos consecuencias que importan:
+
+1.  **Stuff no existía en producción.** Con un solo valor en toda la flota,
+    la política de 003B (k=.30 / α=.50) se aplicaba sobre una constante.
+    El suppression real era `0.00` para los 404 pitchers.
+2.  **El error no era unidireccional.** El delta va de −27 a +25: los
+    pitchers élites (ST 87-97) no recibían la supresión que les corresponde,
+    y los pitchers flojos (ST 45-55) no recibían la penalización de contact
+    quality poor. Stuff estaba mal *expresado*, no sólo ausente.
+
+## DATA-STUFF-001B --- materialización
+
+Sólo se abrió porque 001A encontró mismatches.
+
+### B-1 --- causa raíz (publicación)
+
+``` text
+etl/services/card_catalog.py::_card_from_profile
+```
+
+Leía `stuff_rating` dentro de `_RATING_FIELDS` y lo materializaba en
+`values`, pero el constructor de `PlayerCardModel` de esa misma función
+nunca asignaba `stuff`. Toda carta publicada caía en el
+`server_default='70'` de la migración `0042`.
+
+Correcciones:
+
+-   `_card_from_profile` asigna `stuff` desde el perfil autoritativo.
+    Si `stuff_rating` es NULL (BATTER por contrato de role-shape), escribe
+    `STUFF_BASELINE` — su valor exacto — y no `0`, que daría supresión
+    `+21` a las 402 cartas de bateo.
+-   `_validate_rows` valida `stuff` dentro de 0-99.
+-   `_validate_rows` reporta `stuff is None` explícitamente: el patrón
+    `getattr(card, f) or 0` de los demás campos enmascararía un `None`
+    como `0`, que está dentro de rango.
+
+Con esto, un catálogo nuevo no puede reintroducir el silent default: si
+`stuff` no llega, la publicación falla en vez de publicar en silencio.
+
+### B-2 --- backfill controlado
+
+`app/seeds/backfill_cards.py::backfill_catalog_stuff()` — reutiliza
+`_resolve_stuff_from_ratings()`, o sea la precedencia ya documentada, sin
+duplicarla.
+
+``` text
+python app/seeds/backfill_cards.py --catalog-stuff            (dry-run)
+python app/seeds/backfill_cards.py --catalog-stuff --apply   (escribe)
+```
+
+Decisiones:
+
+-   **Dry-run por defecto.** Sin `--apply` calcula el plan y hace
+    `rollback`. Nada se escribe sin pedirlo explícitamente.
+-   **Alcance explícito por catálogo**, por defecto el ACTIVE BASE. No es un
+    filtro global: el catálogo v1 RETIREED se dejó intacto (verificado:
+    sigue con 1 valor distinto, todos 70).
+-   **Sólo role PITCHER.** El rol se infiere de la fuente autoritativa (el
+    `CardRatingProfile`, o un `PlayerRatings` PITCHER si la carta se
+    publicó por la ruta fallback), nunca del `position` de la carta: un
+    two-way publica un único perfil.
+-   **Idempotente** por construcción: escribe `card.stuff != autoritativo`.
+-   **No usa** el centinela `rating_model_version IS NULL` de la ruta
+    legacy: esas cartas ya están firmadas y son otro caso.
+
+Resultado:
+
+``` text
+total_cards                     806
+pitcher_cards                   404
+batter_cards_untouched          402
+changed                         392
+unchanged                        12
+mean_delta                    0.4031
+stuff_sources.card_rating_profile  404
+stuff_sources.player_ratings        0
+stuff_sources.neutral                0
+```
+
+Las 404 resuelven por `CardRatingProfile` (precedencia #1): no hubo
+ninguna caída al fallback, y 0 conflictos con `PlayerRatings` (D4), así
+que la fuente era inequívoca.
+
+### B-3 --- re-auditoría
+
+``` text
+silent_default_mismatch       392  →  0
+exact_match                  0 → 392
+exact_match_at_baseline     12  →  12
+stale_override                0  →  0
+divergent                     0  →  0
+materialization_rate    0.029703  →  1.0
+```
+
+Idempotencia verificada en la BD real: segunda corrida `changed = 0`.
+
+``` text
+player_cards.stuff (catálogo ACTIVE v2)
+    53 valores distintos, rango 45..97
+    414 en exactamente 70  (402 batters + 12 pitchers neutros)
+
+player_cards.stuff (catálogo RETIRED v1)
+    1 valor distinto, todos 70  ← intacto, histórico
+```
+
+### Verificación de la cadena completa
+
+Con datos reales, la ruta productiva
+`mapper → fatigue_manager → calculator`:
+
+``` text
+Nathan King     card.stuff=45  profile.stuff=45  effective=45.00  suppression=+7.50
+Ronald Hill     card.stuff=70  profile.stuff=70  effective=70.00  suppression=-0.00
+Jason Martin    card.stuff=97  profile.stuff=97  effective=97.00  suppression=-8.10
+
+mismo pitcher a w=1.35 (135 lanzamientos)
+Jason Martin    raw=97  effective=86.50  suppression=-4.95
+```
+
+`card.stuff` coincide con el perfil autoritativo en los tres casos, y la
+fatiga degrada el Stuff efectivo como espera α=.50. La supresión real de
+la flota pasó de `0.00` a un rango de `+7.50 .. −8.10`.
+
+### Contratos de regresión S1-S4
+
+`backend/tests/etl/test_stuff_propagation.py` --- 16/16 PASS.
+
+``` text
+S1  la publicación materializa stuff (pitcher, batter, fallback,
+    idempotencia)
+S2  la validación falla si stuff no llega (fuera de rango, None)
+S3  el backfill es explícito, idempotente y sólo de pitchers
+    (dry-run no escribe, apply escribe, 2ª corrida changed=0,
+    batters intactos, otro catálogo intacto)
+S4  no reintroducción: 0 silent defaults; el mapper lee card.stuff
+```
+
+Suite completa:
+
+``` text
+987  →  1003 passed     (+16, 0 regresiones)
+```
+
+### Estado
+
+``` text
+DATA-STUFF-001A — CLOSED / PASS
+DATA-STUFF-001B — CLOSED / PASS
+```
+
+### Qué NO quedó demostrado
+
+-   **No se midió el impacto en gameplay.** Se verificó que el atributo se
+    materializa y llega al motor con el valor correcto, no cómo mueve el
+    XBH/BIP del catálogo real. Eso pertenece a
+    `GAMEPLAY-RATING-003` (rating expression) o a un acceptance del
+    catálogo contra `CALIBRATED-BASELINE-v1`.
+-   **No se cambió ningún número de la política.** k=.30, α=.50 y
+    `STUFF_BASELINE`=70 siguen congelados. 001B es una corrección de datos,
+    no una recalibración.
+-   **No se evaluaron las cartas del catálogo v1 RETIRED.** Permanecen en
+    70 por diseño (histórico). Si alguna vez se juega con ellas, necesitará
+    su propio bloque explícito.
+-   **No se tocó el frontend.** `format_pitcher_stats` sigue emitiendo
+    sólo VEL/CTA/MCA; `stuff` no es un atributo de presentación hoy.
+
+------------------------------------------------------------------------
+
+# 27. TELEMETRY/FATIGUE
+
+El acceptance de Stuff utiliza shootout:
+
+``` text
+workload fijo durante un PA
+```
+
+El runtime real incrementa pitch count lanzamiento por lanzamiento.
+
+Esto no invalida 003B: se demostró que un `fatigue_factor` dado produce
+exactamente el Stuff efectivo aprobado.
+
+La dinámica temporal pertenece a Fatigue/Telemetry y queda como deuda
+separada.
+
+------------------------------------------------------------------------
+
+# 28. GAMEPLAY-RATING-002 --- Clutch
+
+Después de `DATA-STUFF-001`.
+
+BatterAttrs ya contiene:
+
+``` text
+Contact
+Power
+Vision
+Clutch
+```
+
+pero Clutch no tiene todavía una expresión contextual bien definida.
+
+A diferencia de Stuff, necesita primero definir **leverage**:
+
+-   inning;
+-   score differential;
+-   runners;
+-   outs;
+-   potencial de empate/ventaja;
+-   situación del PA.
+
+Cadena recomendada:
+
+``` text
+semántica
+→ leverage definition
+→ magnitude
+→ context robustness
+→ production acceptance
+```
+
+No reutilizar arbitrariamente el modelo de Stuff.
+
+------------------------------------------------------------------------
+
+# 29. Telemetría de Gameplay
+
+Existe `PitchEventLog` con infraestructura para:
+
+-   game;
+-   plate appearance;
+-   pitch number;
+-   choices;
+-   approach;
+-   pitch family;
+-   count before;
+-   fatigue;
+-   modifiers;
+-   matchup inputs;
+-   probability distribution;
+-   RNG;
+-   result;
+-   engine version.
+
+Pendientes:
+
+``` text
+TELEMETRY-PITCH-001
+Runtime instrumentation not fully wired.
+
+TELEMETRY-PA-001
+No robust runtime PA identity.
+
+TELEMETRY-EVENT-001 / VERSION-001
+GameEventLog fields exist but writer/runtime does not fully populate them.
+
+TELEMETRY-DOMAIN-001
+BatterApproach telemetry is not fully aligned with runtime
+swing_type / zone_guess / pitch_guess.
+```
+
+------------------------------------------------------------------------
+
+# 30. Provenance
+
+`GameSession.state_data` conserva el estado operativo, pero no toda la
+procedencia necesaria para reproducir históricamente una partida.
+
+Pendientes:
+
+``` text
+GAMEPLAY-PROVENANCE-001
+TELEMETRY-PROVENANCE-001
+```
+
+Una partida debería identificar:
+
+``` text
+catalog id/version
+rating model version
+rules version
+engine version/build
+```
+
+------------------------------------------------------------------------
+
+# 31. Starter pack --- deuda de adquisición
+
+`PackService.assign_starter_pack()` continúa utilizando pools
+históricamente no catalog-scoped.
+
+Finding:
+
+``` text
+STARTER-001
+Starter acquisition pool is not catalog-scoped.
+```
+
+No resolver introduciendo `ACTIVE` global en repositorios.
+
+Pertenece a futura `StarterPolicy / Economy`.
+
+------------------------------------------------------------------------
+
+# 32. Roadmap desde aquí
+
+## Paso 1 --- DATA-STUFF-001A --- DONE
+
+Auditar las 806 cartas activas.
+
+``` text
+pregunta: ¿cuántas tienen card.stuff = 70
+          mientras authoritative ratings-2.0 Stuff != 70?
+respuesta: 392
+```
+
+Sin mutaciones. Contratos D1-D7: 7/7 PASS.
+
+## Paso 2 --- DATA-STUFF-001B --- DONE
+
+``` text
+materialize   → 392 cartas corregidas
+verify precedence → 404/404 desde card_rating_profile
+check idempotence → segunda corrida changed = 0
+re-audit      → 0 silent_default_mismatch, 7/7 PASS
+```
+
+Objetivo final alcanzado:
+
+``` text
+ratings
+→ DB
+→ card
+→ mapper
+→ fatigue
+→ engine
+```
+
+## Paso 3 --- GAMEPLAY-RATING-002 / Clutch
+
+Definir leverage antes de fórmulas.
+
+## Paso 4 --- Provenance
+
+Versionar explícitamente catálogo, ratings, rules y engine.
+
+## Paso 5 --- Telemetry v2
+
+Conectar:
+
+``` text
+game
+→ PA
+→ pitch
+→ decision
+→ probability
+→ RNG
+→ result
+→ state transition
+```
+
+## Paso 6 --- Reconciliation
+
+Demostrar:
+
+``` text
+event stream
+↔ persisted state
+↔ box score / stats
+```
+
+## Paso 7 --- Headless simulator
+
+Simulación determinista sin UI/WebSocket:
+
+-   seeds reproducibles;
+-   grandes poblaciones;
+-   comparación entre perfiles;
+-   comparación entre versiones;
+-   balance automatizado.
+
+## Paso 8 --- Analytics
+
+Primeros productos:
+
+``` text
+game summary
+matchups
+team duels
+pitcher/batter outcomes
+fatigue curves
+approach effectiveness
+rating expression
+```
+
+Endpoints candidatos:
+
+``` text
+/games/{id}/events
+/games/{id}/timeline
+/games/{id}/integrity
+
+/analytics/games/{id}/summary
+/analytics/matchups
+/analytics/teams/{team_id}/duels
+```
+
+------------------------------------------------------------------------
+
+# 33. Roadmap posterior: economía y packs
+
+Cadena:
+
+``` text
+CardCatalog ACTIVE
+        ↓
+PackDefinitionVersion
+        ↓
+Pool / Odds
+        ↓
+OwnedPack
+        ↓
+PackOpening
+        ↓
+Collection
+        ↓
+Lineup
+        ↓
+Gameplay
+        ↓
+Telemetry
+        ↓
+Analytics
+```
+
+Principio:
+
+``` text
+ACTIVE catalog = universo publicable
+ACTIVE catalog ≠ PackDefinition
+```
+
+Fases posteriores:
+
+1.  acquisition inventory;
+2.  ledger/economy;
+3.  rewards;
+4.  `PackDefinition`;
+5.  store/offers;
+6.  `OwnedPack` / opening;
+7.  `StarterPolicy`;
+8.  economic telemetry;
+9.  Economy Simulator;
+10. balance integrado.
+
+------------------------------------------------------------------------
+
+# 34. Decisiones congeladas
+
+No reabrir sin evidencia nueva.
+
+## Fatigue
+
+``` text
+9-inning threshold = 100
+curve = SMOOTH-0.55-F35
+
+CPU:
+HARD   1.20
+MEDIUM 1.35
+EASY   1.50
+```
+
+## Plate Discipline
+
+``` text
+TAKE base  = .30
+TAKE floor = .20
+TAKE ceil  = .85
+Foul       = .45
+```
+
+## Stuff
+
+``` text
+semantics = contact-quality suppression
+baseline  = 70
+k         = .30
+alpha     = .50
+```
+
+## Roster
+
+``` text
+Roster registered at game creation is frozen.
+Owned ≠ registered.
+```
+
+## Transactions
+
+``` text
+commit before WebSocket publish
+```
+
+## Repository semantics
+
+``` text
+No global ACTIVE filtering in historical repositories.
+```
+
+------------------------------------------------------------------------
+
+# 35. Commits de referencia
+
+``` text
+4b852d5  fix(gameplay): make broadcasts transaction-safe
+a1323cb  fix(gameplay): freeze game rosters at session creation
+0455841  fix(gameplay): apply fatigue to pitch-specific attributes
+d8c8804  feat(gameplay): implement calibrated fatigue policy v2
+125b8b6  refactor(frontend): remove obsolete fatigue UI model
+
+740b6a5  LAB calculator override bridge
+a9e17ab  discipline PROD vs B3-C1
+8390bf1  discipline robustness
+876967c  clamp sweep
+84cee31  plate-discipline production promotion
+408722d  production acceptance
+
+bee3bc6  CALIBRATED-BASELINE-v1
+
+f0584aa  003B-1 Stuff semantics
+a582518  003B-2 Stuff vs VEL/MOV
+c56d1d8  003B-3 Stuff coefficient
+213b3a8  003B-4 Power × Stuff
+5eb8352  003B-5A Stuff fatigue semantics
+
+512f5bc  feat(gameplay): integrate Stuff into contact quality
+6015b50  docs(gameplay): close Stuff integration acceptance
+
+84df0a3  DATA-STUFF-001A audit + contracts S1-S5
+f85d645  DATA-STUFF-001B-1 materialize Stuff on publish
+27f2e31  DATA-STUFF-001B-2 controlled Stuff backfill
+```
+
+Actualizar hashes si alguno fue amendado.
+
+------------------------------------------------------------------------
+
+# 36. Próximo checkpoint exacto
+
+``` text
+GAMEPLAY-RATING-002
+CLUTCH SEMANTICS / LEVERAGE MODEL
+```
+
+Cerrado sin abrir: `DATA-STUFF-001A` (7/7) y `DATA-STUFF-001B` (S1-S5,
+re-auditoría 7/7, idempotencia, cadena verificada con datos reales).
+
+La pregunta que abría 001A ya tiene respuesta y está registrada en §26:
+
+``` text
+392
+```
+
+Primer trabajo de 002, antes de cualquier fórmula:
+
+``` text
+1. ¿Qué representa Clutch hoy?
+   - por rating está entre 0 y 99
+   - pero ¿afecta al resultado del PA, del lineup o del
+    Momento de la partida?
+2. ¿Es un atributo del jugador o del lineup?
+3. ¿Debe entrar por el bateador, por el estado del juego,
+   o por ambos?
+4. ¿Es acumulable durante la partida o se congela
+   al inicio?
+```
+
+Restricciones heredadas:
+
+``` text
+NO modificar Stuff (cerrado, con evidencia de producción)
+NO recalibrar sin simular antes
+NO tocar PlayerCards.value sin justification explícita
+NO introducir parámetros sin fuente documentada
+```
+
+Orden recomendado:
+
+``` text
+caracterizar la entrada real de Clutch
+→ simular sobre la población existente
+→ decidir la semántica
+→ recién entonces implementar
+```
+
+------------------------------------------------------------------------
+
+# 37. Estado resumido
+
+``` text
+ROSTER / OWNERSHIP          CLOSED
+CPU CATALOG SCOPING         CLOSED
+TX / WEBSOCKET              CLOSED
+FATIGUE PROPAGATION         CLOSED
+FATIGUE POLICY v2           CLOSED
+CPU FATIGUE STRATEGY        CLOSED
+FATIGUE UI                  CLOSED
+PLATE DISCIPLINE            CLOSED
+CALIBRATED BASELINE         CLOSED
+STUFF SEMANTICS             CLOSED
+STUFF MAGNITUDE             CLOSED
+STUFF × POWER               CLOSED
+STUFF × FATIGUE             CLOSED
+STUFF PROD ACCEPTANCE       CLOSED
+STUFF DATA PROPAGATION      CLOSED   (001A + 001B)
+
+CLUTCH                      NEXT
+PROVENANCE                  PENDING
+RUNTIME TELEMETRY           PENDING
+RECONCILIATION              PENDING
+HEADLESS SIMULATOR          PENDING
+ANALYTICS                   PENDING
+ECONOMY / PACK DESIGN       LATER
+```
+
+------------------------------------------------------------------------
+
+# 38. Regla para mantener este documento vivo
+
+Cada bloque futuro debe registrar:
+
+1.  Problema / finding.
+2.  Hipótesis.
+3.  Contratos prefijados.
+4.  Experimento o implementación.
+5.  Resultados.
+6.  Decisión.
+7.  Commit(s).
+8.  Estado `OPEN / CLOSED / PASS / FAIL`.
+9.  Qué **no** quedó demostrado.
+10. Siguiente bloque permitido.
+
+Esto conserva la trazabilidad y evita convertir decisiones
+experimentales en números mágicos sin contexto.
