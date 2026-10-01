@@ -72,15 +72,16 @@ persistido, eventos enviados al cliente y futuras estadísticas.
 -   `GAMEPLAY-RATING-001 — CLOSED / PASS`.
 -   `DATA-STUFF-001A — CLOSED / PASS`.
 -   `DATA-STUFF-001B — CLOSED / PASS`.
+-   `GAMEPLAY-RATING-002 — DEFERRED` (decisión A: placeholder, sin efecto).
 
 ### Próximo bloque
 
 ``` text
-GAMEPLAY-RATING-002 (Clutch)
+DATA-AUDIT-001 --- audit de vision/velocity/movement por rol
 ```
 
-La cadena de datos quedó cerrada y verificada sobre la población real:
-`ratings-2.0 → player_cards.stuff → mapper → fatigue → calculator`.
+(Clutch quedó cerrado como placeholder; el `or 0` equivalente en las otras
+tres columnas sigue vivo y es el hallazgo abierto más cercano.)
 
 ------------------------------------------------------------------------
 
@@ -1327,41 +1328,162 @@ separada.
 
 ------------------------------------------------------------------------
 
-# 28. GAMEPLAY-RATING-002 --- Clutch
+# 28. GAMEPLAY-RATING-002 --- Clutch --- DEFERRED
 
-Después de `DATA-STUFF-001`.
+## Caracterización (read-only, 2026-10-01)
 
-BatterAttrs ya contiene:
+Se caracterizó antes de proponer fórmulas. Resultado: no hay nada que
+calibrar todavía.
 
-``` text
-Contact
-Power
-Vision
-Clutch
+### 1. Clutch no lo consume el motor
+
+`attribute_mapper.py:80` publica `"clutch"` en el dict de bateo.
+`calculator.py:138-140` lee sólo:
+
+``` python
+con = batter_attrs.get("contacto", 50) * tactics.get("batter_con", 1.0)
+pwr = batter_attrs.get("poder", 50)   * tactics.get("batter_pwr", 1.0)
+vis = batter_attrs.get("vision", 50)  * tactics.get("batter_vis", 1.0)
 ```
 
-pero Clutch no tiene todavía una expresión contextual bien definida.
+Cero lecturas de `clutch` en `calculator`, `cpu_ai`, `bullpen`,
+`state_manager`, `runner_manager`, `tactic_resolver`, telemetría o PWA.
+**Ningún efecto observable en ningún PA.** Contraste: `stuff` sí se lee
+(`calculator.py:151`) y se aplica (`:241`).
 
-A diferencia de Stuff, necesita primero definir **leverage**:
-
--   inning;
--   score differential;
--   runners;
--   outs;
--   potencial de empate/ventaja;
--   situación del PA.
-
-Cadena recomendada:
+Las dos ramas del resolver consumen atributos distintos:
 
 ``` text
-semántica
-→ leverage definition
-→ magnitude
-→ context robustness
-→ production acceptance
+SWING → _calculate_contact_outcome(con, pwr, vel, mov, stuff)
+TAKE  → _take_strike_probability(take_bias, ctl, vis)
 ```
 
-No reutilizar arbitrariamente el modelo de Stuff.
+### 2. Y tampoco hay señal en los datos
+
+| role | n | valores distintos | min | max |
+|------|---|-------------------|-----|-----|
+| BATTER | 402 | **1** | 70 | 70 |
+| PITCHER | 404 | **1** | 0 | 0 |
+
+`player_ratings.clutch_evidence`: **0 de 869 filas**. El inventario de
+`ratings_2_0` ya lo declaraba:
+`Clutch situacional | sin agregado situacional | MISSING`.
+
+El 70 no es una medición, es un placeholder explícito. El 0 de los
+pitchers era un bug, no un neutral.
+
+### 3. El `or 0` alcanzaba a 4 columnas
+
+`card_catalog.py` usaba `or 0` en todo, y los NULL-por-role-shape caían
+al piso del dominio:
+
+| role | velocity | movement | vision | clutch |
+|------|----------|----------|--------|--------|
+| PITCHER | 43-98 | 46-95 | **0** | **0** |
+| BATTER | **0** | **0** | 45-97 | 70 |
+
+Es **latente**, no vivo: `vision` sólo se consume vía `batter_attrs` (un
+pitcher no batea) y `velocity`/`movement` sólo vía `pitcher_attrs` (un
+bateador no lanza). Son minas dormidas, no un defecto en producción.
+
+También había **dos neutrales**: `backfill_cards.py` decía
+`NEUTRAL_CLUTCH = 50` mientras `etl/config/ratings_2.py` decía
+`CLUTCH_NEUTRAL_RATING = 70` (que es lo que materializa
+`calculate_batter_clutch()`).
+
+### 4. Por qué no se propuso fórmula
+
+Escribir Clutch como coeficiente hoy amplificaría una constante: el
+mismo resultado para los 806 jugadores. Si el coeficiente es sizable,
+todos se mueven igual — un cambio de ritmo global disfrazado de skill
+individual. La variable que lo haría real (inning, score differential,
+runners, outs) **no existe** en ratings-2.0: se construye en el paso 5
+(telemetría). El propio roadmap prohíbe
+`NO introducir parámetros sin fuente documentada`.
+
+## Decisión
+
+``` text
+CLUTCH PLACEHOLDER DECISION
+
+Option:          A
+Neutral:         70
+Gameplay effect: NONE
+Current role:    ratings-2.0 placeholder only
+
+GAMEPLAY-RATING-002:
+DEFERRED
+
+Future direction:
+B — Clutch contextual basado en leverage,
+después de que exista el game context / telemetry necesario.
+
+C:
+REJECTED FOR NOW (no calibrated source)
+
+Scope of commit:
+Clutch only.
+
+Vision / Velocity / Movement:
+leave unchanged; audit separately.
+```
+
+La definición de leverage que este bloque anticipaba queda **sin
+ejecutar**: pasa a ser prerrequisito del paso 5, no del paso 3.
+
+## Lo que se hizo
+
+- `card_catalog.py`: Clutch materializa `CLUTCH_NEUTRAL_RATING` cuando
+  `clutch_rating` es NULL, en vez de `or 0`.
+- `_validate_rows` rechaza `clutch is None` (el `or 0` lo enmascararía).
+- `backfill_cards.py`: `NEUTRAL_CLUTCH` colapsa a la constante canónica;
+  nuevo `backfill_catalog_clutch()` con dry-run por defecto, acotado a un
+  catálogo, y que **sólo rellena ausencias** (nunca pisa Clutch con fuente
+  autoritativa).
+- `attribute_mapper.py`: el docstring afirmaba que vision y clutch venían
+  de un backfill "NOT NULL sin fallback". Era falso para el catálogo
+  ACTIVE, cuya ruta legacy nunca corre. Corregido y anotado que Clutch no
+  lo consume el motor.
+
+Datos (404 pitchers `0 → 70`), idempotente, catálogo RETIRED intacto:
+
+``` text
+antes   BATTER 402 en 70   PITCHER 404 en 0
+después BATTER 402 en 70   PITCHER 404 en 70
+2ª corrida: changed = 0
+```
+
+## Contratos A1-A4
+
+`backend/tests/etl/test_clutch_placeholder.py`
+
+``` text
+A1  el neutral es una sola constante canónica (70)
+A2  la publicación materializa el neutral y valida ausencia
+A3  el backfill rellena ausencias: dry-run, apply, idempotente,
+    no pisa Clutch autoritativo, no toca otros catálogos
+A4  Clutch NO cambia el resultado del PA --- verificado
+    conductualmente sobre las DOS ramas del resolver
+```
+
+A4 es un test de distribución: corre 400 seeds por caso y compara
+histogramas de eventos. Incluye contramuestras que demuestran que el
+arnés detecta diferencias (variar `poder` en SWING, `vision` en TAKE) y
+un contraste de que `stuff` sí mueve la distribución. Verificado que
+falla si se cablea Clutch a contact quality.
+
+``` text
+suite: 1006 → 1023 passed
+```
+
+## Pendiente (fuera de scope por decisión explícita)
+
+`vision`/`velocity`/`movement` en el rol que no les corresponde siguen en
+0. Se auditan por separado, y **no** son equivalentes al caso de Clutch:
+el peso de `vision` en la rama TAKE es real
+(`VISION_TAKE_WEIGHT = 0.002`), así que un 0 futuro en el rol incorrecto
+no sería inerte como el de Clutch. Merecen su propio bloque y su propia
+decisión de neutral.
 
 ------------------------------------------------------------------------
 
@@ -1478,15 +1600,23 @@ ratings
 → engine
 ```
 
-## Paso 3 --- GAMEPLAY-RATING-002 / Clutch
+## Paso 3 --- GAMEPLAY-RATING-002 / Clutch --- DEFERRED
 
-Definir leverage antes de fórmulas.
+Caracterizado y cerrado como placeholder (opción A). No hay fórmula que
+proponer: `clutch_evidence` está vacío y el motor no lee Clutch. La
+expresión contextual (dirección B) depende del paso 5.
 
-## Paso 4 --- Provenance
+## Paso 4 --- DATA-AUDIT-001 --- role-shape en vision/velocity/movement
+
+Audit del mismo `or 0` que queda vivo en las otras tres columnas, antes
+de tocar nada. Más sensible que el caso de Clutch porque `vision` sí
+pesa en la rama TAKE.
+
+## Paso 5 --- Provenance
 
 Versionar explícitamente catálogo, ratings, rules y engine.
 
-## Paso 5 --- Telemetry v2
+## Paso 6 --- Telemetry v2
 
 Conectar:
 
@@ -1501,7 +1631,7 @@ game
 → state transition
 ```
 
-## Paso 6 --- Reconciliation
+## Paso 7 --- Reconciliation
 
 Demostrar:
 
@@ -1511,7 +1641,7 @@ event stream
 ↔ box score / stats
 ```
 
-## Paso 7 --- Headless simulator
+## Paso 8 --- Headless simulator
 
 Simulación determinista sin UI/WebSocket:
 
@@ -1521,7 +1651,7 @@ Simulación determinista sin UI/WebSocket:
 -   comparación entre versiones;
 -   balance automatizado.
 
-## Paso 8 --- Analytics
+## Paso 9 --- Analytics
 
 Primeros productos:
 
@@ -1682,6 +1812,9 @@ c56d1d8  003B-3 Stuff coefficient
 84df0a3  DATA-STUFF-001A audit + contracts S1-S5
 f85d645  DATA-STUFF-001B-1 materialize Stuff on publish
 27f2e31  DATA-STUFF-001B-2 controlled Stuff backfill
+fc890ec  close DATA-STUFF-001, open Clutch
+
+1bb2e8d  GAMEPLAY-RATING-002 decision A: Clutch neutral 70
 ```
 
 Actualizar hashes si alguno fue amendado.
@@ -1691,49 +1824,61 @@ Actualizar hashes si alguno fue amendado.
 # 36. Próximo checkpoint exacto
 
 ``` text
-GAMEPLAY-RATING-002
-CLUTCH SEMANTICS / LEVERAGE MODEL
+DATA-AUDIT-001
+ROLE-SHAPE AUDIT: vision / velocity / movement
 ```
 
-Cerrado sin abrir: `DATA-STUFF-001A` (7/7) y `DATA-STUFF-001B` (S1-S5,
-re-auditoría 7/7, idempotencia, cadena verificada con datos reales).
+Cerrado sin abrir: `DATA-STUFF-001A/001B`, y `GAMEPLAY-RATING-002`
+(caracterizado, decisión A, deferred).
 
-La pregunta que abría 001A ya tiene respuesta y está registrada en §26:
+### Por qué este bloque y no otro
+
+`card_catalog.py` materializa los N/A del perfil con `or 0` en seis
+columnas. Stuff y Clutch ya están corregidos. Quedan tres:
 
 ``` text
-392
+PITCHER.vision      404 cartas en 0    (lo consumía vision sí: VISION_TAKE_WEIGHT)
+BATTER.velocity     402 cartas en 0
+BATTER.movement     402 cartas en 0
 ```
 
-Primer trabajo de 002, antes de cualquier fórmula:
+Diferencia con el caso de Clutch, y es lo que lo hace más urgente:
+Clutch no lo lee nadie, así que su `0` era inerte. `vision` **sí**
+pesa en la rama TAKE del resolver. Hoy es inalcanzable (un pitcher no
+batea), pero el día que haya bateo de pitcher, ese jugador entra con el
+peor visión del dominio en la rama que decide strike vs ball.
+
+### Primera consulta
 
 ``` text
-1. ¿Qué representa Clutch hoy?
-   - por rating está entre 0 y 99
-   - pero ¿afecta al resultado del PA, del lineup o del
-    Momento de la partida?
-2. ¿Es un atributo del jugador o del lineup?
-3. ¿Debe entrar por el bateador, por el estado del juego,
-   o por ambos?
-4. ¿Es acumulable durante la partida o se congela
-   al inicio?
+¿Existe algún camino por el que un PITCHER entre como batter_attrs
+o un BATTER como pitcher_attrs?
+
+   ublication path
+    → roster registration / lineup construction
+    → pitcher-batter substitution
+    → emergency / extra-inning / interleague rules
+```
+
+Seguir el código, no suponer. La respuesta decide si esto es una mina
+latente o un defecto alcanzable.
+
+### Después
+
+``` text
+si no hay camino:
+    → corregir por simetría con Clutch, sin urgencia,
+      con el mismo patrón (constante canónica + validación)
+si hay camino:
+    → corregir y auditar alcance real antes de aceptar
 ```
 
 Restricciones heredadas:
 
 ``` text
-NO modificar Stuff (cerrado, con evidencia de producción)
-NO recalibrar sin simular antes
-NO tocar PlayerCards.value sin justification explícita
-NO introducir parámetros sin fuente documentada
-```
-
-Orden recomendado:
-
-``` text
-caracterizar la entrada real de Clutch
-→ simular sobre la población existente
-→ decidir la semántica
-→ recién entonces implementar
+NO tocar Clutch (cerrado con decisión A)
+NO introducir coeficientes sin fuente
+NO reescribir catálogos históricos
 ```
 
 ------------------------------------------------------------------------
@@ -1756,8 +1901,9 @@ STUFF × POWER               CLOSED
 STUFF × FATIGUE             CLOSED
 STUFF PROD ACCEPTANCE       CLOSED
 STUFF DATA PROPAGATION      CLOSED   (001A + 001B)
+CLUTCH                      DEFERRED (placeholder, sin efecto)
 
-CLUTCH                      NEXT
+DATA-AUDIT-001              NEXT   (vision / velocity / movement)
 PROVENANCE                  PENDING
 RUNTIME TELEMETRY           PENDING
 RECONCILIATION              PENDING
