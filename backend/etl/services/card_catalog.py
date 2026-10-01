@@ -30,6 +30,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.core.time import utcnow
+from app.engine.stuff_policy import STUFF_BASELINE
 from app.models import (
     CardCatalog,
     CardEdition,
@@ -769,6 +770,18 @@ def _card_from_profile(
     position = player.primary_position or "UT"
     if is_two_way:
         position = "TWP" if position in ("SP", "RP", "P") else position
+    # DATA-STUFF-001B-1 — materializar Stuff desde el perfil autoritativo.
+    #
+    # `stuff_rating` ya viajaba en `_RATING_FIELDS` pero nunca llegaba a la
+    # carta: toda carta publicada caía en el server_default 70, es decir Stuff
+    # exactamente neutro para toda la flota. El motor consumía una política
+    # (k=.30 / α=.50) que el catálogo silenciaba — 392/404 pitchers ACTIVE con
+    # authoritativa != 70.
+    #
+    # `stuff_rating` es NULL por diseño para role BATTER (CHECK de role-shape),
+    # y la columna de la carta es NOT NULL: por eso el fallback es el baseline
+    # exacto (delta 0, supresión 0) y no un 0, que sesgaría la flota de bateo.
+    stuff = values["stuff_rating"]
     return PlayerCardModel(
         id=_new_id(),
         team_id=game_team_id,
@@ -787,6 +800,7 @@ def _card_from_profile(
         movement=values["movement_rating"] or 0,
         vision=values["vision_rating"] or 0,
         clutch=values["clutch_rating"] or 0,
+        stuff=int(stuff) if stuff is not None else STUFF_BASELINE,
         repertoire=profile.repertoire_payload,
         player_id=player.id,
         player_season_id=profile.player_season_id,
@@ -819,10 +833,16 @@ def _validate_rows(rows: list[PlayerCardModel]) -> list[str]:
             ("movement", "movement"),
             ("vision", "vision"),
             ("clutch", "clutch"),
+            ("stuff", "stuff"),
         ):
             value = getattr(card, field_name) or 0
             if not 0 <= value <= 99:
                 issues.append(f"{label} fuera de rango: {value}")
+        # `getattr(...) or 0` de arriba enmascararía un None como 0 (dentro de
+        # rango). `player_cards.stuff` es NOT NULL y su ausencia es exactamente
+        # el silent-default que DATA-STUFF-001 cerró, así que se valida aparte.
+        if card.stuff is None:
+            issues.append(f"stuff sin materializar: {card.name}")
         if card.repertoire and len(card.repertoire) > 4:
             issues.append(f"repertorio excede 4 pitches: {card.name}")
         if not card.game_identity_id or not card.team_id:
