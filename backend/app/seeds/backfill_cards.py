@@ -45,6 +45,24 @@ auditar cuántas cartas quedaron sin dato real.
 
 Idempotente: solo toca cartas sin rating_model_version. Reejecutable sin daño.
 
+Stuff en catálogos publicados (DATA-STUFF-001B-2)
+--------------------------------------------------
+La ruta legacy de arriba NO cubre el catálogo ACTIVE BASE v2 (ratings-2.0):
+esas cartas ya están firmadas con `rating_model_version='ratings-2.0'`, así que
+el centinela `IS NULL` las salta. Y el defecto real era otro — la publicación
+(`etl/services/card_catalog.py::_card_from_profile`) nunca asignó `stuff`, así
+que las 806 cartas active quedaron todas en el `server_default` 70 mientras el
+Stuff autoritativo de 392 de los 404 pitchers era otro valor.
+
+    `python app/seeds/backfill_cards.py --catalog-stuff`            (dry-run)
+    `python app/seeds/backfill_cards.py --catalog-stuff --apply`   (escribe)
+
+`backfill_catalog_stuff()` reutiliza `_resolve_stuff_from_ratings()`, o sea la
+misma precedencia de arriba, y sólo materializa cartas de role PITCHER:
+`stuff_rating` es NULL por diseño para BATTER, así que la flota de bateo
+permanece en STUFF_BASELINE (su valor exacto) en vez de recibir 402
+"correcciones" inventadas.
+
 Consejo operativo:
     Correr DESPUÉS de upgrade head y ANTES de activar el Matchup Engine V1.
     Hasta que se ejecute, el mapper conserva su fallback y nada cambia.
@@ -73,6 +91,9 @@ try:
 except ModuleNotFoundError:
     from database import SessionLocal  # type: ignore
 
+from app.models.card_catalog import CardCatalog
+from app.models.card_edition import CardEditionType
+
 LEGACY_VISION_WEIGHT_CONTACT = 0.70
 LEGACY_VISION_WEIGHT_OVERALL = 0.30
 NEUTRAL_CLUTCH = 50
@@ -80,6 +101,7 @@ BASE_EDITION = "BASE"
 LEGACY_MODEL_VERSION = "LEGACY"
 
 PITCHER_ROLE = "PITCHER"
+BATTER_ROLE = "BATTER"
 
 
 def _resolve_stuff_from_ratings(db, card) -> int:
@@ -147,9 +169,191 @@ def backfill_vision_clutch_edition(db) -> dict:
     }
 
 
+def backfill_catalog_stuff(db, catalog_id: str = None, apply: bool = False) -> dict:
+    """DATA-STUFF-001B-2 -- materializa ``player_cards.stuff`` desde ratings-2.0.
+
+    Corrige el silent default que encontró ``etl/audit_stuff_propagation.py``:
+    la ruta de publicación nunca asignó ``stuff``, así que las 806 cartas del
+    catálogo ACTIVE BASE v2 quedaron todas en el ``server_default`` 70 mientras
+    el Stuff autoritativo de 392 de los 404 pitchers era otro valor. El motor
+    aplicaba la política de 003B sobre un atributo que el catálogo silenciaba.
+
+    Alcance:
+        Un catálogo explícito (por defecto, el ACTIVE BASE de la temporada). No
+        es un filtro global: un catálogo retirado sigue siendo histórico y no
+        se reescribe.
+
+    Rol:
+        Sólo se materializan las cartas cuyo ``CardRatingProfile`` es
+        PITCHER. ``stuff_rating`` es NULL por diseño para BATTER (CHECK de
+        role-shape) y la columna de la carta es NOT NULL, así que la flota de
+        bateo debe quedarse en ``STUFF_BASELINE``, que es su valor exacto
+        (delta 0, supresión 0). Sin esta separación, contar o escribir las 806
+        cartas produciría ~402 "correcciones" inventadas.
+
+    Idempotencia:
+        Escribir es ``card.stuff != autoritativo``; una segunda corrida con la
+        misma fuente no toca ninguna fila. No usa el centinela
+        ``rating_model_version IS NULL`` de la ruta legacy: esas cartas ya
+        están firmadas y son otro caso.
+
+    Seguridad:
+        ``apply=False`` (default) sólo informa: calcula el plan y hace
+        ``rollback``. Nada se escribe sin que se pida explícitamente.
+
+    Returns:
+        dict con el plan, los contadores por fuente y por clase, y una muestra
+        de las cartas que cambiarían.
+    """
+    if catalog_id is None:
+        catalog = (
+            db.query(CardCatalog)
+            .filter(
+                CardCatalog.season == 2026,
+                CardCatalog.edition_type == CardEditionType.BASE,
+                CardCatalog.status == "ACTIVE",
+            )
+            .first()
+        )
+        if catalog is None:
+            raise RuntimeError("no hay catálogo ACTIVE BASE para la temporada 2026")
+        catalog_id = catalog.id
+
+    cards = db.query(PlayerCardModel).filter(PlayerCardModel.catalog_id == catalog_id).all()
+
+    profile_ids = {c.card_rating_profile_id for c in cards if c.card_rating_profile_id}
+    profiles = {
+        p.id: p
+        for p in db.query(CardRatingProfile)
+        .filter(CardRatingProfile.id.in_(profile_ids))
+        .all()
+    } if profile_ids else {}
+
+    ratings = {}
+    for rating in (
+        db.query(PlayerRatings)
+        .filter(
+            PlayerRatings.season == 2026,
+            PlayerRatings.role == PITCHER_ROLE,
+            PlayerRatings.stuff_rating.isnot(None),
+        )
+        .order_by(PlayerRatings.updated_at.desc())
+        .all()
+    ):
+        ratings.setdefault((rating.player_id, rating.season), rating)
+
+    sources = {"card_rating_profile": 0, "player_ratings": 0, "neutral": 0}
+    roles = {PITCHER_ROLE: 0, BATTER_ROLE: 0, "unknown": 0}
+    changed = 0
+    unchanged = 0
+    delta_total = 0
+    sample = []
+
+    for card in cards:
+        profile = profiles.get(card.card_rating_profile_id)
+        rating = (
+            ratings.get((card.player_id, card.season))
+            if card.player_id and card.season
+            else None
+        )
+
+        # El rol se infiere de la propia fuente autoritativa, no del `position`
+        # de la carta: `position` es una etiqueta de presentación y un two-way
+        # publica un único perfil.
+        #   - CardRatingProfile presente  → su `role` manda.
+        #   - sin perfil pero con PlayerRatings PITCHER → es pitcher (el query
+        #     ya está filtrado por role=PITCHER, así que la fuente lo declara).
+        #   - ninguna de las dos → no hay Stuff autoritativo: se deja el
+        #     baseline y se reporta, nunca se inventa un valor.
+        if profile is not None:
+            role = profile.role
+        elif rating is not None:
+            role = PITCHER_ROLE
+        else:
+            role = "unknown"
+        roles[role] = roles.get(role, 0) + 1
+
+        if role != PITCHER_ROLE:
+            # Batters se quedan en STUFF_BASELINE por contrato de role-shape.
+            continue
+
+        stuff, source = _resolve_stuff_from_ratings(db, card)
+        sources[source] += 1
+
+        if card.stuff == stuff:
+            unchanged += 1
+            continue
+
+        changed += 1
+        delta_total += stuff - card.stuff
+        if len(sample) < 15:
+            sample.append(
+                {
+                    "card_id": card.id,
+                    "name": card.name,
+                    "from": card.stuff,
+                    "to": stuff,
+                    "delta": stuff - card.stuff,
+                    "source": source,
+                }
+            )
+        if apply:
+            card.stuff = stuff
+
+    if apply:
+        db.commit()
+    else:
+        db.rollback()
+
+    return {
+        "catalog_id": catalog_id,
+        "apply": apply,
+        "total_cards": len(cards),
+        "pitcher_cards": roles.get(PITCHER_ROLE, 0),
+        "batter_cards_untouched": roles.get(BATTER_ROLE, 0),
+        "unknown_role_skipped": roles.get("unknown", 0),
+        "stuff_sources": sources,
+        "changed": changed,
+        "unchanged": unchanged,
+        "mean_delta": round(delta_total / changed, 4) if changed else 0.0,
+        "sample": sample,
+    }
+
+
 def main():
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Backfills de player_cards")
+    parser.add_argument(
+        "--catalog-stuff",
+        action="store_true",
+        help="DATA-STUFF-001B-2: materializar player_cards.stuff (dry-run)",
+    )
+    parser.add_argument(
+        "--catalog-id", default=None, help="catálogo objetivo (por defecto, el ACTIVE BASE)"
+    )
+    parser.add_argument(
+        "--apply",
+        action="store_true",
+        help="escribir de verdad (sin esto, dry-run con rollback)",
+    )
+    args = parser.parse_args()
+
     db = SessionLocal()
     try:
+        if args.catalog_stuff:
+            import json
+
+            summary = backfill_catalog_stuff(
+                db, catalog_id=args.catalog_id, apply=args.apply
+            )
+            print(json.dumps(summary, indent=2, ensure_ascii=False))
+            if not args.apply:
+                print(
+                    "\nDRY-RUN: nada escrito. Reejecutar con --apply para materializar."
+                )
+            return
+
         summary = backfill_vision_clutch_edition(db)
         print(f"Backfill completado: {summary['updated']} cartas actualizadas.")
         print(f"  Stuff por fuente: {summary['stuff_sources']}")
