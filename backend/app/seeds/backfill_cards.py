@@ -93,10 +93,15 @@ except ModuleNotFoundError:
 
 from app.models.card_catalog import CardCatalog
 from app.models.card_edition import CardEditionType
+from etl.config.ratings_2 import CLUTCH_NEUTRAL_RATING
 
 LEGACY_VISION_WEIGHT_CONTACT = 0.70
 LEGACY_VISION_WEIGHT_OVERALL = 0.30
-NEUTRAL_CLUTCH = 50
+# GAMEPLAY-RATING-002: este literal era 50 y divergía de la constante canónica
+# `CLUTCH_NEUTRAL_RATING` (70) que usa `etl/services/batter_clutch.py` y que ya
+# materializan los batters de ratings-2.0. Dos neutrales distintos para el
+# mismo placeholder; se colapsa en la fuente canónica.
+NEUTRAL_CLUTCH = CLUTCH_NEUTRAL_RATING
 BASE_EDITION = "BASE"
 LEGACY_MODEL_VERSION = "LEGACY"
 
@@ -320,6 +325,128 @@ def backfill_catalog_stuff(db, catalog_id: str = None, apply: bool = False) -> d
     }
 
 
+def backfill_catalog_clutch(db, catalog_id: str = None, apply: bool = False) -> dict:
+    """GAMEPLAY-RATING-002 (opción A) -- neutral de Clutch en cartas publicadas.
+
+    Corrige un silent default de la misma familia que DATA-STUFF-001, pero con
+    la dirección opuesta: Stuff tenía una fuente autoritativa real que no se
+    estaba copiando; acá **no hay fuente**. ``clutch_evidence`` está vacío en
+    ``ratings-2.0`` (0 de 869 filas) y el motor no lee Clutch, así que la
+    decisión tomada es placeholder explícito y sin efecto de gameplay.
+
+    Lo que sí estaba mal era el valor: ``clutch_rating`` es NULL por diseño para
+    role PITCHER (CHECK de role-shape) y la publicación usaba ``or 0``, dejando
+    a los 404 pitchers en el piso del dominio. 0 no es "sin dato", es el peor
+    Clutch posible; si algún día se cablea (dirección B, leverage situacional)
+    arrancaría en el peor valor del rango.
+
+    Alcance:
+        Un catálogo explícito (por defecto, el ACTIVE BASE). El catálogo
+        retirado se deja histórico, igual que en ``backfill_catalog_stuff``.
+
+    Sólo rellena ausencias, nunca pisa datos:
+        Se escribe únicamente donde ``clutch_rating`` es NULL en la fuente
+        autoritativa **y** la carta no tiene ya el neutral. Una carta con Clutch
+        real (hoy no existe ninguna) queda intacta.
+
+    Idempotente:
+        Escribir es ``card.clutch != neutral``; la segunda corrida no toca filas.
+
+    Seguridad:
+        ``apply=False`` (default) calcula el plan y hace ``rollback``.
+
+    Returns:
+        dict con el plan, los conteos por rol y una muestra de los cambios.
+    """
+    if catalog_id is None:
+        catalog = (
+            db.query(CardCatalog)
+            .filter(
+                CardCatalog.season == 2026,
+                CardCatalog.edition_type == CardEditionType.BASE,
+                CardCatalog.status == "ACTIVE",
+            )
+            .first()
+        )
+        if catalog is None:
+            raise RuntimeError("no hay catálogo ACTIVE BASE para la temporada 2026")
+        catalog_id = catalog.id
+
+    cards = db.query(PlayerCardModel).filter(PlayerCardModel.catalog_id == catalog_id).all()
+
+    profile_ids = {c.card_rating_profile_id for c in cards if c.card_rating_profile_id}
+    profiles = {
+        p.id: p
+        for p in db.query(CardRatingProfile)
+        .filter(CardRatingProfile.id.in_(profile_ids))
+        .all()
+    } if profile_ids else {}
+
+    # Fuente autoritativa: sólo importa si trae Clutch real. Si no lo trae, la
+    # ausencia es legítima (role-shape de PITCHER) y se materializa el neutral.
+    has_authoritative_clutch: dict[str, bool] = {}
+    if profile_ids:
+        for profile_id, has_value in (
+            db.query(CardRatingProfile.id, CardRatingProfile.clutch_rating.isnot(None))
+            .filter(CardRatingProfile.id.in_(profile_ids))
+            .all()
+        ):
+            has_authoritative_clutch[profile_id] = bool(has_value)
+
+    roles = {PITCHER_ROLE: 0, BATTER_ROLE: 0, "unknown": 0}
+    changed = 0
+    unchanged = 0
+    skipped_with_data = 0
+    sample = []
+
+    for card in cards:
+        profile = profiles.get(card.card_rating_profile_id)
+        role = profile.role if profile is not None else "unknown"
+        roles[role] = roles.get(role, 0) + 1
+
+        if has_authoritative_clutch.get(card.card_rating_profile_id, False):
+            # Hay Clutch autoritativo: nunca se pisa.
+            skipped_with_data += 1
+            continue
+
+        if card.clutch == CLUTCH_NEUTRAL_RATING:
+            unchanged += 1
+            continue
+
+        changed += 1
+        if len(sample) < 15:
+            sample.append(
+                {
+                    "card_id": card.id,
+                    "name": card.name,
+                    "role": role,
+                    "from": card.clutch,
+                    "to": CLUTCH_NEUTRAL_RATING,
+                }
+            )
+        if apply:
+            card.clutch = CLUTCH_NEUTRAL_RATING
+
+    if apply:
+        db.commit()
+    else:
+        db.rollback()
+
+    return {
+        "catalog_id": catalog_id,
+        "apply": apply,
+        "neutral": CLUTCH_NEUTRAL_RATING,
+        "total_cards": len(cards),
+        "pitcher_cards": roles.get(PITCHER_ROLE, 0),
+        "batter_cards_untouched": roles.get(BATTER_ROLE, 0),
+        "unknown_role_skipped": roles.get("unknown", 0),
+        "skipped_with_authoritative_clutch": skipped_with_data,
+        "changed": changed,
+        "unchanged": unchanged,
+        "sample": sample,
+    }
+
+
 def main():
     import argparse
 
@@ -328,6 +455,11 @@ def main():
         "--catalog-stuff",
         action="store_true",
         help="DATA-STUFF-001B-2: materializar player_cards.stuff (dry-run)",
+    )
+    parser.add_argument(
+        "--catalog-clutch",
+        action="store_true",
+        help="GAMEPLAY-RATING-002: neutral de Clutch en pitchers (dry-run)",
     )
     parser.add_argument(
         "--catalog-id", default=None, help="catálogo objetivo (por defecto, el ACTIVE BASE)"
@@ -345,6 +477,19 @@ def main():
             import json
 
             summary = backfill_catalog_stuff(
+                db, catalog_id=args.catalog_id, apply=args.apply
+            )
+            print(json.dumps(summary, indent=2, ensure_ascii=False))
+            if not args.apply:
+                print(
+                    "\nDRY-RUN: nada escrito. Reejecutar con --apply para materializar."
+                )
+            return
+
+        if args.catalog_clutch:
+            import json
+
+            summary = backfill_catalog_clutch(
                 db, catalog_id=args.catalog_id, apply=args.apply
             )
             print(json.dumps(summary, indent=2, ensure_ascii=False))

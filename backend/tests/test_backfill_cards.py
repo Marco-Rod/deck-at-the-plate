@@ -17,6 +17,7 @@ from app.seeds.backfill_cards import (
     backfill_vision_clutch_edition,
     LEGACY_MODEL_VERSION,
     BASE_EDITION,
+    NEUTRAL_CLUTCH,
 )
 
 
@@ -66,7 +67,11 @@ class TestBackfill:
 
         card = db.query(PlayerCardModel).filter_by(id="legacy-1").one()
         assert card.vision == int(70 * 0.70 + 85 * 0.30)  # 74
-        assert card.clutch == 50
+        # El neutral canónico (GAMEPLAY-RATING-002 opción A), no un literal:
+        # este test afirma "el backfill escribe el neutral", y el valor de
+        # ese neutral está en una sola fuente.
+        assert card.clutch == NEUTRAL_CLUTCH
+        assert card.clutch == 70  # CLUTCH_NEUTRAL_RATING
         assert card.edition_type == BASE_EDITION
         assert card.rating_model_version == LEGACY_MODEL_VERSION
 

@@ -56,6 +56,7 @@ from etl.services.base_eligibility_policy import (
     PROVISIONAL,
 )
 from etl.services.eligibility_policies import ELIGIBILITY_POLICIES
+from etl.config.ratings_2 import CLUTCH_NEUTRAL_RATING
 
 logger = logging.getLogger("etl.services.card_catalog")
 
@@ -782,6 +783,21 @@ def _card_from_profile(
     # y la columna de la carta es NOT NULL: por eso el fallback es el baseline
     # exacto (delta 0, supresión 0) y no un 0, que sesgaría la flota de bateo.
     stuff = values["stuff_rating"]
+    # GAMEPLAY-RATING-002 (opción A, 2026-10-01) — Clutch es un placeholder
+    # explícito, no un atributo con efecto: el motor no lo lee (el `calculator`
+    # sólo consume contacto/poder/visión) y `ratings-2.0` no tiene datos
+    # situacionales para derivarlo (`clutch_evidence` = 0/869 filas).
+    #
+    # Aun así, `or 0` era incorrecto: `clutch_rating` es NULL por diseño para
+    # role PITCHER (CHECK de role-shape), así que los 404 pitchers quedaban en
+    # el piso del rango en vez del neutral. 0 no es "sin dato": es el peor
+    # Clutch posible, y si alguna vez se cablea (dirección B, leverage
+    # situacional) arrancaría con el peor valor del dominio.
+    #
+    # Se materializa CLUTCH_NEUTRAL_RATING (70), que es lo que ya producen los
+    # batters vía `calculate_batter_clutch()`: la columna queda consistente
+    # entre roles sin afirmar una señal que no existe.
+    clutch = values["clutch_rating"]
     return PlayerCardModel(
         id=_new_id(),
         team_id=game_team_id,
@@ -799,7 +815,7 @@ def _card_from_profile(
         control=values["control_rating"] or 0,
         movement=values["movement_rating"] or 0,
         vision=values["vision_rating"] or 0,
-        clutch=values["clutch_rating"] or 0,
+        clutch=int(clutch) if clutch is not None else CLUTCH_NEUTRAL_RATING,
         stuff=int(stuff) if stuff is not None else STUFF_BASELINE,
         repertoire=profile.repertoire_payload,
         player_id=player.id,
@@ -843,6 +859,10 @@ def _validate_rows(rows: list[PlayerCardModel]) -> list[str]:
         # el silent-default que DATA-STUFF-001 cerró, así que se valida aparte.
         if card.stuff is None:
             issues.append(f"stuff sin materializar: {card.name}")
+        # Mismo masking para clutch (GAMEPLAY-RATING-002): debe llegar el
+        # neutral explícito, nunca quedar en None ni en el piso del rango.
+        if card.clutch is None:
+            issues.append(f"clutch sin materializar: {card.name}")
         if card.repertoire and len(card.repertoire) > 4:
             issues.append(f"repertorio excede 4 pitches: {card.name}")
         if not card.game_identity_id or not card.team_id:

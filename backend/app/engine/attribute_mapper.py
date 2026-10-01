@@ -64,8 +64,20 @@ def map_card_to_batter_attrs(card: "PlayerCardModel") -> BatterAttrs:
     Convierte un PlayerCardModel a un diccionario de atributos de bateo
     listo para ser consumido por el engine (calculator.py).
 
-    La "vision" y el "clutch" son columnas persistidas (NOT NULL post-backfill)
-    calculadas por seeds/backfill_cards.py, por lo que aquí no hay fallback.
+    La "vision" es una columna persistida y con señal real: ``calculator.py``
+    la lee vía ``VISION_TAKE_WEIGHT``.
+
+    El "clutch" se expone pero **no lo consume el motor** (GAMEPLAY-RATING-002,
+    opción A): ``calculator.py`` lee sólo ``contacto``/``poder``/``vision``, y
+    ``ratings-2.0`` no tiene datos situacionales para derivar Clutch
+    (``clutch_evidence`` = 0 filas). La columna está materializada con el
+    neutral explícito ``CLUTCH_NEUTRAL_RATING`` para que quede lista si se
+    cablea, pero hoy es un placeholder inerte.
+
+    Antes este docstring decía que vision y clutch venían de un backfill
+    "NOT NULL post-backfill" sin fallback. Eso era falso para ambos en el
+    catálogo ACTIVE: la ruta legacy `backfill_vision_clutch_edition` sólo toca
+    cartas con ``rating_model_version IS NULL``, o sea no las de ``ratings-2.0``.
 
     Args:
         card: Instancia de PlayerCardModel obtenida de la base de datos.
