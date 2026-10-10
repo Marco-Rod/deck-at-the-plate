@@ -29,8 +29,9 @@ def compute_team_ratings(cards: Sequence, default: int = 70) -> dict:
 def compute_lineup_ratings(slots: Mapping[str, dict], default: int = 70) -> dict:
     """
     Medias a partir de ``UserLineup.slots`` (JSON): slot -> dict de carta.
-    El slot ``"P"`` (dominio de lineup) cuenta como pitcher, igual que las
-    posiciones lanzadoras de la carta (``PITCHER_POSITIONS``).
+    Son dos ejes ortogonales: el slot (``"P"`` del dominio de lineup) y la
+    posición de la carta (``PITCHER_POSITIONS``). Cualquiera de los dos
+    clasifica la carta como pitcher.
     """
     batters, pitchers = [], []
     for slot_pos, card in (slots or {}).items():

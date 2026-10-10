@@ -267,10 +267,13 @@ class MLBSeedHelper:
         si es "P", se asigna SP como valor por defecto.
         """
         normalized = position.upper()
+        # "P" es canónico desde DATA-AUDIT-001, pero esta semilla lo colapsa a
+        # "SP" a propósito para no cambiar la salida histórica del seed. Por eso
+        # se evalúa antes de la pertenencia a PITCHER_POSITIONS.
+        if normalized == Position.PITCHER.value:
+            return Position.STARTER.value  # "SP"
         if normalized in PITCHER_POSITIONS:
             return normalized
-        if normalized in ("P",):
-            return Position.STARTER.value  # "SP"
         # Cualquier otro valor (p. ej. variantes) cae a SP de forma segura
         if normalized and normalized.isalpha():
             return Position.STARTER.value
@@ -444,9 +447,9 @@ def seed_mlb_2026_data(db: Session):
 
         for player_info in roster:
             position = player_info.get("position", {}).get("abbreviation", "DH")
-            # "P" es la abreviatura genérica de lanzador en la API de MLB;
-            # el juego la normaliza después a SP/RP/SU/CP/CL/TWP.
-            is_pitcher = position.upper() in ("P",) or position.upper() in PITCHER_POSITIONS
+            # La API de MLB devuelve "P" como abreviatura genérica de lanzador.
+            # "P" ya vive en PITCHER_POSITIONS, así que no hace falta listarlo.
+            is_pitcher = position.upper() in PITCHER_POSITIONS
 
             card = MLBSeedHelper.create_player_card(
                 player_info,

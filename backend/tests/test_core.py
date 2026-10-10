@@ -27,6 +27,34 @@ def test_position_compatibility():
     assert enums.Position.TWO_WAY.is_pitcher
 
 
+def test_position_pitcher_generic_is_a_pitcher():
+    """DATA-AUDIT-001: "P" debe clasificar como lanzador, no como bateador.
+
+    Si "P" queda fuera de Position.is_pitcher, las 403 cartas con role=PITCHER
+    y position="P" del catalogo activo devuelven is_batter=True y pueden entrar
+    al lineup con vision/contact/power en 0.
+    """
+    assert enums.Position("P") == enums.Position.PITCHER
+    assert enums.Position.PITCHER.is_pitcher
+    assert "P" in enums.PITCHER_POSITIONS
+    assert not enums.Position.PITCHER.is_fielder
+
+
+def test_pitcher_positions_cover_every_pitcher_position():
+    """Ninguna posicion lanzadora puede quedar fuera de la constante derivada."""
+    expected = {"P", "SP", "RP", "SU", "CP", "CL", "TWP"}
+    assert set(enums.PITCHER_POSITIONS) == expected
+    for value in expected:
+        assert enums.Position(value).is_pitcher
+
+
+def test_no_position_is_both_pitcher_and_fielder():
+    """Un puesto no puede lanzar y ser de campo a la vez (DH incluido)."""
+    pitchers = {p for p in enums.Position if p.is_pitcher}
+    fielders = {p for p in enums.Position if p.is_fielder}
+    assert not pitchers & fielders
+
+
 def test_runner_base_keys_match_state_data():
     assert {b.value for b in enums.RunnerBase} == {"1b", "2b", "3b"}
 

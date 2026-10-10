@@ -156,6 +156,7 @@ class Position(str, enum.Enum):
     @property
     def is_pitcher(self) -> bool:
         return self in (
+            Position.PITCHER,
             Position.STARTER,
             Position.RELIEVER,
             Position.SETUP,

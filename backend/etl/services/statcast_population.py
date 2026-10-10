@@ -14,8 +14,16 @@ from etl.pipelines.statcast import StatcastRawPipeline, StatcastRunResult
 
 logger = logging.getLogger("etl.services.statcast_population")
 
-PITCHER_POSITIONS = ("P", "SP", "RP", "SU", "CP", "CL", "TWP")
-BATTER_POSITIONS = ("C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "DH", "TWP")
+from app.core.enums import PITCHER_POSITIONS
+from app.core.enums import Position
+
+# Derivadas del dominio; TWP es elegible en ambos roles.
+PITCHER_POSITION_VALUES = tuple(sorted(PITCHER_POSITIONS))
+BATTER_POSITION_VALUES = tuple(
+    sorted(
+        {p.value for p in Position if p.is_fielder or p is Position.TWO_WAY}
+    )
+)
 
 
 @dataclass(frozen=True)
@@ -54,10 +62,10 @@ def select_population_players(
         Player.primary_position.isnot(None),
     )
     if role == "pitcher":
-        query = query.filter(Player.primary_position.in_(PITCHER_POSITIONS))
+        query = query.filter(Player.primary_position.in_(PITCHER_POSITION_VALUES))
     else:
         # TWP es elegible en ambos roles; pitchers puros no están en esta lista.
-        query = query.filter(Player.primary_position.in_(BATTER_POSITIONS))
+        query = query.filter(Player.primary_position.in_(BATTER_POSITION_VALUES))
     query = query.order_by(Player.mlb_id.asc())
     if limit is not None:
         query = query.limit(limit)

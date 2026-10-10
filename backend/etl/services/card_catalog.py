@@ -62,9 +62,6 @@ logger = logging.getLogger("etl.services.card_catalog")
 
 _CARD_STATUSES = CardCatalog.STATUSES
 
-# "P" es lanzador explícito en algunos orígenes y no vive en Position.
-_PITCHER_POSITIONS = frozenset(PITCHER_POSITIONS) | {"P"}
-
 
 def _new_id() -> str:
     return str(uuid.uuid4())
@@ -87,7 +84,7 @@ def profile_publish_order(profile):
     """
     player = profile.player_season.player
     position = player.primary_position or "UT"
-    wants_pitcher = position in _PITCHER_POSITIONS
+    wants_pitcher = position in PITCHER_POSITIONS
     role = profile.role or "BATTER"
     matches = (role == "PITCHER") == wants_pitcher
     return (0 if matches else 1, profile.player_season_id, role)
