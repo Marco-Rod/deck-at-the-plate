@@ -18,6 +18,11 @@ from fastapi import HTTPException, status
 
 from app.models import GameSession
 from app.schemas import CreateGameRequest
+from app.engine.build import (
+    ENGINE_BUILD,
+    ENGINE_VERSION,
+    GAMEPLAY_RULES_VERSION,
+)
 from app.engine.deck_manager import initialize_tactics_state
 from app.repositories import (
     find_cards_by_team,
@@ -281,10 +286,19 @@ class GameSessionService:
 
         total_innings = payload.total_innings if payload.total_innings in (3, 6, 9) else 9
 
+        # Snapshot de provenance (GAMEPLAY-PROVENANCE-001). Inmutable desde aquí
+        # en adelante: nunca se relee el catálogo ACTIVE para reinterpretar una
+        # partida existente. ``active_catalog`` se resolvió una vez arriba y es
+        # la única fuente de verdad del catálogo de esta partida.
         game = GameSession(
             id=f"game_{uuid.uuid4().hex[:8]}",
             home_user_id=home_user_id,
             away_user_id=away_user_id,
+            catalog_id=active_catalog.id,
+            rating_model_version=active_catalog.rating_model_version,
+            rules_version=GAMEPLAY_RULES_VERSION,
+            engine_version=ENGINE_VERSION,
+            engine_build=ENGINE_BUILD,
             state_data={
                 "mode": payload.game_mode,
                 "difficulty": payload.difficulty,

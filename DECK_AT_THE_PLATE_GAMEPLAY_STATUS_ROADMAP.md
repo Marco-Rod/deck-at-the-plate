@@ -73,15 +73,21 @@ persistido, eventos enviados al cliente y futuras estadísticas.
 -   `DATA-STUFF-001A — CLOSED / PASS`.
 -   `DATA-STUFF-001B — CLOSED / PASS`.
 -   `GAMEPLAY-RATING-002 — DEFERRED` (decisión A: placeholder, sin efecto).
+-   `DATA-AUDIT-001 — CLOSED / PASS` (fix `Position.PITCHER`).
+-   `GAMEPLAY-PROVENANCE-001 — CLOSED / PASS` (P4).
 
 ### Próximo bloque
 
 ``` text
-DATA-AUDIT-001 --- audit de vision/velocity/movement por rol
+P5-RUNTIME-TELEMETRY --- game -> PA -> pitch -> decision -> probability -> RNG -> result
 ```
 
-(Clutch quedó cerrado como placeholder; el `or 0` equivalente en las otras
-tres columnas sigue vivo y es el hallazgo abierto más cercano.)
+(P4-PROVENANCE cerrado: la partida versiona catalogo / ratings / rules /
+engine en columnas de `game_sessions` + `engine/build.py`. DATA-AUDIT-001
+cerrado: el `or 0` de vision/velocity/movement no era una mina latente sino
+un defecto alcanzable, causado por `Position.PITCHER` ("P") ausente de
+`Position.is_pitcher`. Corregido en el enum; exposicion `vision=0` en
+bateadores = 0. Sin tocar vision/velocity/movement.)
 
 ------------------------------------------------------------------------
 
@@ -1533,11 +1539,11 @@ procedencia necesaria para reproducir históricamente una partida.
 Pendientes:
 
 ``` text
-GAMEPLAY-PROVENANCE-001
-TELEMETRY-PROVENANCE-001
+GAMEPLAY-PROVENANCE-001   CLOSED (P4: columnas en game_sessions)
+TELEMETRY-PROVENANCE-001  PENDING
 ```
 
-Una partida debería identificar:
+Una partida identifica (ver §Paso 5):
 
 ``` text
 catalog id/version
@@ -1606,15 +1612,194 @@ Caracterizado y cerrado como placeholder (opción A). No hay fórmula que
 proponer: `clutch_evidence` está vacío y el motor no lee Clutch. La
 expresión contextual (dirección B) depende del paso 5.
 
-## Paso 4 --- DATA-AUDIT-001 --- role-shape en vision/velocity/movement
+## Paso 4 --- DATA-AUDIT-001 --- role-shape en vision/velocity/movement --- CERRADO
 
 Audit del mismo `or 0` que queda vivo en las otras tres columnas, antes
 de tocar nada. Más sensible que el caso de Clutch porque `vision` sí
 pesa en la rama TAKE.
 
-## Paso 5 --- Provenance
+**Resultado: el `or 0` de vision/velocity/movement NO es una mina latente.
+Es un defecto alcanzable, causado por un bug de clasificación, no por
+el `or 0`.**
 
-Versionar explícitamente catálogo, ratings, rules y engine.
+### Causa raíz
+
+`Position.is_pitcher` omitía `Position.PITCHER` (`"P"`), y
+`PITCHER_POSITIONS` se deriva de ese property
+(`backend/app/core/enums.py:183`). Consecuencia sobre el catálogo
+activo (806 cartas):
+
+| Métrica | Antes | Después |
+| --- | --- | --- |
+| `is_pitcher == True` | **1** (solo `TWP`) | **404** |
+| `is_batter == True` | 805 | 402 |
+| `position='P'` con `is_batter` | **403** | **0** |
+| bateadores con `vision == 0` | 403 | **0** |
+| lanzadores con `velocity`/`movement == 0` | 0 | **0** |
+
+Las 403 cartas con `role=PITCHER` y `position='P'` devolvían
+`is_batter=True`, pasaban las validaciones de lineup
+(`game_session_service.py:69` humano, `:237` CPU) y entraban a batear con
+`vision=0, contact=0, power=0`. `vision=0` sí pesa en TAKE
+(`VISION_TAKE_WEIGHT`), así que la exposición era real y no teórica.
+
+Simultáneamente, el juego quedaba casi injugable: con un solo lanzador
+válido en 806 cartas, `game_session_service.py:245` podía rechazar
+equipos CPU sin lanzadores.
+
+El bug estaba parcheado por cuarta parte en el propio repo, contra el
+docstring de `enums.py:11` ("nunca redefinirla"):
+
+- `etl/services/card_catalog.py:66` --- `PITCHER_POSITIONS | {"P"}`
+- `etl/services/statcast_population.py:17` --- tupla local con `"P"`
+- `app/seeds/seed_mlb_2026.py:449` --- `position in ("P",)`
+- `app/services/team_ratings.py:39` --- `or slot_pos == "P"`
+
+Tres de los cuatro workarounds quedaron redundantes y se eliminaron:
+
+- `etl/services/card_catalog.py:66` --- `PITCHER_POSITIONS | {"P"}` borrado;
+  `profile_publish_order` deriva directo de la constante.
+- `etl/services/statcast_population.py:17` --- tupla local reemplazada por
+  `PITCHER_POSITION_VALUES` / `BATTER_POSITION_VALUES`, derivadas de
+  `Position.is_pitcher` / `is_fielder` (+ TWP en bateo). Verificado que los
+  dos conjuntos son idénticos a las tuplas anteriores.
+- `app/seeds/seed_mlb_2026.py:270,449` --- `in ("P",)` eliminado.
+  `seed_mlb_2026._normalize_pitcher_position` sí conserva el colapso
+  `"P" -> "SP"`, pero evaluado **antes** de la pertenencia a
+  `PITCHER_POSITIONS` a propósito: es comportamiento de salida histórica del
+  seed, no un workaround del enum.
+
+**`app/services/team_ratings.py:39` NO era un workaround y se conserva.**
+`compute_lineup_ratings` clasifica por dos ejes ortogonales: el slot del
+lineup (`UserLineup.slots`, donde `"P"` es el slot lanzador) y la posición de
+la carta. Una carta `DH` metida en el slot `"P"` debe seguir contando como
+pitcher, y eso depende del clause `slot_pos == "P"`. Sólo se aclar�� el
+docstring para explicitar los dos ejes.
+
+### Fix
+
+Añadir `Position.PITCHER` a la tupla de `Position.is_pitcher`
+(`backend/app/core/enums.py:158-165`). Una línea; corrige la fuente
+única de la que derivan `PITCHER_POSITIONS`, `PlayerCardModel.is_pitcher`
+e `is_batter`.
+
+**No se tocó `vision`, `velocity` ni `movement`.** La exposición se
+cerró corrigiendo clasificación, no datos: el `or 0` queda latente y
+ defendible (un `NULL` de rol ajeno materializado en 0 nunca es leido
+por el motor), igual que `clutch` antes de neutralizarse.
+
+### Verificación
+
+- Exposición cerrada en producción: `batters con vision==0: 0`,
+  `pitchers con velocity==0 o movement==0: 0`,
+  `cartas bateador y lanzador a la vez: 0`.
+- `TWP` (Renato Valente) sin cambios: sigue lanzador, no bateador
+  (`is_two_way=False` en datos; su vision=0 es correcta porque su
+  perfil es `role=PITCHER`).
+- Tests nuevos en `backend/tests/test_core.py`: `"P"` es lanzador,
+  cobertura total de `PITCHER_POSITIONS`, y ningún puesto es a la vez
+  lanzador y de campo.
+- Mutación comprobada: revertir el enum hace fallar los tests nuevos.
+- Suite completa: **1026 passed** (antes 1023).
+
+### Deuda que queda registrada
+
+`is_two_way` es inalcanzable por construcción
+(`card_catalog.py:766-770` exige velocity>0 **y** power>0 **y**
+contact>0, pero el role-shape CHECK garantiza el set de bateo *o* el de
+pitcher, nunca ambos). El `or self.is_two_way` de
+`PlayerCardModel.is_batter/is_pitcher` es rama muerta.
+
+Eso es hoy inofensivo y el fix de arriba lo mantiene inofensivo: con
+`is_two_way` siempre `False`, la clasificación depende sólo de
+`position`. Pero si alguien "arregla" `is_two_way` sin tocar la
+materialización, la carta TWP entra al lineup con
+`vision/contact/power = 0` y el defecto se vuelve alcanzable. Es el
+mismo patrón que Clutch: una decisión de neutral pendiente que sólo
+importa cuando algo más cambie.
+
+## Paso 5 --- Provenance --- CERRADO (GAMEPLAY-PROVENANCE-001)
+
+Una partida deja de ser metadato incidental: identifica con qué catálogo,
+modelo de ratings, reglas y build se jugó. Antes, `state_data` (JSON, sin
+índices) era lo único persistido y no permitía responder esas preguntas.
+
+### Decisión: columnas, no claves JSON
+
+Cinco columnas nullable en `game_sessions` (migración `0043`):
+
+| Columna | Origen | Responde |
+| --- | --- | --- |
+| `catalog_id` | FK `card_catalogs.id` (ON DELETE RESTRICT) | ¿Qué cartas? |
+| `rating_model_version` | denormalizado del catálogo | ¿Qué modelo de ratings? |
+| `rules_version` | `GAMEPLAY_RULES_VERSION` | ¿Qué reglas semánticas? |
+| `engine_version` | `ENGINE_VERSION` | ¿Qué versión semántica del motor? |
+| `engine_build` | `ENGINE_BUILD` | ¿Qué código estaba desplegado? |
+
+Con columnas se habilitan las consultas que este bloque existe para
+permitir (games by engine/rules/catalog, comparar engine A vs B, reproducir
+desde catalog v2) sin depender de JSON sin índice.
+
+Sin backfill: la tabla estaba vacía (0 sesiones) y, aun sin estarlo, no hay
+provenance retroactivo que inventar. NULL explícito antes que un valor
+inventado que parecería verificable.
+
+`rating_model_version` se denormaliza a propósito aunque derive del
+catálogo: responde la pregunta sin join y convierte
+`session.rating_model_version == catalog.rating_model_version` en un
+invariante verificable.
+
+`engine_version` (semántica) y `engine_build` (código) son columnas
+distintas porque responden preguntas distintas; separarlas evita otra
+migración cuando exista una versión semántica real del motor.
+
+### Snapshot inmutable
+
+`GameSessionService.create()` resuelve `active_catalog` una vez y escribe el
+snapshot al crear la sesión. Nunca se relee el catálogo ACTIVE para
+reinterpretar una partida existente: si el catálogo se promueve después, la
+partida vieja conserva el suyo. La selección CPU sigue catalog-scoped
+(`find_cards_by_team(catalog_id=active_catalog.id)`), coherente con el
+snapshot.
+
+### Bumps de identidad en `engine/build.py`
+
+El bloque separó tres ejes que antes vivían accidentalmente unidos en un
+solo rótulo:
+
+| Constante | Valor | Se mueve |
+| --- | --- | --- |
+| `CALIBRATED_BASELINE_V1_ENGINE_BUILD` | `4ee14a8` | NO (ancla histórica 003A) |
+| `ENGINE_BUILD` | `engine-20261001-datap4` | sí (por DATA-AUDIT-001) |
+| `ENGINE_VERSION` | `engine-1.0` | nace |
+| `GAMEPLAY_RULES_VERSION` | `rules-1.0` | promoción `lab` -> estable |
+
+- `ENGINE_BUILD` se bumpea por el fix de `Position.PITCHER` (Paso 4): cambió
+  comportamiento observable de 403 cartas sin tocar `calculator.py`.
+  Mantener el rótulo viejo habría hecho que la provenance afirmara un
+  runtime que ya no existe.
+- `GAMEPLAY_RULES_VERSION` pasa de `rules-1.0-lab` a `rules-1.0` por
+  promoción explícita (Fatigue v2, Plate Discipline y Stuff ya pasaron
+  acceptance). NO es efecto colateral del fix, que fue corrección de
+  clasificación de dominio y por eso no bumpea reglas.
+- El ancla de CALIBRATED-BASELINE-v1 no se mueve: es histórica y no
+  describe el runtime. `test_baseline` repartió el rótulo único en cuatro
+  asserts (esquema, ancla, runtime, reglas + engine version).
+
+### Verificación
+
+- `test_schema_head_congelado_es_0043`: único head del grafo.
+- Contrato: `test_crear_snapshot_provenance_de_la_partida` (cinco columnas
+  no-null y `rating_model_version == catalog.rating_model_version`) y
+  `test_provenance_no_se_reinterpreta_cuando_el_activo_cambia`.
+- `fixtures.SCHEMA_HEAD` se bumpea `0042 -> 0043` para no quedar mintiendo.
+- Suite completa: **1030 passed**.
+
+### Deuda registrada
+
+`TELEMETRY-PROVENANCE-001` (sellado de provenance en el stream de eventos /
+box score) queda para el bloque de telemetría. Este paso versiona la
+partida, no cada evento.
 
 ## Paso 6 --- Telemetry v2
 
@@ -1842,26 +2027,46 @@ BATTER.velocity     402 cartas en 0
 BATTER.movement     402 cartas en 0
 ```
 
-Diferencia con el caso de Clutch, y es lo que lo hace más urgente:
+Diferencia con el caso de Clutch, y es lo que lo hacía más urgente:
 Clutch no lo lee nadie, así que su `0` era inerte. `vision` **sí**
-pesa en la rama TAKE del resolver. Hoy es inalcanzable (un pitcher no
-batea), pero el día que haya bateo de pitcher, ese jugador entra con el
-peor visión del dominio en la rama que decide strike vs ball.
+pesa en la rama TAKE del resolver.
 
-### Primera consulta
+La premisa de este bloque ("hoy es inalcanzable, un pitcher no batea")
+**era falsa.** Sí había camino, y por un motivo que no era de datos.
+
+### Primera consulta — respondida
 
 ``` text
 ¿Existe algún camino por el que un PITCHER entre como batter_attrs
 o un BATTER como pitcher_attrs?
 
-   ublication path
+   publicación path
     → roster registration / lineup construction
     → pitcher-batter substitution
     → emergency / extra-inning / interleague rules
 ```
 
-Seguir el código, no suponer. La respuesta decide si esto es una mina
-latente o un defecto alcanzable.
+**Sí, y por 403 cartas.** Trazado completo:
+
+| Punto de entrada | Validación | Veredicto |
+| --- | --- | --- |
+| Lineup humano | `game_session_service.py:69` `is_batter` | acepta |
+| Lineup CPU | `game_session_service.py:237` `is_batter` | acepta |
+| Pitcher inicial humano | `game_session_service.py:91` `is_pitcher` | rechaza |
+| Bullpen humano | `bullpen.py:117` `is_pitcher` | rechaza |
+| Bullpen CPU | `game_actions.py:462` `is_pitcher` | rechaza |
+| `active_pitcher` → attrs | `game_actions.py:299` por id | sin check |
+| `gameplay.py:677` (robo) | lee `state["active_pitcher"]` | slot ya validado |
+
+Todas las validaciones eran correctas. El bug estaba un nivel más arriba:
+`Position.is_pitcher` no incluía `Position.PITCHER` (`"P"`), así que las
+403 cartas `role=PITCHER` / `position='P'` devolvían `is_batter=True` y
+**cualquier lineup las aceptaba** con `vision=0, contact=0, power=0`.
+
+Es decir: los guards de rol eran sólidos, la clasificación del enum no.
+Un guard no puede validar un predicado mal definido.
+
+Fix y verificación en §Paso 4. Sin cambios en vision/velocity/movement.
 
 ### Después
 
@@ -1903,9 +2108,9 @@ STUFF PROD ACCEPTANCE       CLOSED
 STUFF DATA PROPAGATION      CLOSED   (001A + 001B)
 CLUTCH                      DEFERRED (placeholder, sin efecto)
 
-DATA-AUDIT-001              NEXT   (vision / velocity / movement)
-PROVENANCE                  PENDING
-RUNTIME TELEMETRY           PENDING
+DATA-AUDIT-001              CLOSED  (alcance: Position.PITCHER fuera de is_pitcher)
+PROVENANCE                  CLOSED  (P4 / GAMEPLAY-PROVENANCE-001)
+RUNTIME TELEMETRY           NEXT    (P5)
 RECONCILIATION              PENDING
 HEADLESS SIMULATOR          PENDING
 ANALYTICS                   PENDING

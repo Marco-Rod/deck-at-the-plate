@@ -41,6 +41,71 @@ def test_crear_sesion_feliz(client, game_factory):
     assert body["state_data"]["active_pitcher"]
 
 
+def test_crear_snapshot_provenance_de_la_partida(
+    client,
+    game_factory,
+    seed_session,
+):
+    """GAMEPLAY-PROVENANCE-001: create() congela catalog/ratings/rules/engine."""
+    from app.engine.build import (
+        ENGINE_BUILD,
+        ENGINE_VERSION,
+        GAMEPLAY_RULES_VERSION,
+    )
+    from app.models import CardCatalog, GameSession
+
+    ctx = game_factory()
+    session = seed_session.get(GameSession, ctx["game_id"])
+
+    assert session.catalog_id is not None
+    assert session.rating_model_version is not None
+    assert session.rules_version == GAMEPLAY_RULES_VERSION
+    assert session.engine_version == ENGINE_VERSION
+    assert session.engine_build == ENGINE_BUILD
+
+    catalog = seed_session.get(CardCatalog, session.catalog_id)
+    assert catalog is not None
+    # Denormalización deliberada: la partida responde el rating model sin join.
+    assert session.rating_model_version == catalog.rating_model_version
+
+
+def test_provenance_no_se_reinterpreta_cuando_el_activo_cambia(
+    client,
+    game_factory,
+    seed_session,
+):
+    """La partida vieja conserva SU catálogo aunque el ACTIVE se promueva."""
+    from app.models import CardCatalog, GameSession
+
+    ctx = game_factory()
+    session = seed_session.get(GameSession, ctx["game_id"])
+    original_catalog_id = session.catalog_id
+    original_ratings = session.rating_model_version
+
+    # Promover un catálogo nuevo a ACTIVE no debe alterar la partida existente.
+    old = seed_session.get(CardCatalog, original_catalog_id)
+    old.status = "RETIRED"
+    newer = CardCatalog(
+        id="cat-provenance-nuevo",
+        season=2026,
+        edition_type="BASE",
+        version=old.version + 1,
+        status="ACTIVE",
+        rating_model_version="ratings-3.0",
+    )
+    seed_session.add(newer)
+    seed_session.commit()
+
+    reloaded = seed_session.get(GameSession, ctx["game_id"])
+    assert reloaded.catalog_id == original_catalog_id
+    assert reloaded.rating_model_version == original_ratings
+
+    seed_session.delete(newer)
+    seed_session.flush()
+    seed_session.get(CardCatalog, original_catalog_id).status = "ACTIVE"
+    seed_session.commit()
+
+
 def test_crear_rechaza_bateador_que_usuario_no_posee(
     client,
     register_user,
