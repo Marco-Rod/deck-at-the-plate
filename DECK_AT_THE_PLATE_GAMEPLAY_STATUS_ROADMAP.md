@@ -1974,7 +1974,7 @@ P5-C / Paso 7).
 **Siguiente bloque permitido.** P5-C (reconciliación `TELEMETRY-PITCH-001`) y
 el resto de Telemetry v2.
 
-**Commit(s).** P5-B (`RUNTIME-TELEMETRY P5-B`).
+**Commit(s).** P5-B (`787b1c6`, `RUNTIME-TELEMETRY P5-B`).
 
 ## Paso 7 --- Reconciliation
 
@@ -2165,6 +2165,7 @@ fc890ec  close DATA-STUFF-001, open Clutch
 f203a54  GAMEPLAY-PROVENANCE-001: la partida versiona catalogo/ratings/rules/engine (P4)
 e79c1eb  alembic 0001/0010 DDL-only idempotentes
 365e849  RUNTIME-TELEMETRY P5-A: identidad de PA, versionado y wiring del pitch log
+787b1c6  RUNTIME-TELEMETRY P5-B: dominio BatterApproach (TELEMETRY-DOMAIN-001)
 ```
 
 Actualizar hashes si alguno fue amendado.
