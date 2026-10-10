@@ -187,4 +187,7 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_game_event_logs_id'), table_name='game_event_logs')
     op.drop_index(op.f('ix_game_event_logs_game_id'), table_name='game_event_logs')
     op.drop_table('game_event_logs')
+    # El tipo ENUM cardrarity (creado por sa.Enum del upgrade) no se elimina con
+    # las tablas; se suelta para que downgrade base && upgrade head sea idempotente.
+    op.execute("DROP TYPE IF EXISTS cardrarity")
     # ### end Alembic commands ###

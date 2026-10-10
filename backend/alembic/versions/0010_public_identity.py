@@ -8,15 +8,17 @@ Aplica el plan Deck_at_the_Plate_ETL_Card_Catalog_Public_Identity_Plan_V2
 (fase "capas de identidad + catalog"):
 
     - Capa SOURCE: source_teams + source_team_game_team_mappings.
-    - Capa GAME: re-key de teams a UUID deterministico
-      (uuid5(public_abbreviation)), + abbreviation/slug/logo_asset/is_active.
-    - player_cards.team_id y users.favorite_team_id re-apuntados al UUID.
+    - Capa GAME: teams admite UUID + abbreviation/slug/logo_asset/is_active.
+    - player_cards.team_id y users.favorite_team_id ampliados para UUID.
     - player_team_stints pasa a referenciar source_teams (Migration 4 V2).
     - Snapshots de roster re-escritos a la forma source_team_* (V2 §12);
       se descarta team_roster_* (0009, tablas vacias).
     - game_player_identities + card_catalogs + player_cards.game_identity_id
       y player_cards.catalog_id.
     - user_teams.base_franchise -> base_team_id (FK teams.id, nunca SOURCE).
+
+Migracion DDL-only para una BD desechable, sin preservar datos legacy.
+sync-game-team-mappings puebla los equipos GAME y sus mappings SOURCE.
 
 La clasificacion legacy de player_cards es la migracion 0011.
 """
@@ -25,7 +27,6 @@ from typing import Sequence, Union
 from alembic import op
 import sqlalchemy as sa
 
-from app.core.identities import game_team_id_for
 
 
 # revision identifiers, used by Alembic.
@@ -35,14 +36,7 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
-def _current_team_abbrs(bind) -> list[str]:
-    rows = bind.execute(sa.text("SELECT id FROM teams ORDER BY id")).fetchall()
-    return [r[0] for r in rows]
-
-
 def upgrade() -> None:
-    bind = op.get_bind()
-
     # ---------- Snapshots de roster 0009: se reemplaza por la forma V2 ----------
     op.drop_table("team_roster_members")
     op.drop_table("team_roster_snapshots")
@@ -114,19 +108,12 @@ def upgrade() -> None:
     )
 
     # ---------- Re-key de teams: varchar(3) abreviatura -> UUID determinístico ----------
-    abbrs = _current_team_abbrs(bind)
-    abbr_to_uuid = {abbr: game_team_id_for(abbr) for abbr in abbrs}
-    if not abbr_to_uuid:
-        raise RuntimeError(
-            "teams esta vacio; el re-key espera la semilla previa de 30 franquicias."
-        )
-
     # FKs entrantes que apuntan a teams.id se re-crean al final.
     op.drop_constraint("player_cards_team_id_fkey", "player_cards", type_="foreignkey")
     op.drop_constraint("users_favorite_team_id_fkey", "users", type_="foreignkey")
     op.drop_constraint("fk_player_team_stints_team", "player_team_stints", type_="foreignkey")
 
-    # Se ensanchan antes de escribir UUIDs (varchar(3) -> varchar(36)).
+    # Las referencias GAME admiten UUIDs (varchar(3) -> varchar(36)).
     op.alter_column("player_cards", "team_id", existing_type=sa.String(3), type_=sa.String(36))
     op.alter_column("users", "favorite_team_id", existing_type=sa.String(3), type_=sa.String(36))
 
@@ -135,7 +122,7 @@ def upgrade() -> None:
     op.drop_index("ix_teams_id", table_name="teams")
     op.drop_index("ix_teams_is_cpu", table_name="teams")
 
-    # La tabla vieja (ids = abreviatura) se conserva solo para la copia.
+    # La tabla legacy se reemplaza por el esquema GAME, sin copiar datos.
     op.rename_table("teams", "teams_legacy")
 
     op.create_table(
@@ -156,37 +143,6 @@ def upgrade() -> None:
     op.create_index("ix_teams_slug", "teams", ["slug"], unique=False)
     op.create_index("ix_teams_is_active", "teams", ["is_active"], unique=False)
     op.create_index("ix_teams_is_cpu", "teams", ["is_cpu"], unique=False)
-
-    # Copia 1:1 de las franquicias existentes al nuevo PK UUID (sin tocar branding).
-    legacy_rows = bind.execute(
-        sa.text(
-            "SELECT id, name, city, primary_color, secondary_color, is_cpu "
-            "FROM teams_legacy ORDER BY id"
-        )
-    ).fetchall()
-    for row in legacy_rows:
-        abbr, name, city, primary_color, secondary_color, is_cpu = row
-        new_id = abbr_to_uuid[abbr]
-        bind.execute(
-            sa.text(
-                "INSERT INTO teams (id, abbreviation, name, city, slug, logo_asset, "
-                "primary_color, secondary_color, is_cpu, is_active) "
-                "VALUES (:id, :abbr, :name, :city, :slug, NULL, :pc, :sc, :cpu, true)"
-            ).bindparams(
-                id=new_id, abbr=abbr, name=name, city=city,
-                slug=abbr.lower(), pc=primary_color or "#121619", sc=secondary_color or "#C5A059",
-                cpu=bool(is_cpu),
-            )
-        )
-
-    # Re-apunta FKs de cartas y usuarios al nuevo UUID.
-    for abbr, new_id in abbr_to_uuid.items():
-        bind.execute(
-            sa.text("UPDATE player_cards SET team_id = :new WHERE team_id = :old").bindparams(new=new_id, old=abbr)
-        )
-        bind.execute(
-            sa.text("UPDATE users SET favorite_team_id = :new WHERE favorite_team_id = :old").bindparams(new=new_id, old=abbr)
-        )
 
     op.drop_table("teams_legacy")
 
@@ -294,17 +250,6 @@ def upgrade() -> None:
     # ---------- user_teams: base_franchise (codigo SOURCE) -> base_team_id (GAME) ----------
     op.add_column("user_teams", sa.Column("base_team_id", sa.String(length=36), nullable=True))
 
-    base_rows = bind.execute(
-        sa.text("SELECT id, base_franchise FROM user_teams WHERE base_franchise IS NOT NULL")
-    ).fetchall()
-    for row in base_rows:
-        row_id, base_franchise = row
-        new_team_id = abbr_to_uuid.get(base_franchise.upper())
-        if new_team_id is None:
-            continue
-        bind.execute(
-            sa.text("UPDATE user_teams SET base_team_id = :new WHERE id = :id").bindparams(new=new_team_id, id=row_id)
-        )
     op.drop_column("user_teams", "base_franchise")
     op.create_foreign_key("fk_user_teams_base_team", "user_teams", "teams", ["base_team_id"], ["id"])
     op.create_index("ix_user_teams_base_team_id", "user_teams", ["base_team_id"], unique=False)
@@ -343,9 +288,8 @@ def downgrade() -> None:
     op.drop_constraint("fk_users_favorite_team", "users", type_="foreignkey")
     op.drop_constraint("fk_player_cards_team", "player_cards", type_="foreignkey")
 
-    # Rebuild teams legacy desde el UUID actual.
-    bind = op.get_bind()
-    op.rename_table("teams", "teams_game")
+    # Reconstruye el esquema legacy; no migra datos.
+    op.drop_table("teams")
     op.create_table(
         "teams",
         sa.Column("id", sa.String(length=3), nullable=False),
@@ -358,23 +302,6 @@ def downgrade() -> None:
     )
     op.create_index(op.f("ix_teams_id"), "teams", ["id"], unique=False)
     op.create_index(op.f("ix_teams_is_cpu"), "teams", ["is_cpu"], unique=False)
-    game_rows = bind.execute(
-        sa.text("SELECT id, abbreviation, name, city, primary_color, secondary_color, is_cpu FROM teams_game ORDER BY id")
-    ).fetchall()
-    for row in game_rows:
-        bind.execute(
-            sa.text(
-                "INSERT INTO teams (id, name, city, primary_color, secondary_color, is_cpu) "
-                "VALUES (:abbr, :name, :city, :pc, :sc, :cpu)"
-            ).bindparams(
-                abbr=row[1], name=row[2], city=row[3],
-                pc=row[4], sc=row[5], cpu=bool(row[6]),
-            )
-        )
-    # Restaura FK-relink (data original no recuperable).
-    bind.execute(sa.text("UPDATE player_cards SET team_id = NULL WHERE team_id IS NOT NULL"))
-    bind.execute(sa.text("UPDATE users SET favorite_team_id = NULL WHERE favorite_team_id IS NOT NULL"))
-    op.drop_table("teams_game")
 
     op.alter_column("player_cards", "team_id", existing_type=sa.String(36), type_=sa.String(3))
     op.alter_column("users", "favorite_team_id", existing_type=sa.String(36), type_=sa.String(3))
