@@ -187,7 +187,8 @@ def _resolve_play_outcome(
 
     # P5-A: matchup EFECTIVO consumido por el engine (post-tácticas, post-fatiga).
     # Se registra antes de cualquier draw para que la telemetría refleje lo que
-    # el motor realmente usó al decidir (nunca fabricado).
+    # el motor realmente usó al decidir (nunca fabricado). Incluye la DECISIÓN
+    # del bateador (guesses) porque el motor la consume para zone/pitch match.
     if _trace is not None:
         _trace["matchup_inputs"] = {
             "contact": con,
@@ -198,6 +199,8 @@ def _resolve_play_outcome(
             "movement": mov,
             "stuff": stuff,
             "swing_type": swing_type.value if hasattr(swing_type, "value") else swing_type,
+            "guessed_zone": guessed_zone,
+            "guessed_pitch": guessed_pitch,
             "actual_zone": actual_zone,
             "actual_pitch": actual_pitch,
         }

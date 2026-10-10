@@ -90,8 +90,9 @@ un defecto alcanzable, causado por `Position.PITCHER` ("P") ausente de
 bateadores = 0. Sin tocar vision/velocity/movement.)
 
 P5-A (identidad de PA + versionado + wiring honesto del pitch log al runtime)
-cerrado: ver §Paso 6. Sigue P5-B (reconciliación, dominio completo de
-`BatterApproach`) y lo demás del bloque.
+y P5-B (dominio `BatterApproach`: alineación con swing_type/zone_guess/
+pitch_guess) cerrados: ver §Paso 6. Sigue P5-C (reconciliación, `TELEMETRY-
+PITCH-001`) y lo demás del bloque.
 
 ------------------------------------------------------------------------
 
@@ -1534,8 +1535,12 @@ GameEventLog fields exist but writer/runtime does not fully populate them.
 
 TELEMETRY-DOMAIN-001
 BatterApproach telemetry is not fully aligned with runtime
-swing_type / zone_guess / pitch_guess.                           PENDING (P5-B)
+swing_type / zone_guess / pitch_guess.                           CLOSED (P5-B)
 ```
+
+`TELEMETRY-PITCH-001` sigue abierto: el pitch log cubre cada pitch resuelto por
+`resolve_swing`, pero no eventos fuera de él (toma forzada, robo, balks) ni la
+reconciliación evento ↔ estado ↔ box score. Es P5-C / Paso 7.
 
 ------------------------------------------------------------------------
 
@@ -1894,14 +1899,82 @@ engine ya usó.
 **Qué NO quedó demostrado.** `TELEMETRY-PITCH-001` sigue parcial: el pitch log
 cubre cada swing/take/bunt resuelto por `resolve_swing`, pero no eventos
 generados fuera de él (robos, balks, toma forzada) ni la reconciliación
-evento ↔ estado ↔ box score (`TELEMETRY-DOMAIN-001`: alineación completa de
-`BatterApproach`). Son P5-B / Paso 7.
+evento ↔ estado ↔ box score. `TELEMETRY-DOMAIN-001` (alineación de
+`BatterApproach`) quedó abierto, resuelto en P5-B.
 
-**Siguiente bloque permitido.** P5-B (dominio `BatterApproach`, reconciliación)
-y el resto de Telemetry v2.
+**Siguiente bloque permitido.** P5-B (dominio `BatterApproach`) y el resto de
+Telemetry v2.
 
 **Commit(s).** P5-A (`365e849`, `RUNTIME-TELEMETRY P5-A`), junto a los tests
 nuevos.
+
+### P5-B --- dominio `BatterApproach` (TELEMETRY-DOMAIN-001) --- CERRADO
+
+**Problema / finding.** `TELEMETRY-DOMAIN-001`: el log sólo escribía
+`REACT`/`TAKE` e ignoraba por completo `guessed_pitch`. `approach_match`
+era siempre NULL. El dominio V1 (`BatterApproach` =
+FASTBALL/BREAKING/REACT/TAKE) no se derivaba de la decisión real del bateador
+(`swing_type` + `guessed_pitch`), así que la apuesta del bateador se perdía.
+
+**Hipótesis.** La decisión del runtime se traduce al dominio V1 sin fabricar:
+la apuesta a un lanzamiento concreto es una apuesta de **familia**
+(FASTBALL/BREAKING); el resto es REACT; TAKE es TAKE. El acierto del approach
+se mide por familia (nivel V1), y el acierto **exacto** del motor pre-V1
+(`guessed_pitch == pitch_type`) queda reconstruible desde `matchup_inputs`.
+
+**Contratos prefijados.**
+
+``` text
+batter_approach_for_runtime(swing_type, guessed_pitch) -> BatterApproach
+    TAKE                              -> TAKE
+    familia(guessed_pitch)=FASTBALL   -> FASTBALL
+    familia(guessed_pitch)=BREAKING   -> BREAKING
+    sin guess / OFFSPEED / unknown    -> REACT
+approach_match_for_runtime(approach, actual_pitch) -> bool | None
+    FASTBALL / BREAKING -> familia(actual_pitch) == approach
+    REACT / TAKE        -> None   (sin acierto binario)
+matchup_inputs ahora incluye guessed_zone / guessed_pitch / actual_zone /
+actual_pitch / swing_type (la decisión que el engine consumió)
+```
+
+**Implementación.**
+
+- `pitch_telemetry.py`: dos helpers PUROS `batter_approach_for_runtime` y
+  `approach_match_for_runtime` (una sola fuente de verdad del dominio).
+- `calculator.py`: el trace `matchup_inputs` añade `guessed_zone` /
+  `guessed_pitch` (decisión consumida por el motor para zone/pitch match).
+- `game_actions._record_pitch_telemetry`: recibe `guessed_pitch`, deriva
+  `batter_approach` y `approach_match` con los helpers, persiste el
+  `matchup_inputs` COMPLETO (antes se truncaba a atributos y se perdía la
+  decisión) y propaga `approach_match` al builder (bug de P5-A: se calculaba
+  pero no se enviaba).
+
+**Decisión.** El `approach` V1 es **por familia**; `approach_match` es acierto
+de familia, NO el reward del motor. El reward exacto del engine se reconstruye
+desde `matchup_inputs` (`guessed_pitch` vs `actual_pitch`). No se mezclan porque
+el modelo V1 abstrae el tipo concreto a familia; registrarlos juntos haría
+creer que un acierto de familia fue premiado por el motor.
+
+**Resultados / verificación.**
+
+- `test_pitch_telemetry.py` (+16): tablas del mapeo de approach (FASTBALL/
+  BREAKING/REACT/TAKE, OFFSPEED→REACT, unknown→REACT) y del acierto por familia.
+- `test_calculator_trace.py` (+1): `matchup_inputs` expone la decisión y el
+  contexto del pitch.
+- `test_pitch_telemetry_contract.py` (+3 parametrizados): sobre la API real,
+  `guessed_pitch="4-SEAM"→FASTBALL`, `"SLIDER"→BREAKING` (con `approach_match`
+  bool coherente con la familia real) y `"CHANGE"→REACT` (`approach_match`
+  NULL); la decisión cruda queda en `matchup_inputs`.
+- Suite completa: **1068 passed**.
+
+**Qué NO quedó demostrado.** La reconciliación evento ↔ estado ↔ box score y
+los pitches no resueltos por el bateador siguen abiertos (`TELEMETRY-PITCH-001`,
+P5-C / Paso 7).
+
+**Siguiente bloque permitido.** P5-C (reconciliación `TELEMETRY-PITCH-001`) y
+el resto de Telemetry v2.
+
+**Commit(s).** P5-B (`RUNTIME-TELEMETRY P5-B`).
 
 ## Paso 7 --- Reconciliation
 
@@ -2202,7 +2275,7 @@ CLUTCH                      DEFERRED (placeholder, sin efecto)
 
 DATA-AUDIT-001              CLOSED  (alcance: Position.PITCHER fuera de is_pitcher)
 PROVENANCE                  CLOSED  (P4 / GAMEPLAY-PROVENANCE-001)
-RUNTIME TELEMETRY           P5-A CLOSED  (PA identity + versioning + pitch log wiring); P5-B NEXT
+RUNTIME TELEMETRY           P5-A/P5-B CLOSED  (PA identity + versioning + pitch log wiring + BatterApproach domain); P5-C NEXT
 RECONCILIATION              PENDING
 HEADLESS SIMULATOR          PENDING
 ANALYTICS                   PENDING

@@ -17,7 +17,7 @@ Regla del modelo: el log se escribe post-resolución y no contiene secretos.
 
 from typing import Optional
 
-from app.core.enums import BatterApproach, PitchFamily, PitchType
+from app.core.enums import BatterApproach, PitchFamily, PitchType, SwingType
 
 # Tolerancia para que "la suma de la distribución ≈ 1" no falle por
 # errores de coma flotante al normalizar pesos.
@@ -50,6 +50,54 @@ def pitch_family_for_runtime(pitch_type: str) -> PitchFamily:
     except ValueError:
         return PitchFamily.OTHER
     return _PITCH_FAMILY_BY_TYPE_V1.get(p_type, PitchFamily.OTHER)
+
+
+def batter_approach_for_runtime(
+    swing_type: str, guessed_pitch: Optional[str]
+) -> BatterApproach:
+    """Traduce la decisión del bateador del runtime al dominio V1.
+
+    El runtime decide con ``swing_type`` (NORMAL/POWER/TAKE/BUNT) y, opcionalmente,
+    ``guessed_pitch`` (un código de lanzamiento concreto). El Matchup Engine V1
+    abstrae esa apuesta al nivel de familia: sólo FASTBALL y BREAKING son
+    "approaches" seleccionables (``PitchFamily.OTHER no es seleccionable``).
+
+    Reglas:
+      - ``swing_type == TAKE``                → ``TAKE`` (no hay swing).
+      - apuesta a familia FASTBALL            → ``FASTBALL``.
+      - apuesta a familia BREAKING            → ``BREAKING``.
+      - sin apuesta, OFFSPEED o desconocido   → ``REACT``.
+
+    No fabrica: deriva la etiqueta V1 de la propia decisión del bateador.
+    """
+    if swing_type == SwingType.TAKE:
+        return BatterApproach.TAKE
+    if not guessed_pitch:
+        return BatterApproach.REACT
+    family = pitch_family_for_runtime(guessed_pitch)
+    if family == PitchFamily.FASTBALL:
+        return BatterApproach.FASTBALL
+    if family == PitchFamily.BREAKING:
+        return BatterApproach.BREAKING
+    return BatterApproach.REACT
+
+
+def approach_match_for_runtime(
+    approach: BatterApproach, actual_pitch: Optional[str]
+) -> Optional[bool]:
+    """Acierto del approach V1: ¿la familia del pitch real coincidió con la apuesta?
+
+    ``None`` para ``REACT``/``TAKE``: no hay acierto binario (definición del
+    modelo, igual que una zona no apostada no tiene ``zone_match``).
+    Para ``FASTBALL``/``BREAKING`` compara FAMILIAS (nivel V1). El acierto exacto
+    del motor pre-V1 (``guessed_pitch == pitch_type``) queda reconstruible desde
+    ``matchup_inputs``; por eso NO se confunde con el premio del engine.
+    """
+    if approach == BatterApproach.FASTBALL:
+        return pitch_family_for_runtime(actual_pitch) == PitchFamily.FASTBALL
+    if approach == BatterApproach.BREAKING:
+        return pitch_family_for_runtime(actual_pitch) == PitchFamily.BREAKING
+    return None
 
 
 def _require(condition: bool, message: str) -> None:

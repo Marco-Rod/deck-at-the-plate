@@ -11,9 +11,12 @@ Verifica sobre la API real (SQLite) que resolver un swing:
 
 from __future__ import annotations
 
-from app.core.enums import PitchFamily
+import pytest
+
+from app.core.enums import BatterApproach, PitchFamily
 from app.engine.build import ENGINE_BUILD
 from app.models import GameEventLog, PitchEventLog
+from app.services.pitch_telemetry import pitch_family_for_runtime
 
 
 def _bottom_state(ctx):
@@ -83,6 +86,42 @@ def test_un_swing_registra_un_pitch_log_honesto(
     assert isinstance(log.zone_match, bool)
     # NORMAL → approach REACT: no hay acierto binario que registrar.
     assert log.approach_match is None
+
+
+@pytest.mark.parametrize(
+    ("guessed_pitch", "expected_approach", "match_is_none"),
+    [
+        ("4-SEAM", BatterApproach.FASTBALL, False),
+        ("SLIDER", BatterApproach.BREAKING, False),
+        # OFFSPEED no es approach V1 → REACT, sin acierto binario.
+        ("CHANGE", BatterApproach.REACT, True),
+    ],
+)
+def test_approach_v1_del_bateador_se_deriva_del_guess(
+    client, game_factory, mutate_game, seed_session,
+    guessed_pitch, expected_approach, match_is_none,
+):
+    ctx = game_factory()
+    gid = ctx["game_id"]
+    mutate_game(gid, columns={"is_top_inning": False}, state=_bottom_state(ctx))
+
+    resp = _swing(client, gid, ctx["headers"], guessed_pitch=guessed_pitch)
+    assert resp.status_code == 200, resp.text
+
+    logs = _pitch_logs(seed_session, gid)
+    assert len(logs) == 1
+    log = logs[0]
+
+    assert log.batter_approach == expected_approach
+    # La decisión cruda queda reconstruible desde matchup_inputs.
+    assert log.matchup_inputs["guessed_pitch"] == guessed_pitch
+
+    if match_is_none:
+        assert log.approach_match is None
+    else:
+        # El acierto es por FAMILIA (nivel V1), coherente con el pitch real.
+        family = PitchFamily(expected_approach.value)
+        assert log.approach_match == (pitch_family_for_runtime(log.pitch_type) == family)
 
 
 def test_identidad_pa_secuencia_y_versionado(

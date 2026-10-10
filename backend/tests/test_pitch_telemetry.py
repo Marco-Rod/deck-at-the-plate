@@ -11,8 +11,10 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.database import Base
-from app.core.enums import BatterApproach, PitchFamily
+from app.core.enums import BatterApproach, PitchFamily, SwingType
 from app.services.pitch_telemetry import (
+    approach_match_for_runtime,
+    batter_approach_for_runtime,
     build_pitch_event_log_payload,
     pitch_family_for_runtime,
 )
@@ -157,4 +159,55 @@ def test_pitch_family_for_runtime_desconocido_no_inventa():
     # nunca se inventa una familia (misma regla que el ETL).
     assert pitch_family_for_runtime("ZX") == PitchFamily.OTHER
     assert pitch_family_for_runtime("") == PitchFamily.OTHER
+
+
+# ---------------------------------------------------------------------------
+# Dominio BatterApproach del runtime (P5-B / TELEMETRY-DOMAIN-001)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    ("guessed_pitch", "expected"),
+    [
+        ("4-SEAM", BatterApproach.FASTBALL),
+        ("SINKER", BatterApproach.FASTBALL),
+        ("CUTTER", BatterApproach.FASTBALL),
+        ("SLIDER", BatterApproach.BREAKING),
+        ("CURVE", BatterApproach.BREAKING),
+        # OFFSPEED no es un approach seleccionable en V1 → REACT.
+        ("CHANGE", BatterApproach.REACT),
+        # Sin apuesta / código desconocido → REACT.
+        (None, BatterApproach.REACT),
+        ("ZX", BatterApproach.REACT),
+    ],
+)
+def test_batter_approach_for_runtime(guessed_pitch, expected):
+    assert batter_approach_for_runtime(SwingType.NORMAL, guessed_pitch) == expected
+
+
+def test_batter_approach_for_runtime_take_gana_siempre():
+    # TAKE nunca es un approach de swing, aunque traiga un guess de la CPU.
+    assert batter_approach_for_runtime(SwingType.TAKE, "4-SEAM") == BatterApproach.TAKE
+    assert batter_approach_for_runtime(SwingType.TAKE, None) == BatterApproach.TAKE
+
+
+@pytest.mark.parametrize(
+    ("approach", "actual_pitch", "expected"),
+    [
+        (BatterApproach.FASTBALL, "SINKER", True),
+        (BatterApproach.FASTBALL, "SLIDER", False),
+        (BatterApproach.BREAKING, "CURVE", True),
+        (BatterApproach.BREAKING, "4-SEAM", False),
+        # REACT/TAKE no tienen acierto binario.
+        (BatterApproach.REACT, "SLIDER", None),
+        (BatterApproach.TAKE, "SLIDER", None),
+    ],
+)
+def test_approach_match_for_runtime(approach, actual_pitch, expected):
+    assert approach_match_for_runtime(approach, actual_pitch) is expected
+
+
+def test_approach_match_compara_familias_no_tipos():
+    # El approach V1 es por familia: acertar CURVE habiendo apostado BREAKING
+    # cuenta como acierto, aunque el tipo exacto difiera (reward del motor).
+    assert approach_match_for_runtime(BatterApproach.BREAKING, "SLIDER") is True
 

@@ -83,6 +83,25 @@ def test_distribucion_take_es_binaria():
     assert set(trace["distribution"]) == {Event.STRIKE_LOOKING.value, Event.BALL.value}
 
 
+def test_matchup_inputs_expone_la_decision_y_el_contexto_del_pitch():
+    # El trace registra la decisión del bateador (guesses) y el contexto real
+    # del pitch que el engine consumió para zone/pitch match (P5-B).
+    inputs = _inputs("NORMAL", guessed_zone=7, guessed_pitch="SLIDER")
+    trace = calculate_play_outcome_with_trace(**inputs).trace
+    matchup = trace["matchup_inputs"]
+
+    assert matchup["guessed_zone"] == 7
+    assert matchup["guessed_pitch"] == "SLIDER"
+    assert matchup["actual_zone"] == PITCH["zone"]
+    assert matchup["actual_pitch"] == PITCH["pitch_type"]
+    assert matchup["swing_type"] == "NORMAL"
+    # Atributos efectivos que el engine usó.
+    assert matchup["contact"] == BATTER["contacto"]
+    assert matchup["power"] == BATTER["poder"]
+    assert matchup["vision"] == BATTER["vision"]
+    assert matchup["stuff"] == PITCHER["stuff"]
+
+
 def test_distribucion_ibb_es_bola_segura():
     pitch = {"pitch_type": "IBB", "zone": 5}
     trace = calculate_play_outcome_with_trace(**_inputs("NORMAL", pitch=pitch)).trace

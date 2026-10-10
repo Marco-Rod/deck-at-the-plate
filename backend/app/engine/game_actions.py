@@ -23,7 +23,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Callable, Literal
 
-from app.core.enums import BatterApproach, SwingType
+from app.core.enums import SwingType
 from app.engine.attribute_mapper import (
     map_card_to_batter_attrs,
     map_card_to_pitcher_attrs,
@@ -65,6 +65,8 @@ from app.repositories import (
 from app.repositories.pitch_telemetry_repository import record_pitch_event
 from app.services.card_presenter import build_batter_payload, build_pitcher_payload
 from app.services.pitch_telemetry import (
+    approach_match_for_runtime,
+    batter_approach_for_runtime,
     build_pitch_event_log_payload,
     pitch_family_for_runtime,
 )
@@ -278,6 +280,7 @@ def _record_pitch_telemetry(
     pitcher_card,
     swing_type: str,
     guessed_zone: int | None,
+    guessed_pitch: str | None,
     current_pitch: dict,
     balls_before: int,
     strikes_before: int,
@@ -299,9 +302,12 @@ def _record_pitch_telemetry(
       - TAKE nunca lleva ``batter_zone_choice`` ni ``zone_match``: la zona la
         impone el pitch. Un ``guessed_zone`` que la CPU aprecie durante un TAKE
         es un artefacto del engine legado que V1 reemplaza; no sobrevive al log.
-      - NORMAL/POWER/BUNT → approach REACT (no hay apuesta a familia de
-        lanzamiento que acertar); TAKE → approach TAKE. ``approach_match`` es
-        NULL en ambos (no existe acierto binario, definición del modelo).
+      - ``batter_approach`` se deriva de la decisión del runtime (swing_type +
+        guessed_pitch) con ``batter_approach_for_runtime``: una apuesta a familia
+        FASTBALL/BREAKING es un approach; TAKE es TAKE; el resto REACT.
+        ``approach_match`` es el acierto de FAMILIA (V1); para REACT/TAKE es NULL.
+        El acierto exacto del motor (guessed_pitch == pitch_type) queda
+        reconstruible desde ``matchup_inputs``: no se mezcla con el approach.
     """
     if not batter_card or not pitcher_card:
         # Las FKs de pitch_event_logs exigen tarjetas reales. Sin ellas no hay
@@ -313,22 +319,21 @@ def _record_pitch_telemetry(
         return
 
     is_take = swing_type == SwingType.TAKE
+    batter_approach = batter_approach_for_runtime(swing_type, guessed_pitch)
     if is_take:
-        batter_approach = BatterApproach.TAKE
         batter_zone_choice = None
         zone_match = False
     else:
-        batter_approach = BatterApproach.REACT
         batter_zone_choice = guessed_zone
         zone_match = (guessed_zone == current_pitch.get("zone"))
+    approach_match = approach_match_for_runtime(
+        batter_approach, _event_value(current_pitch.get("pitch_type"))
+    )
 
-    # matchup_inputs = atributos EFECTIVOS que el engine usó (trace del motor).
-    matchup_inputs = None
-    if trace.get("matchup_inputs"):
-        matchup_inputs = {
-            key: trace["matchup_inputs"][key]
-            for key in ("contact", "power", "vision", "velocity", "control", "movement", "stuff")
-        }
+    # matchup_inputs = atributos EFECTIVOS + decisión que el engine usó (trace).
+    # Se persiste completo (incluye guesses y contexto del pitch) para que el
+    # acierto exacto y la reconstrucción del duelo no dependan del estado.
+    matchup_inputs = trace.get("matchup_inputs") or None
 
     pitch_type = _event_value(current_pitch.get("pitch_type", "4-SEAM"))
 
@@ -350,6 +355,7 @@ def _record_pitch_telemetry(
         engine_version=ENGINE_BUILD,
         batter_zone_choice=batter_zone_choice,
         zone_match=zone_match,
+        approach_match=approach_match,
         balls_before=balls_before,
         strikes_before=strikes_before,
         outs_before=outs_before,
@@ -515,6 +521,7 @@ async def resolve_swing(
         pitcher_card=pitcher_card,
         swing_type=swing_type,
         guessed_zone=guessed_zone,
+        guessed_pitch=guessed_pitch,
         current_pitch=current_pitch,
         balls_before=balls_before,
         strikes_before=strikes_before,
