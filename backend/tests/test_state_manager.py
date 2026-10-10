@@ -159,3 +159,17 @@ def test_walk_off_ends_game():
     assert result.final_event == Event.GAME_OVER
     assert state["is_game_over"] is True
     assert "WALK-OFF" in state["winner_message"]
+
+
+def test_walk_off_preserva_el_play_real():
+    # P5-C: el envoltorio GAME_OVER no debe borrar la clasificación de la jugada.
+    # ``final_event`` (broadcast) es GAME_OVER, pero ``last_play_event`` conserva
+    # el play real para que el box score lo registre (HOME_RUN, no GAME_OVER).
+    game = make_game(
+        current_inning=9, is_top_inning=False,
+        score_home=1, score_away=1,
+    )
+    state = make_state(runners={"1b": None, "2b": None, "3b": None})
+    result = process_at_bat_transition(game, "HOME_RUN", state)
+    assert result.final_event == Event.GAME_OVER
+    assert state["last_play_event"] == Event.HOME_RUN

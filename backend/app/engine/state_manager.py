@@ -286,6 +286,12 @@ def process_at_bat_transition(
             end_half_inning(game, state)
 
     # FASE 6: Evaluación de condición de fin de juego
+    # P5-C (RECONCILIATION): ``final_event`` puede sobrescribirse a GAME_OVER, que
+    # NO es un evento de jugada sino un estado del partido. Conservamos la
+    # clasificación REAL de la jugada (post-avance de corredores) en
+    # ``last_play_event`` para que la telemetría registre el play verdadero y no
+    # el envoltorio de fin de juego (mismo patrón que ``last_runs_scored``).
+    state["last_play_event"] = final_event
     is_over, message = check_game_over(game, state)
     if is_over:
         state["is_game_over"] = True

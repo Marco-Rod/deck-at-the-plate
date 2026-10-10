@@ -538,6 +538,13 @@ async def resolve_swing(
         runs_scored = state.get("last_runs_scored", 0)
         rbi = runs_scored
 
+        # P5-C (RECONCILIATION): el box score registra el PLAY real que cerró el
+        # at-bat, no el envoltorio GAME_OVER. ``event`` (broadcast) puede ser
+        # GAME_OVER, pero ``last_play_event`` conserva la clasificación de la
+        # jugada (HOME_RUN, WALK, OUT_GROUND, …). Sin esto, un walk-off HR se
+        # registraba como GAME_OVER y el box score perdía el hit/HR.
+        play_event = state.get("last_play_event", event) or event
+
         # Orden estructural de la jugada terminada dentro de la partida: ordinal
         # contiguo de los eventos de box score (1, 2, 3, …).
         event_sequence = state.get("event_sequence", 0) + 1
@@ -549,7 +556,7 @@ async def resolve_swing(
         record_game_event(
             db=db,
             game_id=game_id,
-            event_type=event,
+            event_type=play_event,
             inning=game.current_inning,
             is_top_inning=game.is_top_inning,
             batter_id=active_batter_id,
