@@ -8,7 +8,7 @@ Se usa para:
   - Mostrar en tiempo real en el frontend (box score)
 """
 
-from sqlalchemy import Column, String, Integer, DateTime, JSON, Boolean
+from sqlalchemy import Column, String, Integer, DateTime, JSON, Boolean, UniqueConstraint
 from datetime import datetime
 from app.database import Base
 
@@ -53,6 +53,19 @@ class GameEventLog(Base):
     plate_appearance_id = Column(String(36), nullable=True, index=True)
     # Versión del motor que resolvió la jugada; útil para análisis histórico.
     engine_version = Column(String(30), nullable=True, index=True)
+    # Orden estructural de la jugada dentro de la partida (P5-A). Unique junto
+    # a game_id: (un game, una jugada) = un sequence_no. Permite reconstruir el
+    # orden de las jugadas sin depender de created_at ni del id.
+    sequence_no = Column(Integer, nullable=True)
+    __table_args__ = (
+        # Un game + un sequence_no → una sola jugada. NULL sale del índice
+        # (Postgres/SQLite), algo correcto: los eventos legados sin sequence
+        # no deberían colisionar entre sí.
+        UniqueConstraint(
+            "game_id", "sequence_no",
+            name="uq_game_event_logs_game_sequence_no",
+        ),
+    )
 
     # Metadatos
     created_at = Column(DateTime, default=datetime.utcnow)

@@ -71,6 +71,9 @@ def record_game_event(
     runners_on_base: dict = None,
     runs_scored: int = 0,
     rbi: int = 0,
+    plate_appearance_id: str = None,
+    engine_version: str = None,
+    sequence_no: int = None,
 ) -> GameEventLog:
     """
     Registra un evento de la partida en la base de datos.
@@ -89,6 +92,9 @@ def record_game_event(
         runners_on_base: Dict con corredores en base
         runs_scored: Carreras anotadas
         rbi: RBIs generados
+        plate_appearance_id: Identidad del PA que cerró esta jugada (P5-A)
+        engine_version: Build del motor que resolvió la jugada (P4 provenance)
+        sequence_no: Orden estructural de la jugada dentro de la partida (P5-A)
 
     Returns:
         GameEventLog registrado
@@ -115,6 +121,9 @@ def record_game_event(
         runners_on_base=runners_on_base or {},
         runs_scored=runs_scored,
         rbi=rbi,
+        plate_appearance_id=plate_appearance_id,
+        engine_version=engine_version,
+        sequence_no=sequence_no,
     )
 
     db.add(event_log)

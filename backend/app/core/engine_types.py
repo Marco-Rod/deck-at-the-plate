@@ -103,6 +103,21 @@ class PlayResult(NamedTuple):
     description: str
 
 
+class TracedPlay(NamedTuple):
+    """Resultado de un duelo junto con el trace de decisiones del engine.
+
+    P5-A (RUNTIME TELEMETRY): envoltura ADITIVA de ``PlayResult``. ``result``
+    es exactamente lo que devolvería ``calculate_play_outcome`` (misma
+    resolución, mismo orden de draws); ``trace`` describe lo que el engine
+    conocía ANTES del RNG decisivo (distribución final por clase de evento,
+    draws ejecutados y el draw que realizó el resultado, más el matchup
+    efectivo). Nunca se fabrica: sólo expone lo que el motor ya calculó.
+    """
+
+    result: PlayResult
+    trace: dict
+
+
 class AtBatResult(NamedTuple):
     """Resultado integral del procesamiento de una jugada sobre el estado."""
 

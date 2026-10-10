@@ -20,6 +20,7 @@ def resolve_bunt(
     pitcher_attrs: PitcherAttrs,
     batter_attrs: BatterAttrs,
     runners: Runners,
+    _trace: dict | None = None,
 ) -> Tuple[Event, str, bool]:
     """
     Resuelve el toque de bola (Bunt).
@@ -27,6 +28,10 @@ def resolve_bunt(
     a cambio de un 75% de éxito para avanzar a los corredores en base.
     
     Retorna: (event, description, sacrifice_success)
+
+    P5-A: ``_trace`` opcional para telemetría. La resolución es idéntica (un
+    único ``random.random()``); el trace sólo deriva la distribución ex-ante
+    (OUT_GROUND vs STRIKE_LOOKING) y captura el draw decisivo sin fabricar.
     """
     ctl = pitcher_attrs.get("control", 50)
     con = batter_attrs.get("contacto", 50)
@@ -35,7 +40,18 @@ def resolve_bunt(
     bunt_success_chance = 0.75 + (con - 50) * 0.003 - (ctl - 50) * 0.002
     bunt_success_chance = max(0.40, min(0.90, bunt_success_chance))
 
-    if random.random() < bunt_success_chance:
+    if _trace is not None:
+        _trace["distribution"] = {
+            Event.OUT_GROUND.value: bunt_success_chance,
+            Event.STRIKE_LOOKING.value: 1.0 - bunt_success_chance,
+        }
+
+    draw = random.random()
+    if _trace is not None:
+        _trace["draws"] = [{"step": "bunt", "value": draw, "success_chance": bunt_success_chance}]
+        _trace["rng_value"] = draw
+
+    if draw < bunt_success_chance:
         return Event.OUT_GROUND, "Toque de bola perfecto para toque de sacrificio. El bateador cae fuera en 1B pero los corredores avanzan.", True
     else:
         # Falló el toque: atrapado rápido en foul o ponche de toque

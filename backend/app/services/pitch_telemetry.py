@@ -5,24 +5,51 @@ Servicio de telemetría del Matchup Engine V1
 payload de un PitchEventLog a partir de lo que el engine ya conoce al resolver
 un pitch. No toca la base de datos ni el estado de la partida.
 
-Por qué NO está conectado a ``resolve_swing``:
-    El motor actual no produce aún ``approach`` ni ``probability_distribution``
-    (esos conceptos pertenecen al Matchup Engine V1). Escribir telemetría
-    fabricando datos solo contaminaría el dataset que se usará para balancear.
-    Cuando el V1 se active, el engine debe llamar a este builder y a
-    ``record_pitch_event`` (repositories) justo DESPUÉS de resolver el pitch,
-    nunca antes (secretos del rival fuera del registro).
+Por qué está conectado (P5-A):
+    ``resolve_swing`` llama a este builder y a ``record_pitch_event`` justo
+    DESPUÉS de resolver el pitch, nunca antes (secretos del rival fuera del
+    registro). La distribución final ex-ante y el ``rng_value`` provienen del
+    trace aditivo del calculator: no se fabrica ningún dato. ``pitch_family_for_runtime``
+    traduce el ``pitch_type`` del runtime a la familia del log.
 
 Regla del modelo: el log se escribe post-resolución y no contiene secretos.
 """
 
 from typing import Optional
 
-from app.core.enums import BatterApproach, PitchFamily
+from app.core.enums import BatterApproach, PitchFamily, PitchType
 
 # Tolerancia para que "la suma de la distribución ≈ 1" no falle por
 # errores de coma flotante al normalizar pesos.
 _DISTRIBUTION_TOLERANCE = 0.01
+
+# Familia de cada PitchType del runtime (códigos del juego, no Statcast).
+# La clasificación de códigos Statcast vive en el ETL (etl/normalizers/);
+# esta es la del motor, que habla en valores propios de PitchType. IBB no es
+# un lanzamiento real pero sí un pitch del log: se clasifica como OTHER.
+_PITCH_FAMILY_BY_TYPE_V1: dict[PitchType, PitchFamily] = {
+    PitchType.FOUR_SEAM: PitchFamily.FASTBALL,
+    PitchType.SINKER: PitchFamily.FASTBALL,
+    PitchType.CUTTER: PitchFamily.FASTBALL,
+    PitchType.SLIDER: PitchFamily.BREAKING,
+    PitchType.CURVE: PitchFamily.BREAKING,
+    PitchType.CHANGE: PitchFamily.OFFSPEED,
+    PitchType.IBB: PitchFamily.OTHER,
+}
+
+
+def pitch_family_for_runtime(pitch_type: str) -> PitchFamily:
+    """Familia del lanzamiento para el log de telemetría del runtime.
+
+    Un pitch_type desconocido (carta legacy fuera del repertorio V1) se
+    normaliza a ``OTHER``: nunca se inventa una familia (regla idéntica a la
+    del ETL, donde un código sin política → None con warning).
+    """
+    try:
+        p_type = PitchType(pitch_type)
+    except ValueError:
+        return PitchFamily.OTHER
+    return _PITCH_FAMILY_BY_TYPE_V1.get(p_type, PitchFamily.OTHER)
 
 
 def _require(condition: bool, message: str) -> None:

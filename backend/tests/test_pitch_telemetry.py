@@ -12,7 +12,10 @@ from sqlalchemy.orm import sessionmaker
 
 from app.database import Base
 from app.core.enums import BatterApproach, PitchFamily
-from app.services.pitch_telemetry import build_pitch_event_log_payload
+from app.services.pitch_telemetry import (
+    build_pitch_event_log_payload,
+    pitch_family_for_runtime,
+)
 from app.repositories.pitch_telemetry_repository import (
     record_pitch_event,
     get_pitch_logs_by_game,
@@ -127,3 +130,31 @@ class TestRepository:
         assert len(logs) == 1
         assert logs[0].zone_match is True
         assert logs[0].approach_match is True
+
+
+# ---------------------------------------------------------------------------
+# Mapping runtime pitch_type → pitch_family (P5-A)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    ("pitch_type", "expected"),
+    [
+        ("4-SEAM", PitchFamily.FASTBALL),
+        ("SINKER", PitchFamily.FASTBALL),
+        ("CUTTER", PitchFamily.FASTBALL),
+        ("SLIDER", PitchFamily.BREAKING),
+        ("CURVE", PitchFamily.BREAKING),
+        ("CHANGE", PitchFamily.OFFSPEED),
+        ("IBB", PitchFamily.OTHER),
+    ],
+)
+def test_pitch_family_for_runtime_clasifica_el_repertorio(pitch_type, expected):
+    assert pitch_family_for_runtime(pitch_type) == expected
+
+
+def test_pitch_family_for_runtime_desconocido_no_inventa():
+    # Una carta legacy con un código fuera del repertorio V1 cae en OTHER:
+    # nunca se inventa una familia (misma regla que el ETL).
+    assert pitch_family_for_runtime("ZX") == PitchFamily.OTHER
+    assert pitch_family_for_runtime("") == PitchFamily.OTHER
+

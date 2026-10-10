@@ -35,6 +35,7 @@ from app.core.engine_types import (
     PlayResult,
     SwingSelection,
     TacticsModifiers,
+    TracedPlay,
 )
 from app.engine.stuff_policy import STUFF_BASELINE, stuff_power_suppression
 
@@ -96,6 +97,32 @@ def calculate_play_outcome(
     )
 
 
+def calculate_play_outcome_with_trace(
+    pitcher_attrs: PitcherAttrs,
+    batter_attrs: BatterAttrs,
+    pitch_selected: PitchSelection,
+    swing_selected: SwingSelection,
+    tactics_modifiers: TacticsModifiers = None,
+) -> TracedPlay:
+    """Idéntico a ``calculate_play_outcome`` pero devuelve también el trace.
+
+    P5-A (RUNTIME TELEMETRY): la resolución es EXACTAMENTE la misma (mismos
+    draws, mismo orden, mismo resultado) que la API de producción; este wrapper
+    sólo adjunta el trace de decisión para que el runtime pueda registrar un
+    ``PitchEventLog`` honesto (distribución final antes del RNG y el draw que
+    realizó el resultado) sin duplicar la fórmula del motor.
+
+    Retorna ``TracedPlay(result, trace)`` donde ``result`` es el ``PlayResult``
+    idéntico al de ``calculate_play_outcome``.
+    """
+    trace: dict = {}
+    result = _resolve_play_outcome(
+        pitcher_attrs, batter_attrs, pitch_selected, swing_selected, tactics_modifiers,
+        _trace=trace,
+    )
+    return TracedPlay(result=result, trace=trace)
+
+
 def _resolve_play_outcome(
     pitcher_attrs: PitcherAttrs,
     batter_attrs: BatterAttrs,
@@ -105,6 +132,7 @@ def _resolve_play_outcome(
     take_bias: float = None,
     foul_chance: float = None,
     take_floor: float = None,
+    _trace: dict | None = None,
 ) -> PlayResult:
     """Resolución completa de una jugada con knobs LAB (002C-B / 002C-C / 002E-4).
 
@@ -157,8 +185,29 @@ def _resolve_play_outcome(
     actual_zone = pitch_selected["zone"]
     actual_pitch = pitch_selected["pitch_type"]
 
+    # P5-A: matchup EFECTIVO consumido por el engine (post-tácticas, post-fatiga).
+    # Se registra antes de cualquier draw para que la telemetría refleje lo que
+    # el motor realmente usó al decidir (nunca fabricado).
+    if _trace is not None:
+        _trace["matchup_inputs"] = {
+            "contact": con,
+            "power": pwr,
+            "vision": vis,
+            "velocity": vel,
+            "control": ctl,
+            "movement": mov,
+            "stuff": stuff,
+            "swing_type": swing_type.value if hasattr(swing_type, "value") else swing_type,
+            "actual_zone": actual_zone,
+            "actual_pitch": actual_pitch,
+        }
+
     # Manejo especial de Base por Bolas Intencional
     if actual_pitch == PitchType.IBB:
+        if _trace is not None:
+            _trace["distribution"] = {Event.BALL.value: 1.0}
+            _trace["rng_value"] = None
+            _trace["draws"] = []
         return PlayResult(Event.BALL, "Base por bolas intencional.")
 
     zone_matched = (guessed_zone == actual_zone)
@@ -166,20 +215,31 @@ def _resolve_play_outcome(
 
     # --- FASE 1: BATEADOR NO HACE SWING (TAKE) ---
     if swing_type == SwingType.TAKE:
-        return _calculate_take_outcome(take_bias, ctl, vis, zone_matched, take_floor)
+        return _calculate_take_outcome(take_bias, ctl, vis, zone_matched, take_floor, _trace)
 
     # --- FASE 2/3: SWING → whiff / foul / bola en juego ---
     return _calculate_contact_outcome(
         foul_chance, swing_type, con, pwr, vel, mov, zone_matched, pitch_matched, stuff,
+        _trace,
     )
 
 
 def _calculate_take_outcome(
     take_bias: float, ctl: float, vis: float, zone_matched: bool, take_floor: float,
+    _trace: dict | None = None,
 ) -> PlayResult:
     """FASE 1 — TAKE: strike cantado vs bola (002C-B: take_bias LAB, CLAMP-001)."""
-    if random.random() < _take_strike_probability(take_bias, ctl, vis,
-                                                  zone_matched, take_floor):
+    strike_prob = _take_strike_probability(take_bias, ctl, vis, zone_matched, take_floor)
+    if _trace is not None:
+        _trace["distribution"] = {
+            Event.STRIKE_LOOKING.value: strike_prob,
+            Event.BALL.value: 1.0 - strike_prob,
+        }
+    draw = random.random()
+    if _trace is not None:
+        _trace["draws"] = [{"step": "take", "value": draw, "strike_prob": strike_prob}]
+        _trace["rng_value"] = draw
+    if draw < strike_prob:
         return PlayResult(Event.STRIKE_LOOKING, "Lanzamiento en la zona. ¡Strike cantado!")
     return PlayResult(Event.BALL, "Lanzamiento fuera de la zona. ¡Bola!")
 
@@ -194,6 +254,7 @@ def _calculate_contact_outcome(
     zone_matched: bool,
     pitch_matched: bool,
     effective_stuff: float = STUFF_BASELINE,
+    _trace: dict | None = None,
 ) -> PlayResult:
     """FASE 2/3 — SWING: whiff → foul (002C-C) → BABIP.
 
@@ -201,6 +262,11 @@ def _calculate_contact_outcome(
     power_score (BABIP): no toca el whiff ni la disciplina, que es exactamente
     el aislamiento de mecanismo que 003B fijó al elegir el brazo S2 y que el
     contrato T7 vuelve a verificar.
+
+    P5-A: cuando recibe ``_trace``, primero deriva la distribución final ex-ante
+    (pura, sin consumo de RNG) y luego ejecuta LOS MISMOS draws en el MISMO
+    orden que la ruta sin trace (uniform whiff, random foul siempre evaluado,
+    uniform babip). ``rng_value`` es el draw decisivo normalizado a [0,1).
     """
     # Base Whiff%: ~24.5% en MLB para un duelo neutro (50 vs 50)
     # Un picheo con alto movimiento (ej. Slider/Sweeper de 95 MOV) incrementa el whiff%
@@ -217,18 +283,53 @@ def _calculate_contact_outcome(
 
     whiff_chance = max(5.0, min(65.0, whiff_base))
 
+    # --- Distribución final ex-ante (P5-A, pura; no consume RNG) ---
+    if _trace is not None:
+        foul_effective = _contact_foul_probability(foul_chance, zone_matched, pitch_matched)
+        whiff_prob = whiff_chance / 100.0
+        bip_total = (1.0 - whiff_prob) * (1.0 - foul_effective)
+        bip_base = (
+            (pwr - 50) * 0.4
+            + (15.0 if (zone_matched and pitch_matched) else 0.0)
+            + stuff_power_suppression(effective_stuff)
+        )
+        distribution: dict = {
+            Event.STRIKE_SWINGING.value: whiff_prob,
+            Event.FOUL.value: (1.0 - whiff_prob) * foul_effective,
+        }
+        for event_key, frac in _bip_class_distribution(bip_base, bip_base + 100.0).items():
+            distribution[event_key] = bip_total * frac
+        _trace["distribution"] = distribution
+        _trace["draws"] = []
+
     # Evaluación de contacto
-    if random.uniform(0, 100) < whiff_chance:
+    whiff_draw = random.uniform(0, 100)
+    if _trace is not None:
+        _trace["draws"].append({"step": "whiff", "value": whiff_draw, "threshold": whiff_chance})
+    if whiff_draw < whiff_chance:
+        if _trace is not None:
+            _trace["rng_value"] = whiff_draw / 100.0
         return PlayResult(Event.STRIKE_SWINGING, "Swing abanicado. ¡Strike!")
 
     # De los contactos que no abanican, ~45% son Fouls (002E-4: foul_chance LAB
     # ahora en fracción 0–1). El draw se evalúa SIEMPRE (orden de RNG preservado);
     # acertar zona + tipo deja la probabilidad en 0 → contacto limpio garantizado.
-    if random.random() < _contact_foul_probability(foul_chance, zone_matched, pitch_matched):
+    foul_draw = random.random()
+    if _trace is not None:
+        foul_effective = _contact_foul_probability(foul_chance, zone_matched, pitch_matched)
+        _trace["draws"].append({"step": "foul", "value": foul_draw, "threshold": foul_effective})
+    if foul_draw < _contact_foul_probability(foul_chance, zone_matched, pitch_matched):
+        if _trace is not None:
+            _trace["rng_value"] = foul_draw
         return PlayResult(Event.FOUL, "Batazo de foul.")
 
     # --- BOLA PUESTA EN JUEGO (BABIP MLB REAL) ---
-    power_score = (pwr - 50) * 0.4 + random.uniform(0, 100)
+    babip_draw = random.uniform(0, 100)
+    if _trace is not None:
+        _trace["draws"].append({"step": "babip", "value": babip_draw})
+        _trace["rng_value"] = babip_draw / 100.0
+
+    power_score = (pwr - 50) * 0.4 + babip_draw
 
     if zone_matched and pitch_matched:
         power_score += 15.0
@@ -272,3 +373,35 @@ def _contact_foul_probability(foul_chance: float, zone_matched: bool, pitch_matc
     if zone_matched and pitch_matched:
         return 0.0
     return foul_chance
+
+
+def _bip_class_distribution(lo: float, hi: float) -> dict[str, float]:
+    """Distribución analítica de las clases de bola en juego: P(power_score).
+
+    ``power_score ~ Uniform(lo, hi)`` con ``hi = lo + 100`` (el draw babip
+    aporta ``random.uniform(0, 100)`` y el resto son constantes: bono de zona
+    + tipo y supresión de Stuff, ambos ya incluidos en ``lo``).
+
+    Los umbrales replican el docstring del módulo y los ``elif`` de
+    ``_calculate_contact_outcome`` (HR > 96, 3B 93-96, 2B 85-93, 1B 63-85,
+    OG 25-63, OF ≤ 25). Son seis clases que particionan toda la recta real,
+    por lo que la suma es exactamente 1.0; las fronteras son de medida cero
+    en una distribución continua y no cambian la suma.
+
+    Es PURA (sin RNG): devuelve lo que el engine sabía antes de sacar el draw.
+    """
+    def _span(lower: float, upper: float) -> float:
+        if hi < lower or lo > upper:
+            return 0.0
+        return max(0.0, min(hi, upper) - max(lo, lower))
+
+    classes: dict[str, float] = {
+        Event.HOME_RUN.value: _span(96.0, float("inf")),
+        Event.HIT_3B.value: _span(93.0, 96.0),
+        Event.HIT_2B.value: _span(85.0, 93.0),
+        Event.HIT_1B.value: _span(63.0, 85.0),
+        Event.OUT_GROUND.value: _span(25.0, 63.0),
+        Event.OUT_FLY.value: _span(float("-inf"), 25.0),
+    }
+    width = hi - lo
+    return {event_key: span / width for event_key, span in classes.items()}

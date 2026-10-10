@@ -92,12 +92,12 @@ def _alembic_heads(versions_dir: Path) -> set[str]:
     return {rev for rev in revisions if rev not in parents}
 
 
-def test_schema_head_congelado_es_0043():
-    # 0043 = 0043_game_session_provenance (GAMEPLAY-PROVENANCE-001). Único head:
-    # la cadena de down_revision sigue siendo lineal, sin ramas.
+def test_schema_head_congelado_es_0044():
+    # 0044 = 0044_game_event_sequence (RUNTIME TELEMETRY P5-A, sequence_no en
+    # game_event_logs). Único head: la cadena de down_revision sigue lineal.
     versions_dir = Path(__file__).resolve().parent.parent / "alembic" / "versions"
     heads = _alembic_heads(versions_dir)
-    assert heads == {"0043"}, f"heads inesperados: {heads}"
+    assert heads == {"0044"}, f"heads inesperados: {heads}"
 
 
 def test_ancla_historica_de_calibrated_baseline_v1_no_se_mueve():

@@ -15,6 +15,7 @@ No compara contra números mágicos: la curva de fatiga puede ajustarse después
 import asyncio
 from types import SimpleNamespace
 
+from app.core.engine_types import PlayResult, TracedPlay
 from app.engine import game_actions
 
 
@@ -51,7 +52,7 @@ def _capture_resolve_swing(monkeypatch, pitch_counts):
 
     captured = {}
 
-    def fake_calculate_play_outcome(
+    def fake_calculate_play_outcome_with_trace(
         *,
         pitcher_attrs,
         batter_attrs,
@@ -61,9 +62,14 @@ def _capture_resolve_swing(monkeypatch, pitch_counts):
     ):
         captured["pitcher_attrs"] = pitcher_attrs
         captured["pitch_selected"] = pitch_selected
-        return ("HIT_1B", "Hit")
+        return TracedPlay(result=PlayResult("HIT_1B", "Hit"), trace={})
 
-    monkeypatch.setattr(game_actions, "calculate_play_outcome", fake_calculate_play_outcome)
+    monkeypatch.setattr(
+        game_actions, "calculate_play_outcome_with_trace", fake_calculate_play_outcome_with_trace
+    )
+    # El objeto de telemetría pitch-by-pitch no es responsabilidad de este test
+    # (su foco es la frontera de fatiga → repertorio); se neutraliza la escritura.
+    monkeypatch.setattr(game_actions, "_record_pitch_telemetry", lambda *a, **k: None)
     monkeypatch.setattr(
         game_actions,
         "get_card_by_id",

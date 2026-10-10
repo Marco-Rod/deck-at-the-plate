@@ -89,6 +89,10 @@ un defecto alcanzable, causado por `Position.PITCHER` ("P") ausente de
 `Position.is_pitcher`. Corregido en el enum; exposicion `vision=0` en
 bateadores = 0. Sin tocar vision/velocity/movement.)
 
+P5-A (identidad de PA + versionado + wiring honesto del pitch log al runtime)
+cerrado: ver §Paso 6. Sigue P5-B (reconciliación, dominio completo de
+`BatterApproach`) y lo demás del bloque.
+
 ------------------------------------------------------------------------
 
 # 3. Catálogo y ratings
@@ -1517,16 +1521,20 @@ Pendientes:
 ``` text
 TELEMETRY-PITCH-001
 Runtime instrumentation not fully wired.
+(parcial P5-A: el pitch log se escribe post-resolución en cada swing/take/bunt
+ resuelto; falta el pitch NO resuelto por el bateador — p.ej. toma forzada,
+ robo, balks — y la reconciliación con el box score.)
 
 TELEMETRY-PA-001
-No robust runtime PA identity.
+No robust runtime PA identity.                                   CLOSED (P5-A)
 
 TELEMETRY-EVENT-001 / VERSION-001
 GameEventLog fields exist but writer/runtime does not fully populate them.
+                                                                 CLOSED (P5-A)
 
 TELEMETRY-DOMAIN-001
 BatterApproach telemetry is not fully aligned with runtime
-swing_type / zone_guess / pitch_guess.
+swing_type / zone_guess / pitch_guess.                           PENDING (P5-B)
 ```
 
 ------------------------------------------------------------------------
@@ -1815,6 +1823,84 @@ game
 → result
 → state transition
 ```
+
+### P5-A --- identidad de PA + versionado + wiring honesto --- CERRADO
+
+**Problema / finding.** `GameEventLog` ya tenía columnas de telemetría
+(`plate_appearance_id`, `engine_version`, `sequence_no`, distribución, RNG),
+`PitchEventLog` ya tenía el builder y el repo, pero el runtime NUNCA los
+poblaba: no había identidad de plate-appearance, el box score no sellaba
+versión, y el pitch log no se emitía al resolver. `TELEMETRY-PA-001`,
+`TELEMETRY-EVENT-001/VERSION-001`.
+
+**Hipótesis.** El runtime puede alimentar la telemetría sin tocar el motor
+congelado: la resolución se envuelve con un **trace aditivo** que no consume
+RNG y el log se escribe DESPUÉS de resolver el pitch (nunca antes: los
+secretos del rival — zona/pitch elegidos por la CPU — no se filtran al
+registro del bateador).
+
+**Contratos prefijados.** (de `engine_types.PlayResult` / `PitchEventLog` /
+`GameEventLog`)
+
+``` text
+TracedPlay(NamedTuple): result: PlayResult; trace: dict
+trace = {matchup_inputs, distribution, rng_value, draws}
+distribution: {event: p},  Σ p = 1 (±1e-9), claves ∈ Event
+rng_value ∈ [0, 1)                (uniform 0-100 normalizado /100)
+draws: [{step, value[, threshold]}], orden real de consumo
+```
+
+**Implementación.**
+
+- `calculator.py`: nueva pública `calculate_play_outcome_with_trace(...) ->
+  TracedPlay`. `_resolve_play_outcome` / `_calculate_take_outcome` /
+  `_calculate_contact_outcome` aceptan `_trace` opcional. `calculate_play_outcome`
+  queda intacta y **bit-exacta** (mismos draws, mismo orden). Distribución
+  final ex-ante calculada SIN consumir RNG: TAKE binaria; swing = whiff / foul
+  / 6 clases BIP (`_bip_class_distribution`, umbrales HR>96, 3B 93-96,
+  2B 85-93, 1B 63-85, OG 25-63, OF≤25). El `rng_value` guardado es el draw
+  DECISIVO del resultado.
+- `tactical_actions.py`: `resolve_bunt(..., _trace=None)`; un solo draw.
+- `pitch_telemetry.py`: `pitch_family_for_runtime(pitch_type)` — mapeo runtime
+  → `PitchFamily` (desconocido → OTHER; nunca se inventa familia).
+- `game_stats.py` + `alembic 0044`: `game_event_logs.sequence_no` +
+  `UniqueConstraint(game_id, sequence_no)`. `sequence_no` = ordinal contiguo
+  del evento de box score (1, 2, 3, …), NO un contador por pitch.
+- `record_game_event(...)`: persiste `plate_appearance_id`, `engine_version`,
+  `sequence_no`.
+- `game_actions.resolve_swing`: captura PRE-pitch (conteo/outs/PA id/pitch nº),
+  resuelve con trace, escribe el `PitchEventLog` (paso 6.5) y sella el
+  `GameEventLog` terminal con PA id + `engine_version=ENGINE_BUILD` +
+  `sequence_no`. La identidad de PA (`pa_<hex12>`) se resetea al cerrar el PA.
+
+**Resultados / verificación.**
+
+- `test_calculator_trace.py` (8): bit-exactitud trace vs producción,
+  Σ distribución = 1, IBB → `{BALL: 1.0}`, partición BABIP, `rng_value ∈ [0,1)`
+  y coherencia draw↔resultado, frecuencia empírica ≈ analítica (N=20 000).
+- `tests/contract/test_pitch_telemetry_contract.py` (2): un `PitchEventLog`
+  honesto por swing resuelto; identidad de PA estable y distinta entre PAs;
+  pitches contiguos 1..k; `GameEventLog` versionado con `sequence_no` 1..N y PA
+  id = último pitch del PA.
+- `test_pitch_telemetry.py` (+8): `pitch_family_for_runtime`.
+- `fixtures.SCHEMA_HEAD` `0043 -> 0044`; `test_schema_head_congelado_es_0044`.
+- Suite completa: **1048 passed**.
+
+**Decisión.** `sequence_no` es el ordinal contiguo del evento de box score, no
+un contador por pitch (de lo contrario el stream de eventos tendría huecos
+inexplicables). Nada de telemetría fabricada: cada campo es un dato que el
+engine ya usó.
+
+**Qué NO quedó demostrado.** `TELEMETRY-PITCH-001` sigue parcial: el pitch log
+cubre cada swing/take/bunt resuelto por `resolve_swing`, pero no eventos
+generados fuera de él (robos, balks, toma forzada) ni la reconciliación
+evento ↔ estado ↔ box score (`TELEMETRY-DOMAIN-001`: alineación completa de
+`BatterApproach`). Son P5-B / Paso 7.
+
+**Siguiente bloque permitido.** P5-B (dominio `BatterApproach`, reconciliación)
+y el resto de Telemetry v2.
+
+**Commit(s).** P5-A (`RUNTIME-TELEMETRY P5-A`), junto a los tests nuevos.
 
 ## Paso 7 --- Reconciliation
 
@@ -2110,7 +2196,7 @@ CLUTCH                      DEFERRED (placeholder, sin efecto)
 
 DATA-AUDIT-001              CLOSED  (alcance: Position.PITCHER fuera de is_pitcher)
 PROVENANCE                  CLOSED  (P4 / GAMEPLAY-PROVENANCE-001)
-RUNTIME TELEMETRY           NEXT    (P5)
+RUNTIME TELEMETRY           P5-A CLOSED  (PA identity + versioning + pitch log wiring); P5-B NEXT
 RECONCILIATION              PENDING
 HEADLESS SIMULATOR          PENDING
 ANALYTICS                   PENDING

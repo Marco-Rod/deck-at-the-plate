@@ -41,12 +41,12 @@ import app.models  # noqa: F401
 # demostrar que los mecanismos que Stuff no debía alterar siguen idénticos.
 # Moverlo destruiría justamente la referencia que hace posible esa comparación.
 #
-# SCHEMA_HEAD sí se mueve: 0041 → 0042 (003B-6A, columna player_cards.stuff) y
-# ahora 0042 → 0043 (GAMEPLAY-PROVENANCE-001, columnas de provenance en
-# game_sessions). El esquema es el contenedor; los mecanismos congelados son los
-# de ENGINE_BUILD.
+# SCHEMA_HEAD sí se mueve: 0041 → 0042 (003B-6A, columna player_cards.stuff),
+# 0042 → 0043 (GAMEPLAY-PROVENANCE-001, columnas de provenance en game_sessions)
+# y ahora 0043 → 0044 (RUNTIME TELEMETRY P5-A, game_event_logs.sequence_no). El
+# esquema es el contenedor; los mecanismos congelados son los de ENGINE_BUILD.
 BASELINE_COMMIT = "4ee14a8"
-SCHEMA_HEAD = "0043"
+SCHEMA_HEAD = "0044"
 
 START = dt.date(2026, 8, 25)
 END = dt.date(2026, 9, 2)

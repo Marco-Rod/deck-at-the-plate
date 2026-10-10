@@ -276,13 +276,16 @@ class TestT3Fatigue:
         assert not hasattr(calculator, "effective_stuff")
         assert not hasattr(calculator, "FATIGUE_FLOOR")
         # Y el poder se calcula con Stuff YA efectivo: la firma de la rama de
-        # contacto no admite ningún factor de fatiga.
+        # contacto no admite ningún factor de fatiga. ``_trace`` (P5-A) es un
+        # colector de telemetría opcional, NO un factor de fatiga: no altera
+        # ningún argumento del cómputo ni introduce la fatiga en el calculator.
         params = inspect.signature(calculator._calculate_contact_outcome).parameters
         assert list(params) == [
             "foul_chance", "swing_type", "con", "pwr", "vel", "mov",
-            "zone_matched", "pitch_matched", "effective_stuff",
+            "zone_matched", "pitch_matched", "effective_stuff", "_trace",
         ]
         assert params["effective_stuff"].default == STUFF_BASELINE
+        assert params["_trace"].default is None
 
 
 # ---------------------------------------------------------------------------

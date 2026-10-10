@@ -7,7 +7,7 @@ el router `gameplay.py` y que NO es responsabilidad de HTTP:
   - ``build_play_resolved_payload`` : payload estándar del broadcast PLAY_RESOLVED.
   - ``apply_tactic_modifiers``       : acumula modificadores de cartas tácticas activas.
   - ``resolve_swing``                : núcleo 1-7 del at-bat (fatiga, cálculo, transición,
-                                       estadísticas, persistencia y broadcast WS).
+                                       estadísticas, telemetría pitch-by-pitch y broadcast WS).
   - ``execute_cpu_pitcher_change``   : cambio de lanzador decidido por la CPU.
   - ``trigger_cpu_response``         : orquesta la respuesta CPU tras una acción humana (PvE).
 
@@ -19,14 +19,17 @@ Beneficios SOLID:
 """
 
 import logging
+import uuid
 from dataclasses import dataclass
 from typing import Callable, Literal
 
+from app.core.enums import BatterApproach, SwingType
 from app.engine.attribute_mapper import (
     map_card_to_batter_attrs,
     map_card_to_pitcher_attrs,
 )
-from app.engine.calculator import calculate_play_outcome
+from app.engine.build import ENGINE_BUILD
+from app.engine.calculator import calculate_play_outcome_with_trace
 from app.engine.cpu_ai import (
     choose_pitch_from_repertoire,
     get_cpu_pitch_action,
@@ -59,7 +62,12 @@ from app.repositories import (
     get_tactic_card_by_id,
     record_game_event,
 )
+from app.repositories.pitch_telemetry_repository import record_pitch_event
 from app.services.card_presenter import build_batter_payload, build_pitcher_payload
+from app.services.pitch_telemetry import (
+    build_pitch_event_log_payload,
+    pitch_family_for_runtime,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -238,7 +246,7 @@ def _fatigue_factor(base_attr: int, fatigued_attr: int) -> float:
 def apply_tactic_modifiers(active_tactics: dict, db) -> dict:
     """
     Lee las cartas tácticas activas desde la DB y acumula sus modificadores.
-    Retorna un dict listo para pasar a calculate_play_outcome().
+    Retorna un dict listo para pasar al motor (calculate_play_outcome[_with_trace]).
     """
     mods = new_default_tactic_modifiers()
 
@@ -253,6 +261,103 @@ def apply_tactic_modifiers(active_tactics: dict, db) -> dict:
             mods = accumulate_tactic_effects(tac.effects, mods, is_pitcher_tactic=True)
 
     return mods
+
+
+def _event_value(event) -> str:
+    """Normaliza un evento (miembro de ``Event`` o string) a su valor canónico."""
+    return event.value if hasattr(event, "value") else str(event)
+
+
+def _record_pitch_telemetry(
+    db,
+    *,
+    game_id: str,
+    plate_appearance_id: str,
+    pitch_number: int,
+    batter_card,
+    pitcher_card,
+    swing_type: str,
+    guessed_zone: int | None,
+    current_pitch: dict,
+    balls_before: int,
+    strikes_before: int,
+    outs_before: int,
+    pitcher_fatigue: float,
+    tactic_modifiers: dict | None,
+    trace: dict,
+    result: str,
+) -> None:
+    """Persiste el PitchEventLog del pitch RECIÉN resuelto (P5-A).
+
+    Honestidad: el log se construye sólo con datos que el engine ya conocía al
+    resolver (la distribución y el rng vienen del trace del motor). Nada se
+    fabrica. La escritura es POST-resolución y falla ruidosamente si el builder
+    rechaza el payload: el commit lo hace el caller y la transacción revierte
+    completa (misma política que GameEventLog).
+
+    Normalizaciones de dominio del Matchup Engine V1:
+      - TAKE nunca lleva ``batter_zone_choice`` ni ``zone_match``: la zona la
+        impone el pitch. Un ``guessed_zone`` que la CPU aprecie durante un TAKE
+        es un artefacto del engine legado que V1 reemplaza; no sobrevive al log.
+      - NORMAL/POWER/BUNT → approach REACT (no hay apuesta a familia de
+        lanzamiento que acertar); TAKE → approach TAKE. ``approach_match`` es
+        NULL en ambos (no existe acierto binario, definición del modelo).
+    """
+    if not batter_card or not pitcher_card:
+        # Las FKs de pitch_event_logs exigen tarjetas reales. Sin ellas no hay
+        # duelo registrable; mejor omisión explícita que un id inventado.
+        logger.warning(
+            "PitchEventLog omitido (%s): faltan tarjetas (batter=%s, pitcher=%s)",
+            game_id, bool(batter_card), bool(pitcher_card),
+        )
+        return
+
+    is_take = swing_type == SwingType.TAKE
+    if is_take:
+        batter_approach = BatterApproach.TAKE
+        batter_zone_choice = None
+        zone_match = False
+    else:
+        batter_approach = BatterApproach.REACT
+        batter_zone_choice = guessed_zone
+        zone_match = (guessed_zone == current_pitch.get("zone"))
+
+    # matchup_inputs = atributos EFECTIVOS que el engine usó (trace del motor).
+    matchup_inputs = None
+    if trace.get("matchup_inputs"):
+        matchup_inputs = {
+            key: trace["matchup_inputs"][key]
+            for key in ("contact", "power", "vision", "velocity", "control", "movement", "stuff")
+        }
+
+    pitch_type = _event_value(current_pitch.get("pitch_type", "4-SEAM"))
+
+    payload = build_pitch_event_log_payload(
+        game_id=game_id,
+        plate_appearance_id=plate_appearance_id,
+        pitch_number=pitch_number,
+        batter_card_id=batter_card.id,
+        pitcher_card_id=pitcher_card.id,
+        batter_player_id=getattr(batter_card, "player_id", None),
+        pitcher_player_id=getattr(pitcher_card, "player_id", None),
+        batter_approach=batter_approach,
+        pitcher_zone_choice=current_pitch.get("zone"),
+        pitch_type=pitch_type,
+        pitch_family=pitch_family_for_runtime(pitch_type),
+        probability_distribution=trace.get("distribution"),
+        rng_value=trace.get("rng_value"),
+        result=result,
+        engine_version=ENGINE_BUILD,
+        batter_zone_choice=batter_zone_choice,
+        zone_match=zone_match,
+        balls_before=balls_before,
+        strikes_before=strikes_before,
+        outs_before=outs_before,
+        pitcher_fatigue=pitcher_fatigue,
+        tactical_modifiers=tactic_modifiers,
+        matchup_inputs=matchup_inputs,
+    )
+    record_pitch_event(db, payload)
 
 
 async def resolve_swing(
@@ -282,6 +387,25 @@ async def resolve_swing(
         game_id:       ID de la partida para el broadcast WS.
     """
     current_pitch = state.get("current_pitch") or {}
+
+    # --- 0. Telemetría P5-A: contexto PRE-pitch (el conteo aún no cambió) ---
+    # El log del pitch captura el conteo tal y como el bateador lo veía al
+    # enfrentar este envío. game.balls/strikes/outs se mutan en la transición
+    # (paso 6), así que se congelan aquí.
+    balls_before = game.balls
+    strikes_before = game.strikes
+    outs_before = game.outs
+
+    # Identidad de plate-appearance: estable DENTRO del mismo PA (la guarda
+    # state_data entre pitches) y nueva por PA (se reinicia al terminar). Se
+    # usa para agrupar pitch_event_logs y sellar el event terminal.
+    plate_appearance_id = state.get("plate_appearance_id")
+    if not plate_appearance_id:
+        plate_appearance_id = f"pa_{uuid.uuid4().hex[:12]}"
+        state["plate_appearance_id"] = plate_appearance_id
+        state["pa_pitch_number"] = 0
+    pa_pitch_number = state.get("pa_pitch_number", 0) + 1
+    state["pa_pitch_number"] = pa_pitch_number
 
     # --- 1. Fatiga del pitcher ---
     pitch_counts = state.get("pitch_counts", {})
@@ -340,9 +464,12 @@ async def resolve_swing(
         )
     active_tactics = state.get("active_tactics", {})
 
-    # --- 3. Procesamiento especial de BUNT ---
+    # --- 3. Procesamiento especial de BUNT (trace aditivo en el resolver) ---
+    trace: dict = {}
     if swing_type == "BUNT":
-        raw_event, description, sac_success = resolve_bunt(pitcher_attrs, batter_attrs, state.get("runners", {}))
+        raw_event, description, sac_success = resolve_bunt(
+            pitcher_attrs, batter_attrs, state.get("runners", {}), _trace=trace,
+        )
         if sac_success and any(state.get("runners", {}).values()):
             runners = state.get("runners", {})
             new_runners = {"1b": None, "2b": None, "3b": None}
@@ -355,8 +482,8 @@ async def resolve_swing(
         # --- 4. Modificadores de cartas tácticas ---
         tactics_modifiers = apply_tactic_modifiers(active_tactics, db)
 
-        # --- 5. Calcular resultado ---
-        raw_event, description = calculate_play_outcome(
+        # --- 5. Calcular resultado (con trace, misma resolución bit-exacta) ---
+        traced_play = calculate_play_outcome_with_trace(
             pitcher_attrs=pitcher_attrs,
             batter_attrs=batter_attrs,
             pitch_selected=current_pitch,
@@ -367,15 +494,47 @@ async def resolve_swing(
             },
             tactics_modifiers=tactics_modifiers,
         )
+        raw_event, description = traced_play.result
+        trace = traced_play.trace
 
     # --- 6. Transición de estado ---
     at_bat_ended, inning_ended, event, description = process_at_bat_transition(game, raw_event, state)
+
+    # --- 6.5 Telemetría pitch-by-pitch (P5-A) ---
+    # El log se escribe DESPUÉS de cerrar la resolución del pitch (regla del
+    # modelo: nunca se registran secretos del rival antes de resolver). Los
+    # datos provienen del trace del engine: distribución final ex-ante y el
+    # draw determinante, sin inventar nada.
+    fatigue_factor = get_fatigue_factor(current_count, get_pitch_threshold(total_innings))
+    _record_pitch_telemetry(
+        db=db,
+        game_id=game_id,
+        plate_appearance_id=plate_appearance_id,
+        pitch_number=pa_pitch_number,
+        batter_card=batter_card,
+        pitcher_card=pitcher_card,
+        swing_type=swing_type,
+        guessed_zone=guessed_zone,
+        current_pitch=current_pitch,
+        balls_before=balls_before,
+        strikes_before=strikes_before,
+        outs_before=outs_before,
+        pitcher_fatigue=fatigue_factor,
+        tactic_modifiers=tactics_modifiers if swing_type != "BUNT" else None,
+        trace=trace,
+        result=_event_value(raw_event),
+    )
 
     # --- 7. Registrar evento en estadísticas ---
     if at_bat_ended:
         # Usar el runs_scored ya calculado en state_manager (evita recalcular un valor inconsistente)
         runs_scored = state.get("last_runs_scored", 0)
         rbi = runs_scored
+
+        # Orden estructural de la jugada terminada dentro de la partida: ordinal
+        # contiguo de los eventos de box score (1, 2, 3, …).
+        event_sequence = state.get("event_sequence", 0) + 1
+        state["event_sequence"] = event_sequence
 
         # La estadística forma parte de la misma unidad de trabajo que la
         # jugada. No se puede ocultar un error aquí: el caller debe revertir la
@@ -394,7 +553,14 @@ async def resolve_swing(
             runners_on_base=state.get("runners", {}),
             runs_scored=runs_scored,
             rbi=rbi,
+            plate_appearance_id=plate_appearance_id,
+            engine_version=ENGINE_BUILD,
+            sequence_no=event_sequence,
         )
+
+        # El PA terminó: la próxima identidad será un PA nuevo.
+        state["plate_appearance_id"] = None
+        state["pa_pitch_number"] = 0
 
     # --- 8. Preparar state final y evento WS diferido ---
     state["current_pitch"] = None

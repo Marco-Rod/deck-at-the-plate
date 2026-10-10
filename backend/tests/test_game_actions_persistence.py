@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.core.engine_types import PlayResult, TracedPlay
 from app.engine import game_actions
 
 
@@ -46,8 +47,13 @@ def test_resolve_swing_propagates_event_store_failures(monkeypatch):
     monkeypatch.setattr(game_actions, "map_card_to_batter_attrs", lambda _card: {})
     monkeypatch.setattr(game_actions, "apply_pitcher_fatigue", lambda attrs, *_: attrs)
     monkeypatch.setattr(
-        game_actions, "calculate_play_outcome", lambda **_kwargs: ("HIT_1B", "Hit")
+        game_actions,
+        "calculate_play_outcome_with_trace",
+        lambda **_kwargs: TracedPlay(result=PlayResult("HIT_1B", "Hit"), trace={}),
     )
+    # Aislar la atomicidad de GameEventLog: la telemetría pitch-by-pitch tiene
+    # sus propios contratos y no debe enmascarar este fallo con un AttributeError.
+    monkeypatch.setattr(game_actions, "_record_pitch_telemetry", lambda *a, **k: None)
     monkeypatch.setattr(
         game_actions,
         "process_at_bat_transition",
