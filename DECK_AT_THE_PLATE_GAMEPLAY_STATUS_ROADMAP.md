@@ -89,10 +89,12 @@ un defecto alcanzable, causado por `Position.PITCHER` ("P") ausente de
 `Position.is_pitcher`. Corregido en el enum; exposicion `vision=0` en
 bateadores = 0. Sin tocar vision/velocity/movement.)
 
-P5-A (identidad de PA + versionado + wiring honesto del pitch log al runtime)
-y P5-B (dominio `BatterApproach`: alineación con swing_type/zone_guess/
-pitch_guess) cerrados: ver §Paso 6. Sigue P5-C (reconciliación, `TELEMETRY-
-PITCH-001`) y lo demás del bloque.
+P5-A (identidad de PA + versionado + wiring honesto del pitch log al runtime),
+P5-B (dominio `BatterApproach`: alineación con swing_type/zone_guess/
+pitch_guess) y P5-C (reconciliación stream ↔ estado ↔ box score + fix de la
+clasificación del play terminal) cerrados: ver §Paso 6 y §Paso 7. Sigue lo
+restante de `TELEMETRY-PITCH-001` (eventos no-PA: robo, balks) y lo demás del
+bloque.
 
 ------------------------------------------------------------------------
 
@@ -1522,25 +1524,28 @@ Pendientes:
 ``` text
 TELEMETRY-PITCH-001
 Runtime instrumentation not fully wired.
-(parcial P5-A: el pitch log se escribe post-resolución en cada swing/take/bunt
- resuelto; falta el pitch NO resuelto por el bateador — p.ej. toma forzada,
- robo, balks — y la reconciliación con el box score.)
+(PARCIAL P5-A/P5-C: el pitch log se escribe para cada pitch resuelto por
+ el bateador y la reconciliación evento ↔ estado ↔ box score existe y pasó;
+ falta el pitch NO resuelto por el bateador — p.ej. toma forzada, robo, balks
+ — como eventos no-PA del stream.)
 
 TELEMETRY-PA-001
 No robust runtime PA identity.                                   CLOSED (P5-A)
 
 TELEMETRY-EVENT-001 / VERSION-001
 GameEventLog fields exist but writer/runtime does not fully populate them.
-                                                                 CLOSED (P5-A)
+                                                                  CLOSED (P5-A)
 
 TELEMETRY-DOMAIN-001
 BatterApproach telemetry is not fully aligned with runtime
 swing_type / zone_guess / pitch_guess.                           CLOSED (P5-B)
 ```
 
-`TELEMETRY-PITCH-001` sigue abierto: el pitch log cubre cada pitch resuelto por
-`resolve_swing`, pero no eventos fuera de él (toma forzada, robo, balks) ni la
-reconciliación evento ↔ estado ↔ box score. Es P5-C / Paso 7.
+`TELEMETRY-PITCH-001` sigue abierto en parte: el pitch log cubre cada pitch
+resuelto por `resolve_swing` y la reconciliación stream ↔ estado ↔ box score ya
+está demostrada y verificada (P5-C), pero los eventos fuera de `resolve_swing`
+(robo, atrapado robando, balks) no escriben al stream. Es la deuda abierta de
+P5-C.
 
 ------------------------------------------------------------------------
 
@@ -1986,6 +1991,93 @@ event stream
 ↔ box score / stats
 ```
 
+### P5-C --- reconciliación y clasificación del play terminal --- CERRADO
+
+**Problema / finding.** Dos divergencias alcanzables y la ausencia de un
+verificador:
+
+1. **Evento ↔ box score corrupto.** Cuando una jugada termina el partido,
+   `process_at_bat_transition` sobrescribe la clasificación de la jugada con
+   `GAME_OVER` (`state_manager.py`), y `resolve_swing` grababa ESE valor en
+   `GameEventLog.event_type`. Confirmado: un HR walk-off quedaba registrado como
+   `GAME_OVER`, así que el box score (que clasifica por `event_type`) perdía el
+   HR y el hit; un boleto walk-off contaba como turno al bate y perdía el BB.
+2. **Sin verificador.** No existía ninguna función que comprobara el event
+   stream, el estado persistido y el box score contra una cuarta vista: el pitch
+   log.
+
+**Hipótesis.** `GAME_OVER` no es un evento de jugada sino un estado del partido:
+pertenece al broadcast, no al event stream. Conservar la clasificación real de
+la jugada para la telemetría (sin cambiar el `event` que ve el cliente) alinea
+stream ↔ box score. Y la consistencia entre las vistas es comprobable con una
+función pura.
+
+**Contratos prefijados.**
+
+``` text
+process_at_bat_transition(...) sigue devolviendo final_event=GAME_OVER,
+    pero además deja state["last_play_event"] = <play real ya ajustado
+    (p. ej. HOME_RUN o DOUBLE_PLAY)> ANTES del override de fin de juego
+    (mismo patrón que state["last_runs_scored"]).
+
+resolve_swing → record_game_event(event_type = last_play_event or event)
+
+reconcile_game(*, score_home, score_away, score_history, events,
+               box_score=None, pitch_logs=None) -> list[ReconciliationIssue]
+    runs.home_state_vs_stream / runs.away_state_vs_stream
+    runs.history_vs_state
+    runs.history_per_inning_vs_stream
+    runs.box_vs_state
+    sequence.not_contiguous
+    classification.game_over_in_stream
+    pitch.pa_without_pitch_logs / pitch.pa_not_contiguous
+[] = las vistas concuerdan (función PURA: no arregla, sólo reporta).
+```
+
+**Implementación.**
+
+- `state_manager.py`: `state["last_play_event"]` conserva la jugada ajustada
+  antes de que `final_event` se sobrescriba a `GAME_OVER`.
+- `game_actions.resolve_swing`: el `GameEventLog` registra `last_play_event`, no
+  el envoltorio de fin de juego. El broadcast sigue emitiendo `GAME_OVER`.
+- `services/game_reconciliation.py`: `reconcile_game` (puro) +
+  `reconcile_game_from_db` (materializa las vistas desde la BD).
+
+**Decisión.** El play terminal se registra con su tipo real; `GAME_OVER` es
+estado, no evento. La reconciliación es un verificador, no un autocorrector: las
+divergencias se reportan para que las arregle la ruta que produjo el dato.
+
+**Resultados / verificación.**
+
+- `tests/test_reconciliation.py` (+11): tabla de cada invariante
+  (marcador/history/por-inning/box/sequence/GAME_OVER/PA↔pitch), función pura
+  probada con `[]` consistente y con divergencias inyectadas; y regresión del
+  fix (un walk-off HR se registra como `HOME_RUN` aunque el broadcast emita
+  `GAME_OVER`).
+- `test_state_manager.py` (+1): `last_play_event` conserva `HOME_RUN` con
+  `final_event == GAME_OVER`.
+- `tests/contract/test_reconciliation_contract.py` (2): sobre la API real, una
+  partida jugada reconcilia (`[]`, sin `GAME_OVER` en el stream) y el verificador
+  **DETECTA** una divergencia inyectada en el marcador.
+- Suite completa: **1081 passed** (+13).
+
+**Qué NO quedó demostrado.**
+
+- **Los robos siguen fuera del stream** (`TELEMETRY-PITCH-001` parcial): un
+  robo/atrapado robando muta corredores y `outs` en `steal_attempt`
+  (`steal_base`) sin escribir un `GameEventLog`. No es un plate appearance y
+  contarlo como tal corrompería el `at_bats` del box score; necesita su propio
+  modelo de evento no-PA. Queda como deuda explícita.
+- **No hay endpoint de integridad.** El verificador es una función de servicio;
+  `/games/{id}/integrity` sigue siendo un candidato de Analytics (Paso 9).
+- **`TELEMETRY-PITCH-001` no se cierra del todo** mientras los robos no estén en
+  el stream.
+
+**Siguiente bloque permitido.** Un bloque de eventos no-PA (robos en el stream)
+o el resto de Telemetry v2.
+
+**Commit(s).** P5-C (`RUNTIME-TELEMETRY P5-C`).
+
 ## Paso 8 --- Headless simulator
 
 Simulación determinista sin UI/WebSocket:
@@ -2166,6 +2258,7 @@ f203a54  GAMEPLAY-PROVENANCE-001: la partida versiona catalogo/ratings/rules/eng
 e79c1eb  alembic 0001/0010 DDL-only idempotentes
 365e849  RUNTIME-TELEMETRY P5-A: identidad de PA, versionado y wiring del pitch log
 787b1c6  RUNTIME-TELEMETRY P5-B: dominio BatterApproach (TELEMETRY-DOMAIN-001)
+f6110e2  RUNTIME-TELEMETRY P5-C: reconciliación stream↔estado↔box y clasificación del play terminal
 ```
 
 Actualizar hashes si alguno fue amendado.
@@ -2276,8 +2369,8 @@ CLUTCH                      DEFERRED (placeholder, sin efecto)
 
 DATA-AUDIT-001              CLOSED  (alcance: Position.PITCHER fuera de is_pitcher)
 PROVENANCE                  CLOSED  (P4 / GAMEPLAY-PROVENANCE-001)
-RUNTIME TELEMETRY           P5-A/P5-B CLOSED  (PA identity + versioning + pitch log wiring + BatterApproach domain); P5-C NEXT
-RECONCILIATION              PENDING
+RUNTIME TELEMETRY           P5-A/P5-B/P5-C CLOSED (PA identity + versioning + pitch log wiring + BatterApproach domain + reconciliation + play-terminal classification); reste no-PA events
+RECONCILIATION              P5-C CLOSED  (verificador reconcile_game + fix clasificación play terminal; deuda: eventos no-PA fuera del stream)
 HEADLESS SIMULATOR          PENDING
 ANALYTICS                   PENDING
 ECONOMY / PACK DESIGN       LATER
