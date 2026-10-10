@@ -1900,7 +1900,8 @@ evento ↔ estado ↔ box score (`TELEMETRY-DOMAIN-001`: alineación completa de
 **Siguiente bloque permitido.** P5-B (dominio `BatterApproach`, reconciliación)
 y el resto de Telemetry v2.
 
-**Commit(s).** P5-A (`RUNTIME-TELEMETRY P5-A`), junto a los tests nuevos.
+**Commit(s).** P5-A (`365e849`, `RUNTIME-TELEMETRY P5-A`), junto a los tests
+nuevos.
 
 ## Paso 7 --- Reconciliation
 
@@ -2086,6 +2087,11 @@ f85d645  DATA-STUFF-001B-1 materialize Stuff on publish
 fc890ec  close DATA-STUFF-001, open Clutch
 
 1bb2e8d  GAMEPLAY-RATING-002 decision A: Clutch neutral 70
+
+4e1438c  DATA-AUDIT-001: Position.PITCHER ('P') es lanzador
+f203a54  GAMEPLAY-PROVENANCE-001: la partida versiona catalogo/ratings/rules/engine (P4)
+e79c1eb  alembic 0001/0010 DDL-only idempotentes
+365e849  RUNTIME-TELEMETRY P5-A: identidad de PA, versionado y wiring del pitch log
 ```
 
 Actualizar hashes si alguno fue amendado.
