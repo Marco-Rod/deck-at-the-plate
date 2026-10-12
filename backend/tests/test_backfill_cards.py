@@ -13,7 +13,7 @@ from sqlalchemy.orm import sessionmaker
 from app.database import Base
 from app.models import PlayerCardModel
 from app.services.card_editions import ensure_system_base_edition
-from app.seeds.backfill_cards import (
+from legacy.seeds.backfill_cards import (
     backfill_vision_clutch_edition,
     LEGACY_MODEL_VERSION,
     BASE_EDITION,

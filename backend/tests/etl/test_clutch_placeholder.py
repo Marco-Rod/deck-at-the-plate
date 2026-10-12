@@ -36,7 +36,7 @@ from app.models import (
     PlayerCardModel,
 )
 from app.models.card import CardRarity
-from app.seeds.backfill_cards import NEUTRAL_CLUTCH, backfill_catalog_clutch
+from legacy.seeds.backfill_cards import NEUTRAL_CLUTCH, backfill_catalog_clutch
 from etl.config.ratings_2 import CLUTCH_NEUTRAL_RATING, CLUTCH_SOURCE
 from etl.services.card_catalog import _validate_rows, publish_card_catalog
 from etl.services.card_rating_profiles import generate_card_rating_profile

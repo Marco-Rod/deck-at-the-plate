@@ -63,7 +63,7 @@ def seed_mlb_data():
         print("="*80 + "\n")
         
         # Importar el seed
-        from app.seeds.seed_mlb_2026 import seed_mlb_2026_data
+        from legacy.seeds.seed_mlb_2026 import seed_mlb_2026_data
         from app.database import SessionLocal
         
         db = SessionLocal()

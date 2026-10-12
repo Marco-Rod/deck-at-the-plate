@@ -222,7 +222,7 @@ LEGACY_MARKERS = [
 
 
 def test_marcas_legacy_identificadas_con_owner():
-    from app.seeds import backfill_cards, seed_cards
+    from legacy.seeds import backfill_cards, seed_cards
     from app.simulate_game import MockGameSession  # noqa: F401
 
     assert len(seed_cards.INITIAL_CARDS) == 28, "dataset semilla legacy eliminado o alterado"

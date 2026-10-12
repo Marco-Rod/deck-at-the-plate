@@ -20,7 +20,7 @@ def run_script(script_name):
     print(f"🚀 Ejecutando: {script_name}")
     print(f"{'='*80}\n")
     
-    script_path = os.path.join(current_dir, "app/seeds", script_name)
+    script_path = os.path.join(current_dir, "legacy/seeds", script_name)
     result = subprocess.run([sys.executable, script_path], cwd=current_dir)
     
     if result.returncode != 0:

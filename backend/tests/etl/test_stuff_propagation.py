@@ -50,7 +50,7 @@ from app.models import (
     PlayerRatings,
 )
 from app.models.card import CardRarity
-from app.seeds.backfill_cards import backfill_catalog_stuff
+from legacy.seeds.backfill_cards import backfill_catalog_stuff
 from etl.services.card_catalog import _validate_rows, publish_card_catalog
 from etl.services.card_rating_policies import BASE_RATING_POLICY_VERSION
 

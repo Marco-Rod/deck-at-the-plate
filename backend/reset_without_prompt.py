@@ -70,7 +70,7 @@ def seed_mlb_data():
         print("📥 PASO 2: Cargando datos MLB 2026...")
         print("="*80 + "\n")
         
-        from app.seeds.seed_mlb_2026 import seed_mlb_2026_data
+        from legacy.seeds.seed_mlb_2026 import seed_mlb_2026_data
         from app.database import SessionLocal
         
         db = SessionLocal()
