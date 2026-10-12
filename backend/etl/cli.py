@@ -29,6 +29,10 @@ from datetime import date
 from app.database import SessionLocal
 from etl.config import NAMES_GENERATOR_VERSION, RATING_MODEL_VERSION
 from etl.pipelines.analytics import AnalyticsPipeline
+from etl.pipelines.base_catalog_v1 import (
+    BaseCatalogV1Pipeline,
+    render_base_catalog_v1_report,
+)
 from etl.pipelines.metadata import MetadataPipeline
 from etl.pipelines.statcast import StatcastRawPipeline
 from app.services.card_editions import ensure_system_base_edition
@@ -40,6 +44,7 @@ from etl.services.card_catalog import (
     validate_cpu_rosters,
     validate_pack_pool,
 )
+from etl.services.catalog_repertoire_sync import sync_candidate_repertoires
 from etl.services.card_profiles import generate_profiles, validate_profiles
 from etl.services.identity_generation import validate_game_identities
 from etl.services.league_distributions import build_league_distributions
@@ -465,6 +470,35 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Reabre un RETIRED tras rollback como candidato VALIDATING",
     )
     reopen.add_argument("--catalog-id", dest="catalog_id", required=True)
+
+    base_catalog = sub.add_parser(
+        "build-base-catalog",
+        help="Construye el catálogo BASE V1 desde metadata hasta un candidato jugable",
+    )
+    base_catalog.add_argument("--season", type=int, required=True)
+    base_catalog.add_argument(
+        "--as-of",
+        dest="as_of_date",
+        type=_parse_date,
+        required=True,
+        help="Fecha de corte estadístico dentro de la temporada",
+    )
+    base_catalog.add_argument(
+        "--skip-statcast",
+        action="store_true",
+        help="Reintenta desde los datos RAW ya persistidos, sin volver a descargarlos",
+    )
+
+    repertoire_sync = sub.add_parser(
+        "sync-catalog-repertoires",
+        help="Copia repertorios ya calculados hacia un catálogo VALIDATING",
+    )
+    repertoire_sync.add_argument("--catalog-id", dest="catalog_id", required=True)
+    base_catalog.add_argument(
+        "--activate",
+        action="store_true",
+        help="Promueve el candidato sólo si todos los gates de jugabilidad pasan",
+    )
 
     return parser
 
@@ -1184,7 +1218,11 @@ def main(argv=None) -> int:
             logger.info("validate-pack-pool ok=%s detail=%s", result.ok, result.detail)
 
         elif args.command == "promote-card-catalog":
-            result = promote_card_catalog(db, catalog_id=args.catalog_id)
+            result = promote_card_catalog(
+                db,
+                catalog_id=args.catalog_id,
+                enforce_gameplay_gates=True,
+            )
             logger.info(
                 "promote-card-catalog status=%s version=%s cards=%s issues=%s",
                 result.status, result.catalog_version, result.created, result.issues,
@@ -1202,6 +1240,33 @@ def main(argv=None) -> int:
             logger.info(
                 "reopen-card-catalog status=%s version=%s cards=%s",
                 result.status, result.catalog_version, result.created,
+            )
+
+        elif args.command == "build-base-catalog":
+            result = BaseCatalogV1Pipeline(db).run(
+                season=args.season,
+                as_of_date=args.as_of_date,
+                activate=args.activate,
+                ingest_statcast=not args.skip_statcast,
+            )
+            print(render_base_catalog_v1_report(result))
+            if args.activate and result.catalog_status != "ACTIVE":
+                logger.error(
+                    "build-base-catalog no activó el catálogo: status=%s issues=%s",
+                    result.catalog_status,
+                    result.issues,
+                )
+                return 1
+
+        elif args.command == "sync-catalog-repertoires":
+            result = sync_candidate_repertoires(db, catalog_id=args.catalog_id)
+            logger.info(
+                "sync-catalog-repertoires catalog=%s pitchers=%s profiles=%s updated=%s missing=%s",
+                result.catalog_id,
+                result.inspected,
+                result.profiles_refreshed,
+                result.updated,
+                result.missing,
             )
 
         elif args.command == "materialize-card-catalog-candidate":

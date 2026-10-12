@@ -14,8 +14,11 @@ from typing import Collection, List, Sequence
 
 from app.core.enums import PITCHER_POSITIONS
 
-# Posiciones requeridas en el campo (la "P" se cubre con los pitchers del pack).
-REQUIRED_POSITIONS: Collection[str] = ["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "DH"]
+# Posiciones defensivas requeridas en el campo. El slot DH no exige una carta
+# con posición primaria DH: ``build_optimal_lineup`` lo cubre con el mejor
+# bateador disponible. Esto refleja rosters MLB reales, donde muchos clubes no
+# tienen un jugador listado como DH, sin dejar un lineup inicial incompleto.
+REQUIRED_POSITIONS: Collection[str] = ["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF"]
 
 # Totales del sobre base
 FAVORITE_TEAM_CARDS = 7

@@ -9,6 +9,7 @@ from app.models import (
 )
 from etl.services.card_rating_policies import BASE_RATING_POLICY_VERSION
 from etl.services.base_eligibility_policy import BASE_ELIGIBILITY_POLICY_VERSION
+from etl.services.rarity_policies import RARITY_POLICY_VERSION
 
 
 def ensure_system_base_edition(db: Session, *, season: int) -> CardEdition:
@@ -28,6 +29,7 @@ def ensure_system_base_edition(db: Session, *, season: int) -> CardEdition:
             source_type=CardEditionSourceType.SYSTEM,
             source_reference="card-catalog:base",
             rating_policy_version=BASE_RATING_POLICY_VERSION,
+            rarity_policy_version=RARITY_POLICY_VERSION,
             eligibility_policy_version=BASE_ELIGIBILITY_POLICY_VERSION,
             metadata_payload={"policy": "SYSTEM_BASE"},
         )
@@ -40,4 +42,6 @@ def ensure_system_base_edition(db: Session, *, season: int) -> CardEdition:
         raise ValueError("la identidad BASE existente tiene provenance incompatible")
     if edition.rating_policy_version is None:
         edition.rating_policy_version = BASE_RATING_POLICY_VERSION
+    if edition.rarity_policy_version is None:
+        edition.rarity_policy_version = RARITY_POLICY_VERSION
     return edition

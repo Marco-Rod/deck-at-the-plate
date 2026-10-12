@@ -6,7 +6,13 @@ from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
 
-from app.models import CardGenerationProfile, PlayerRatings, PlayerSeason, RatingDistribution
+from app.models import (
+    CardGenerationProfile,
+    PitcherPitchProfile,
+    PlayerRatings,
+    PlayerSeason,
+    RatingDistribution,
+)
 from app.models.card import CardRarity
 from etl.config.performance_tier_2 import (
     OVERALL_RATING_METRIC,
@@ -21,6 +27,7 @@ from etl.services.performance_tier2 import (
     PerformanceTierResult,
     calculate_performance_tier,
 )
+from etl.services.pitch_repertoire import build_runtime_repertoire
 
 
 ADAPTER_VERSION = "pitcher-ratings2-card-profile-2.0"
@@ -39,6 +46,7 @@ def _adapter_input_hash(
     pitcher_trait: str | None,
     rating_distribution: RatingDistribution,
     performance: PerformanceTierResult,
+    repertoire: list[dict],
 ) -> str:
     payload = {
         "adapter_version": ADAPTER_VERSION,
@@ -61,6 +69,7 @@ def _adapter_input_hash(
         "rating_distribution_histogram": rating_distribution.population_histogram,
         "performance_tier": performance.performance_tier.value,
         "performance_percentile": performance.performance_percentile,
+        "repertoire": repertoire,
     }
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
@@ -147,8 +156,19 @@ def generate_pitcher_card_profile_from_ratings2(
         ratings.movement_rating,
         ratings.stuff_rating,
     )
+    arsenal = (
+        db.query(PitcherPitchProfile)
+        .filter(
+            PitcherPitchProfile.player_season_id == player_season.id,
+            PitcherPitchProfile.batter_side == "ALL",
+            PitcherPitchProfile.pitch_count > 0,
+        )
+        .order_by(PitcherPitchProfile.pitch_count.desc(), PitcherPitchProfile.pitch_type.asc())
+        .all()
+    )
+    repertoire = build_runtime_repertoire(arsenal)
     input_hash = _adapter_input_hash(
-        ratings, pitcher_trait, rating_distribution, performance
+        ratings, pitcher_trait, rating_distribution, performance, repertoire
     )
     values = {
         "role": "PITCHER",
@@ -168,7 +188,7 @@ def generate_pitcher_card_profile_from_ratings2(
         "calculated_rarity": CardRarity.COMMON,
         "primary_batter_trait": None,
         "primary_pitcher_trait": pitcher_trait,
-        "repertoire_payload": None,
+        "repertoire_payload": repertoire or None,
         "calculation_metadata": {
             "adapter_version": ADAPTER_VERSION,
             "distribution_version": ratings.distribution_version,

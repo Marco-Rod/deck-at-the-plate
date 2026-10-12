@@ -40,8 +40,10 @@ class PackPoolError(HTTPException):
 class StarterPackConfig:
     """Configuración centralizada del starter pack (13 cartas)."""
 
-    # Posiciones requeridas del baseball (campo + DH)
-    REQUIRED_POSITIONS = {"P", "C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "DH"}
+    # Posiciones defensivas requeridas. DH se asigna con cualquier bateador
+    # disponible por ``build_optimal_lineup`` y no requiere una carta primaria
+    # DH en el catálogo.
+    REQUIRED_POSITIONS = {"P", "C", "1B", "2B", "3B", "SS", "LF", "CF", "RF"}
 
     # Clasificación de posiciones (la regla "es pitcher" es global y vive en core)
     PITCHER_POSITIONS = PITCHER_POSITIONS

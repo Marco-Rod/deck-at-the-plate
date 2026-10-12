@@ -57,6 +57,12 @@ from etl.services.base_eligibility_policy import (
 )
 from etl.services.eligibility_policies import ELIGIBILITY_POLICIES
 from etl.config.ratings_2 import CLUTCH_NEUTRAL_RATING
+from etl.validators.catalog_gameplay import (
+    ValidationResult,
+    validate_cpu_roster_coverage,
+    validate_pitcher_repertoires,
+    validate_starter_pack_coverage,
+)
 
 logger = logging.getLogger("etl.services.card_catalog")
 
@@ -159,6 +165,7 @@ def publish_card_catalog(
     card_edition_id: str,
     rating_model_version: str | None = None,
     data_end_date: date | None = None,
+    activate_if_first: bool = True,
 ) -> CatalogRunResult:
     card_edition = db.get(CardEdition, card_edition_id)
     if card_edition is None:
@@ -188,25 +195,43 @@ def publish_card_catalog(
             )
             result.issues.append("catálogo existente para la edición (no-op)")
             return result
-        raise ValueError(
-            "CardEdition ya tiene un catálogo en estado no reutilizable: "
-            f"{existing_catalog.status} ({existing_catalog.id})"
+        if existing_catalog.status == "FAILED":
+            # Un catálogo FAILED nunca llega a ACTIVE: sus cartas no pueden
+            # entrar a sobres ni a inventarios desde el flujo normal. Al
+            # corregir el insumo (perfiles, distribución o política), se
+            # reconstruye el mismo candidato y su mismo número de versión.
+            # Borramos las cartas inactivas antes de recalcularlas para que no
+            # sobrevivan atributos o rarezas de la tentativa rechazada.
+            if existing:
+                db.query(PlayerCardModel).filter(
+                    PlayerCardModel.catalog_id == existing_catalog.id
+                ).delete(synchronize_session=False)
+            catalog = existing_catalog
+            catalog.status = "BUILDING"
+            catalog.rating_model_version = rating_model_version
+            catalog.data_end_date = data_end_date
+            db.flush()
+        else:
+            raise ValueError(
+                "CardEdition ya tiene un catálogo en estado no reutilizable: "
+                f"{existing_catalog.status} ({existing_catalog.id})"
+            )
+    else:
+        latest = _latest_catalog(db, season=season, edition_type=edition_type)
+        next_version = (latest.version + 1) if latest else 1
+        catalog = CardCatalog(
+            season=season,
+            edition_type=edition_type,
+            version=next_version,
+            status="BUILDING",
+            rating_model_version=rating_model_version,
+            data_end_date=data_end_date,
+            card_edition_id=card_edition.id,
         )
+        db.add(catalog)
+        db.flush()
 
     active = _active_catalog(db, season=season, edition_type=edition_type)
-    latest = _latest_catalog(db, season=season, edition_type=edition_type)
-    next_version = (latest.version + 1) if latest else 1
-    catalog = CardCatalog(
-        season=season,
-        edition_type=edition_type,
-        version=next_version,
-        status="BUILDING",
-        rating_model_version=rating_model_version,
-        data_end_date=data_end_date,
-        card_edition_id=card_edition.id,
-    )
-    db.add(catalog)
-    db.flush()
 
     # ------ BUILDING: candidatos = perfiles válidos del corte ----------
     profile_query = (
@@ -301,10 +326,10 @@ def publish_card_catalog(
     # inmediata (comportamiento histórico). Con un ACTIVE de OTRA edición, el
     # candidato queda VALIDATING y la sustitución es EXPLÍCITA vía
     # promote_card_catalog: nunca se reemplaza un ACTIVE implícitamente.
-    if active is not None:
+    if active is not None or not activate_if_first:
         logger.info(
             "candidato VALIDATING season=%s edition=%s version=%s cards=%s "
-            "ineligible=%s (ACTIVE previo; sustituir con promote)",
+            "ineligible=%s (activar con promote)",
             season,
             edition_type,
             catalog.version,
@@ -346,15 +371,16 @@ def publish_card_catalog(
     )
 
 
-def promote_card_catalog(db: Session, *, catalog_id: str) -> CatalogRunResult:
-    """Sustitución atómica y EXPlícita de un catálogo ACTIVE.
+def promote_card_catalog(
+    db: Session, *, catalog_id: str, enforce_gameplay_gates: bool = False
+) -> CatalogRunResult:
+    """Promoción atómica y explícita de un catálogo VALIDATING.
 
-    El candidato debe estar VALIDATING (publicado en dos fases con un ACTIVE
-    previo de otra edición). Re-ejecuta los gates de calidad sobre SUS cartas
+    El candidato debe estar VALIDATING. Re-ejecuta los gates de calidad sobre SUS cartas
     (quality §52 + pack pool §54 + franquicias §53) y, si pasan, realiza el
     swap en UNA transacción:
 
-        activo previo -> RETIRED (sus cartas dejan de ser activas/elegibles)
+        activo previo -> RETIRED (si existe; sus cartas dejan de ser activas/elegibles)
         candidato     -> ACTIVE  (published_at, cartas activas + pack)
 
     Orden cuidadoso: se retira el predecesor ANTES de promover al candidato
@@ -414,7 +440,7 @@ def promote_card_catalog(db: Session, *, catalog_id: str) -> CatalogRunResult:
         )
         if not pack.ok:
             issues.extend(pack.detail)
-    if not issues:
+    if not issues and enforce_gameplay_gates:
         rosters = validate_cpu_rosters(
             db,
             season=candidate.season,
@@ -423,6 +449,19 @@ def promote_card_catalog(db: Session, *, catalog_id: str) -> CatalogRunResult:
         )
         if not rosters.ok:
             issues.extend(rosters.detail)
+    if not issues and enforce_gameplay_gates:
+        starter_packs = validate_starter_packs(
+            db,
+            season=candidate.season,
+            edition_type=candidate.edition_type,
+            catalog_id=candidate.id,
+        )
+        if not starter_packs.ok:
+            issues.extend(starter_packs.detail)
+    if not issues and enforce_gameplay_gates:
+        repertoires = validate_pitcher_repertoires(candidate_cards)
+        if not repertoires.ok:
+            issues.extend(repertoires.detail)
 
     if issues:
         candidate.status = "FAILED"
@@ -869,12 +908,6 @@ def _validate_rows(rows: list[PlayerCardModel]) -> list[str]:
 
 # ---------- Validadores derivados (plan V2 §53-§54) ----------------------
 
-@dataclass
-class ValidationResult:
-    ok: bool
-    detail: list[str] = field(default_factory=list)
-
-
 # Las drop rates activas (PackService.PACK_RATES) requieren los cinco tiers:
 # BRONZE usa COMMON/BRONZE/SILVER, GOLD BRONZE/SILVER/GOLD/DIAMOND, DIAMOND
 # SILVER/GOLD/DIAMOND. El pool debe proveer al menos una carta por tier.
@@ -951,7 +984,7 @@ def validate_pack_pool(
 def validate_cpu_rosters(
     db: Session, *, season: int, edition_type: str = "BASE", catalog_id: str | None = None
 ) -> ValidationResult:
-    """Cada franquicia pública con mapa+snapshot debe tener cartas publicadas."""
+    """Cada franquicia mapeada debe poder iniciar una partida contra CPU."""
     if catalog_id is not None:
         catalog = db.get(CardCatalog, catalog_id)
         if catalog is None:
@@ -961,25 +994,39 @@ def validate_cpu_rosters(
         if active is None:
             return ValidationResult(ok=False, detail=["sin catálogo ACTIVE"])
         catalog = active
-    detail = []
     rows = (
         db.query(SourceTeamGameTeamMapping.team_id)
         .filter(SourceTeamGameTeamMapping.valid_to.is_(None))
         .all()
     )
-    missing = []
-    for (team_id,) in rows:
-        count = (
-            db.query(PlayerCardModel)
-            .filter(
-                PlayerCardModel.team_id == team_id,
-                PlayerCardModel.catalog_id == catalog.id,
-            )
-            .count()
-        )
-        if count == 0:
-            missing.append(team_id)
-    detail.append(f"franquicias mapeadas={len(rows)} sin cartas={len(missing)}")
-    if missing:
-        detail.append(f"sin cartas publicadas: {', '.join(missing[:20])}")
-    return ValidationResult(ok=not missing, detail=detail)
+    cards = (
+        db.query(PlayerCardModel)
+        .filter(PlayerCardModel.catalog_id == catalog.id)
+        .all()
+    )
+    return validate_cpu_roster_coverage(cards, (team_id for (team_id,) in rows))
+
+
+def validate_starter_packs(
+    db: Session, *, season: int, edition_type: str = "BASE", catalog_id: str | None = None
+) -> ValidationResult:
+    """Verifica que el onboarding pueda construir el starter pack real."""
+    if catalog_id is not None:
+        catalog = db.get(CardCatalog, catalog_id)
+        if catalog is None:
+            return ValidationResult(ok=False, detail=[f"catálogo inexistente: {catalog_id}"])
+    else:
+        catalog = _active_catalog(db, season=season, edition_type=edition_type)
+        if catalog is None:
+            return ValidationResult(ok=False, detail=["sin catálogo ACTIVE"])
+    cards = (
+        db.query(PlayerCardModel)
+        .filter(PlayerCardModel.catalog_id == catalog.id)
+        .all()
+    )
+    rows = (
+        db.query(SourceTeamGameTeamMapping.team_id)
+        .filter(SourceTeamGameTeamMapping.valid_to.is_(None))
+        .all()
+    )
+    return validate_starter_pack_coverage(cards, (team_id for (team_id,) in rows))

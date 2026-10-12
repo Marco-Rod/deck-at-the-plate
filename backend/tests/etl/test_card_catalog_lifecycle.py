@@ -53,6 +53,7 @@ from etl.services.card_catalog import (
     retract_card_catalog,
     validate_cpu_rosters,
     validate_pack_pool,
+    validate_starter_packs,
 )
 from etl.services.card_rating_policies import BASE_RATING_POLICY_VERSION
 from etl.services.card_rating_profiles import generate_card_rating_profile
@@ -214,13 +215,14 @@ def _generation_profile(db, player_season, ratings, *, rarity):
     return profile
 
 
-def _publish(db, edition):
+def _publish(db, edition, **kwargs):
     return publish_card_catalog(
         db,
         season=2026,
         card_edition_id=edition.id,
         rating_model_version="ratings-2.0",
         data_end_date=END,
+        **kwargs,
     )
 
 
@@ -272,6 +274,22 @@ def test_publica_otra_edicion_deja_candidato_validating(db):
     assert db.query(PlayerCardModel).filter_by(is_active=True).count() == 5
 
 
+def test_primer_catalogo_puede_quedar_validating_para_ejecutar_gates(db):
+    edition = _edition(db, code="2026_LIFECYCLE_BOOTSTRAP")
+    _seed(db, [edition], RARITIES)
+    db.commit()
+
+    candidate = _publish(db, edition, activate_if_first=False)
+
+    assert candidate.status == "VALIDATING"
+    assert db.query(CardCatalog).filter_by(status="ACTIVE").count() == 0
+    rejected = promote_card_catalog(
+        db, catalog_id=candidate.catalog_id, enforce_gameplay_gates=True
+    )
+    assert rejected.status == "FAILED"
+    assert any("bateadores=1/9" in issue for issue in rejected.issues)
+
+
 def test_republicar_candidato_validating_retorna_el_mismo_catalogo(db):
     ed1 = _edition(db, code="2026_LIFECYCLE_E1")
     ed2 = _edition(db, code="2026_LIFECYCLE_E2")
@@ -290,7 +308,7 @@ def test_republicar_candidato_validating_retorna_el_mismo_catalogo(db):
     assert any("no-op" in issue for issue in second.issues)
 
 
-@pytest.mark.parametrize("status", ("FAILED", "BUILDING", "RETIRED"))
+@pytest.mark.parametrize("status", ("BUILDING", "RETIRED"))
 def test_republicar_edicion_con_catalogo_no_reutilizable_falla(db, status):
     edition = _edition(db, code=f"2026_LIFECYCLE_{status}")
     catalog = CardCatalog(
@@ -307,6 +325,25 @@ def test_republicar_edicion_con_catalogo_no_reutilizable_falla(db, status):
         _publish(db, edition)
 
     assert db.query(CardCatalog).filter_by(card_edition_id=edition.id).count() == 1
+
+
+def test_republicar_catalogo_failed_con_cartas_lo_reconstruye(db):
+    edition = _edition(db, code="2026_LIFECYCLE_FAILED_RETRY")
+    _seed(db, [edition], RARITIES)
+    db.commit()
+    candidate = _publish(db, edition, activate_if_first=False)
+    rejected = promote_card_catalog(
+        db, catalog_id=candidate.catalog_id, enforce_gameplay_gates=True
+    )
+    assert rejected.status == "FAILED"
+    assert rejected.created == 5
+
+    retried = _publish(db, edition, activate_if_first=False)
+
+    assert retried.status == "VALIDATING"
+    assert retried.catalog_id == candidate.catalog_id
+    assert retried.catalog_version == 1
+    assert retried.created == 5
 
 
 def test_db_impide_dos_catalogos_para_la_misma_edicion(db):
@@ -596,7 +633,10 @@ def test_validate_cpu_rosters_candidato_con_catalog_id(db):
     v1 = db.get(CardCatalog, _publish(db, ed1).catalog_id)
 
     result = validate_cpu_rosters(db, season=2026, catalog_id=v1.id)
-    assert result.ok
+    assert not result.ok
+    assert any("bateadores=1/9" in line for line in result.detail)
+    starter = validate_starter_packs(db, season=2026, catalog_id=v1.id)
+    assert not starter.ok
     unknown = validate_cpu_rosters(db, season=2026, catalog_id="nope")
     assert not unknown.ok
     assert unknown.detail == ["catálogo inexistente: nope"]

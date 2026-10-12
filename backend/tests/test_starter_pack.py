@@ -146,6 +146,18 @@ def test_missing_positions_are_filled_with_common():
         assert required <= covered
 
 
+def test_primary_dh_is_not_required_for_a_valid_starter_pack():
+    """DH es un slot de lineup, no una posición primaria obligatoria."""
+    assert "DH" not in REQUIRED_POSITIONS
+    team_cards = [card for card in make_team_cards() if card.position != "DH"]
+    other_cards = [card for card in make_other_team_cards() if card.position != "DH"]
+
+    result = select_starter_cards(team_cards, other_cards, rng=random.Random(0))
+
+    assert len(result) == TOTAL_CARDS
+    assert any(not _is_pitcher(card) for card in result)
+
+
 @pytest.mark.parametrize("seed", list(range(50)))
 def test_deterministic_with_seed(seed):
     """Con el mismo rng/seed produce la misma selección (estabilidad)."""
